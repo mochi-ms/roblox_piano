@@ -3,13 +3,186 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:RobloxPiano.Desktop.ViewModels"
              mc:Ignorable="d" 
-             d:DesignHeight="450" d:DesignWidth="800">
-    <Grid Margin="32">
-        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-            <Path Data="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" Fill="{StaticResource Text.Disabled}" Width="48" Height="48" Stretch="Uniform" Margin="0,0,0,16"/>
-            <TextBlock Text="Transcribe Workspace (Phase 3)" FontSize="24" FontWeight="SemiBold" Foreground="{StaticResource Text.Secondary}" HorizontalAlignment="Center" Margin="0,0,0,8" />
-            <TextBlock Text="YouTube URL &amp; MP3 to MIDI / MML extraction will be implemented here." FontSize="14" Foreground="{StaticResource Text.Disabled}" HorizontalAlignment="Center" />
+             d:DesignHeight="700" d:DesignWidth="1000">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+    </UserControl.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="32,24">
+        <StackPanel MaxWidth="720" HorizontalAlignment="Left">
+            
+            <!-- 1. Header -->
+            <StackPanel Margin="0,0,0,24">
+                <TextBlock Text="Transcribe" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,4" />
+                <TextBlock Text="Convert piano audio into editable MIDI" FontSize="12.5" Foreground="{StaticResource Text.Secondary}" />
+            </StackPanel>
+
+            <!-- 2. Source Selector (Segmented Radio Group) -->
+            <TextBlock Text="Audio Source" FontSize="12.5" FontWeight="SemiBold" Margin="0,0,0,8" />
+            <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="4" Margin="0,0,0,16" HorizontalAlignment="Left">
+                <StackPanel Orientation="Horizontal">
+                    <RadioButton Content="YouTube Video" Style="{StaticResource NavButtonStyle}" IsChecked="{Binding IsYouTubeSource}" Command="{Binding SelectSourceCommand}" CommandParameter="YouTube" />
+                    <RadioButton Content="Local Audio File" Style="{StaticResource NavButtonStyle}" IsChecked="{Binding IsLocalFileSource}" Command="{Binding SelectSourceCommand}" CommandParameter="Local" />
+                </StackPanel>
+            </Border>
+
+            <!-- 3. Source Input Container -->
+            <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="16" Margin="0,0,0,20">
+                <StackPanel>
+                    <!-- YouTube Input Panel -->
+                    <StackPanel Visibility="{Binding IsYouTubeSource, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="YouTube URL" FontSize="12" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,6" />
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox Grid.Column="0" Text="{Binding YouTubeUrl, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0" VerticalContentAlignment="Center" />
+                            <Button Grid.Column="1" Content="Paste" Command="{Binding PasteUrlCommand}" Margin="0,0,6,0" Padding="12,6" />
+                            <Button Grid.Column="2" Content="Clear" Command="{Binding ClearUrlCommand}" Padding="12,6" />
+                        </Grid>
+                        <TextBlock Text="Supports standard YouTube videos, YouTube Music, and Shorts URLs" FontSize="11" Foreground="{StaticResource Text.Disabled}" />
+                    </StackPanel>
+
+                    <!-- Local File Input Panel -->
+                    <StackPanel Visibility="{Binding IsLocalFileSource, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="Local Audio File" FontSize="12" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,6" />
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox Grid.Column="0" Text="{Binding LocalFilePath, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0" VerticalContentAlignment="Center" />
+                            <Button Grid.Column="1" Content="Browse..." Command="{Binding BrowseFileCommand}" Padding="14,6" />
+                        </Grid>
+                        <TextBlock Text="Supported formats: WAV, MP3, FLAC, AAC, OGG, M4A" FontSize="11" Foreground="{StaticResource Text.Disabled}" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- 4. Extraction Mode / Quality -->
+            <TextBlock Text="Extraction Mode" FontSize="12.5" FontWeight="SemiBold" Margin="0,0,0,8" />
+            <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="16" Margin="0,0,0,20">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="240" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                        <TextBlock Text="Recognition Model" FontSize="12.5" FontWeight="Medium" Margin="0,0,0,2" />
+                        <TextBlock Text="Neural network model tuned for polyphonic piano transcription" FontSize="11" Foreground="{StaticResource Text.Secondary}" />
+                    </StackPanel>
+                    <ComboBox Grid.Column="1" SelectedIndex="{Binding SelectedModeIndex}" VerticalAlignment="Center">
+                        <ComboBoxItem Content="High Quality Piano (Basic Pitch)" />
+                        <ComboBoxItem Content="Fast Mode (Lightweight)" />
+                    </ComboBox>
+                </Grid>
+            </Border>
+
+            <!-- 5. Processing Pipeline & Progress -->
+            <TextBlock Text="Transcription Pipeline" FontSize="12.5" FontWeight="SemiBold" Margin="0,0,0,8" />
+            <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="16" Margin="0,0,0,20">
+                <StackPanel>
+                    <!-- 4-Step Stepper -->
+                    <Grid Margin="0,0,0,16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Step 1: Completed -->
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Ellipse Width="8" Height="8" Fill="{StaticResource Status.Success}" Margin="0,0,6,0" />
+                            <TextBlock Text="Audio Prepare" FontSize="11.5" FontWeight="Medium" Foreground="{StaticResource Text.Primary}" />
+                        </StackPanel>
+
+                        <!-- Step 2: Active -->
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Ellipse Width="8" Height="8" Fill="{StaticResource Accent.Primary}" Margin="0,0,6,0" />
+                            <TextBlock Text="Analyze" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource Accent.Primary}" />
+                        </StackPanel>
+
+                        <!-- Step 3: Pending -->
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Ellipse Width="8" Height="8" Fill="{StaticResource Text.Disabled}" Margin="0,0,6,0" />
+                            <TextBlock Text="Postprocess" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                        </StackPanel>
+
+                        <!-- Step 4: Pending -->
+                        <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Ellipse Width="8" Height="8" Fill="{StaticResource Text.Disabled}" Margin="0,0,6,0" />
+                            <TextBlock Text="MIDI" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Progress Bar & Status Text -->
+                    <Grid Margin="0,0,0,6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="{Binding ProgressStatus}" FontSize="12" Foreground="{StaticResource Text.Secondary}" />
+                        <TextBlock Grid.Column="1" Text="62%" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource Accent.Primary}" />
+                    </Grid>
+                    <ProgressBar Value="{Binding ProgressPercent}" Maximum="100" Margin="0,0,0,4" />
+                </StackPanel>
+            </Border>
+
+            <!-- 6. Result Summary -->
+            <TextBlock Text="Result Preview" FontSize="12.5" FontWeight="SemiBold" Margin="0,0,0,8" />
+            <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="16" Margin="0,0,0,24">
+                <StackPanel>
+                    <Grid Margin="0,0,0,16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Estimated Duration" FontSize="11" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,2" />
+                            <TextBlock Text="04:21" FontSize="13" FontWeight="SemiBold" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1">
+                            <TextBlock Text="Detected Notes" FontSize="11" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,2" />
+                            <TextBlock Text="1,284" FontSize="13" FontWeight="SemiBold" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Detected Range" FontSize="11" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,2" />
+                            <TextBlock Text="A2 – C7" FontSize="13" FontWeight="SemiBold" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="3">
+                            <TextBlock Text="Confidence" FontSize="11" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,2" />
+                            <TextBlock Text="91%" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource Status.Success}" />
+                        </StackPanel>
+                    </Grid>
+
+                    <Separator />
+
+                    <!-- Output File & Action Buttons -->
+                    <Grid Margin="0,8,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                            <TextBlock Text="Output Target" FontSize="11" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,2" />
+                            <TextBlock Text="transcription_output.mid" FontSize="12.5" FontWeight="Medium" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                            <Button Content="Save MIDI" Margin="0,0,8,0" Padding="14,6" />
+                            <Button Content="Open in Player" Style="{StaticResource AccentButtonStyle}" Padding="16,6" />
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
         </StackPanel>
-    </Grid>
+    </ScrollViewer>
 </UserControl>

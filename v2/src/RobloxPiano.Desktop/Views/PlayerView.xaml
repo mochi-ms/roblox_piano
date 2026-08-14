@@ -4,17 +4,17 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d" 
-             d:DesignHeight="600" d:DesignWidth="1000">
+             d:DesignHeight="700" d:DesignWidth="1100">
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-            <RowDefinition Height="120" />
-            <RowDefinition Height="64" />
+            <RowDefinition Height="*" MinHeight="260" />
+            <RowDefinition Height="84" />
+            <RowDefinition Height="60" />
         </Grid.RowDefinitions>
 
-        <!-- Song Header -->
-        <Border Grid.Row="0" Background="{StaticResource Surface.Base}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="0,0,0,1" Padding="24,16">
+        <!-- 1. Track Header -->
+        <Border Grid.Row="0" Background="{StaticResource Surface.Base}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="0,0,0,1" Padding="20,12">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
@@ -22,128 +22,288 @@
                 </Grid.ColumnDefinitions>
                 
                 <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                    <TextBlock Text="Mrs. GREEN APPLE - ライラック" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                    <TextBlock Text="Mrs. GREEN APPLE - ライラック" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,3"/>
                     <StackPanel Orientation="Horizontal">
-                        <Border Background="{StaticResource Surface.Hover}" CornerRadius="4" Padding="6,2" Margin="0,0,8,0">
-                            <TextBlock Text="MIDI" FontSize="11" Foreground="{StaticResource Text.Secondary}" />
+                        <Border Background="{StaticResource Surface.Hover}" CornerRadius="4" Padding="6,1" Margin="0,0,8,0">
+                            <TextBlock Text="MIDI" FontSize="11" Foreground="{StaticResource Text.Secondary}" FontWeight="Medium" />
                         </Border>
-                        <TextBlock Text="2 Tracks" FontSize="12" Foreground="{StaticResource Text.Secondary}" VerticalAlignment="Center" />
+                        <TextBlock Text="2 Tracks • 4/4 Time" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" VerticalAlignment="Center" />
                     </StackPanel>
                 </StackPanel>
                 
                 <!-- Metadata Strip -->
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                    <StackPanel Margin="0,0,24,0">
-                        <TextBlock Text="Duration" FontSize="11" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,2"/>
-                        <TextBlock Text="04:46" FontSize="13" FontWeight="Medium"/>
-                    </StackPanel>
-                    <StackPanel Margin="0,0,24,0">
-                        <TextBlock Text="BPM" FontSize="11" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,2"/>
-                        <TextBlock Text="150" FontSize="13" FontWeight="Medium"/>
-                    </StackPanel>
-                    <StackPanel Margin="0,0,24,0">
-                        <TextBlock Text="Notes" FontSize="11" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,2"/>
-                        <TextBlock Text="1,482" FontSize="13" FontWeight="Medium"/>
-                    </StackPanel>
-                    <StackPanel>
-                        <TextBlock Text="Range" FontSize="11" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,2"/>
-                        <TextBlock Text="A#2 – F#6" FontSize="13" FontWeight="Medium"/>
-                    </StackPanel>
+                    <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="12,6" Margin="0,0,8,0">
+                        <StackPanel>
+                            <TextBlock Text="Duration" FontSize="10.5" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,1"/>
+                            <TextBlock Text="04:46" FontSize="12.5" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="12,6" Margin="0,0,8,0">
+                        <StackPanel>
+                            <TextBlock Text="BPM" FontSize="10.5" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,1"/>
+                            <TextBlock Text="150" FontSize="12.5" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="12,6" Margin="0,0,8,0">
+                        <StackPanel>
+                            <TextBlock Text="Notes" FontSize="10.5" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,1"/>
+                            <TextBlock Text="1,482" FontSize="12.5" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="12,6">
+                        <StackPanel>
+                            <TextBlock Text="Pitch Range" FontSize="10.5" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,1"/>
+                            <TextBlock Text="A#2 – F#6" FontSize="12.5" FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
             </Grid>
         </Border>
 
-        <!-- Piano Roll Workspace Mock -->
+        <!-- 2. Piano Roll Workspace (Visual DAW Mock) -->
         <Border Grid.Row="1" Background="#0A0E13" ClipToBounds="True">
             <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="24" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="80"/>
+                    <ColumnDefinition Width="64"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
                 
-                <!-- Keyboard Gutter -->
-                <Border Grid.Column="0" Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="0,0,1,0">
-                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                        <TextBlock Text="C4" Foreground="{StaticResource Text.Secondary}" FontSize="11" Margin="0,30" />
-                        <TextBlock Text="C3" Foreground="{StaticResource Text.Secondary}" FontSize="11" Margin="0,30" />
-                    </StackPanel>
+                <!-- Measure Timeline Ruler -->
+                <Border Grid.Row="0" Grid.Column="0" Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="0,0,1,1" />
+                <Border Grid.Row="0" Grid.Column="1" Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="0,0,0,1">
+                    <Canvas>
+                        <TextBlock Text="1.1" Canvas.Left="20" Canvas.Top="4" FontSize="10" Foreground="{StaticResource Text.Secondary}" />
+                        <TextBlock Text="2.1" Canvas.Left="140" Canvas.Top="4" FontSize="10" Foreground="{StaticResource Text.Secondary}" />
+                        <TextBlock Text="3.1" Canvas.Left="260" Canvas.Top="4" FontSize="10" Foreground="{StaticResource Text.Secondary}" />
+                        <TextBlock Text="4.1" Canvas.Left="380" Canvas.Top="4" FontSize="10" Foreground="{StaticResource Text.Secondary}" />
+                        <TextBlock Text="5.1" Canvas.Left="500" Canvas.Top="4" FontSize="10" Foreground="{StaticResource Text.Secondary}" />
+                        <TextBlock Text="6.1" Canvas.Left="620" Canvas.Top="4" FontSize="10" Foreground="{StaticResource Text.Secondary}" />
+                        <TextBlock Text="7.1" Canvas.Left="740" Canvas.Top="4" FontSize="10" Foreground="{StaticResource Text.Secondary}" />
+                        <TextBlock Text="8.1" Canvas.Left="860" Canvas.Top="4" FontSize="10" Foreground="{StaticResource Text.Secondary}" />
+                    </Canvas>
+                </Border>
+
+                <!-- Pitch Gutter (Left Key Labels) -->
+                <Border Grid.Row="1" Grid.Column="0" Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="0,0,1,0">
+                    <Grid>
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="G5" Foreground="{StaticResource Text.Disabled}" FontSize="10.5" HorizontalAlignment="Right" Margin="0,10,8,10" />
+                            <TextBlock Text="C5" Foreground="{StaticResource Text.Secondary}" FontWeight="SemiBold" FontSize="10.5" HorizontalAlignment="Right" Margin="0,10,8,10" />
+                            <TextBlock Text="G4" Foreground="{StaticResource Text.Disabled}" FontSize="10.5" HorizontalAlignment="Right" Margin="0,10,8,10" />
+                            <TextBlock Text="C4" Foreground="{StaticResource Text.Primary}" FontWeight="SemiBold" FontSize="10.5" HorizontalAlignment="Right" Margin="0,10,8,10" />
+                            <TextBlock Text="G3" Foreground="{StaticResource Text.Disabled}" FontSize="10.5" HorizontalAlignment="Right" Margin="0,10,8,10" />
+                            <TextBlock Text="C3" Foreground="{StaticResource Text.Secondary}" FontWeight="SemiBold" FontSize="10.5" HorizontalAlignment="Right" Margin="0,10,8,10" />
+                        </StackPanel>
+                    </Grid>
                 </Border>
                 
-                <!-- Timeline & Grid -->
-                <Grid Grid.Column="1">
-                    <!-- Measure Grid Lines (Mock) -->
-                    <Path Data="M100,0 V1000 M200,0 V1000 M300,0 V1000 M400,0 V1000 M500,0 V1000 M600,0 V1000 M700,0 V1000 M800,0 V1000" Stroke="{StaticResource Border.Subtle}" StrokeThickness="1" />
-                    <!-- Horizontal Lines -->
-                    <Path Data="M0,40 H2000 M0,80 H2000 M0,120 H2000 M0,160 H2000 M0,200 H2000" Stroke="{StaticResource Border.Subtle}" StrokeThickness="1" Opacity="0.5" />
+                <!-- Grid & Note Blocks -->
+                <Grid Grid.Row="1" Grid.Column="1" ClipToBounds="True">
+                    <!-- Measure Vertical Grid Lines -->
+                    <Path Data="M140,0 V1000 M260,0 V1000 M380,0 V1000 M500,0 V1000 M620,0 V1000 M740,0 V1000 M860,0 V1000 M980,0 V1000" Stroke="{StaticResource Border.Subtle}" StrokeThickness="1" Opacity="0.7" />
+                    <!-- Sub-beat Grid Lines -->
+                    <Path Data="M80,0 V1000 M200,0 V1000 M320,0 V1000 M440,0 V1000 M560,0 V1000 M680,0 V1000 M800,0 V1000 M920,0 V1000" Stroke="{StaticResource Border.Subtle}" StrokeThickness="0.5" StrokeDashArray="2,2" Opacity="0.3" />
+                    <!-- Horizontal Pitch Lines -->
+                    <Path Data="M0,30 H2500 M0,60 H2500 M0,90 H2500 M0,120 H2500 M0,150 H2500 M0,180 H2500 M0,210 H2500 M0,240 H2500 M0,270 H2500 M0,300 H2500" Stroke="{StaticResource Border.Subtle}" StrokeThickness="0.5" Opacity="0.4" />
                     
-                    <!-- Note Blocks (Mock) -->
-                    <Border Background="{StaticResource Accent.Primary}" CornerRadius="2" Width="40" Height="12" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="120,44,0,0" />
-                    <Border Background="{StaticResource Accent.Primary}" CornerRadius="2" Width="60" Height="12" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="180,84,0,0" />
-                    <Border Background="#238636" CornerRadius="2" Width="20" Height="12" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="240,124,0,0" />
-                    <Border Background="#238636" CornerRadius="2" Width="80" Height="12" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="280,164,0,0" />
+                    <!-- Track 1 Note Blocks (Accent Blue) -->
+                    <Border Background="{StaticResource Accent.Primary}" CornerRadius="2" Width="44" Height="10" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="40,95,0,0" />
+                    <Border Background="{StaticResource Accent.Primary}" CornerRadius="2" Width="68" Height="10" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="90,65,0,0" />
+                    <Border Background="{StaticResource Accent.Primary}" CornerRadius="2" Width="36" Height="10" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="165,95,0,0" />
+                    <Border Background="{StaticResource Accent.Primary}" CornerRadius="2" Width="52" Height="10" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="210,125,0,0" />
+                    <Border Background="{StaticResource Accent.Primary}" CornerRadius="2" Width="76" Height="10" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="270,65,0,0" />
+                    <Border Background="{StaticResource Accent.Primary}" CornerRadius="2" Width="40" Height="10" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="355,95,0,0" />
+                    <Border Background="{StaticResource Accent.Primary}" CornerRadius="2" Width="58" Height="10" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="405,125,0,0" />
+                    <Border Background="{StaticResource Accent.Primary}" CornerRadius="2" Width="92" Height="10" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="470,65,0,0" />
+                    <Border Background="{StaticResource Accent.Primary}" CornerRadius="2" Width="48" Height="10" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="570,95,0,0" />
+
+                    <!-- Track 2 Bass Note Blocks (Status Green) -->
+                    <Border Background="#238636" CornerRadius="2" Width="110" Height="10" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="30,215,0,0" />
+                    <Border Background="#238636" CornerRadius="2" Width="110" Height="10" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="150,245,0,0" />
+                    <Border Background="#238636" CornerRadius="2" Width="110" Height="10" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="270,215,0,0" />
+                    <Border Background="#238636" CornerRadius="2" Width="110" Height="10" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="390,185,0,0" />
+                    <Border Background="#238636" CornerRadius="2" Width="110" Height="10" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="510,215,0,0" />
 
                     <!-- Playhead -->
-                    <Border Width="2" Background="{StaticResource Status.Error}" HorizontalAlignment="Left" Margin="100,0,0,0">
-                        <Polygon Points="-5,0 7,0 1,8" Fill="{StaticResource Status.Error}" HorizontalAlignment="Center" VerticalAlignment="Top"/>
+                    <Border Width="2" Background="{StaticResource Status.Error}" HorizontalAlignment="Left" Margin="210,0,0,0">
+                        <Polygon Points="-4,0 6,0 1,7" Fill="{StaticResource Status.Error}" HorizontalAlignment="Center" VerticalAlignment="Top"/>
                     </Border>
                 </Grid>
             </Grid>
         </Border>
 
-        <!-- Virtual Piano Placeholder -->
-        <Border Grid.Row="2" Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="0,1,0,0">
-            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
-                <TextBlock Text="[ Virtual Piano Workspace ]" Foreground="{StaticResource Text.Disabled}" FontSize="14" FontWeight="Medium" />
-                <TextBlock Text="Interactive 61/88 Keyboard Rendered Here" Foreground="{StaticResource Text.Disabled}" FontSize="12" Margin="0,4,0,0" HorizontalAlignment="Center" />
-            </StackPanel>
+        <!-- 3. Virtual Piano Interactive Keyboard Mock (61-Key Layout) -->
+        <Border Grid.Row="2" Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="0,1,0,0" Padding="12,6">
+            <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="56" />
+                </Grid.RowDefinitions>
+
+                <!-- Octave Header Labels -->
+                <Grid Grid.Row="0" Margin="0,0,0,3">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="133" />
+                        <ColumnDefinition Width="133" />
+                        <ColumnDefinition Width="133" />
+                        <ColumnDefinition Width="133" />
+                        <ColumnDefinition Width="133" />
+                        <ColumnDefinition Width="19" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="C2" FontSize="9.5" Foreground="{StaticResource Text.Disabled}" HorizontalAlignment="Left" Margin="2,0,0,0" />
+                    <TextBlock Grid.Column="1" Text="C3" FontSize="9.5" Foreground="{StaticResource Text.Disabled}" HorizontalAlignment="Left" Margin="2,0,0,0" />
+                    <TextBlock Grid.Column="2" Text="C4 (Middle C)" FontSize="9.5" Foreground="{StaticResource Accent.Primary}" FontWeight="SemiBold" HorizontalAlignment="Left" Margin="2,0,0,0" />
+                    <TextBlock Grid.Column="3" Text="C5" FontSize="9.5" Foreground="{StaticResource Text.Disabled}" HorizontalAlignment="Left" Margin="2,0,0,0" />
+                    <TextBlock Grid.Column="4" Text="C6" FontSize="9.5" Foreground="{StaticResource Text.Disabled}" HorizontalAlignment="Left" Margin="2,0,0,0" />
+                    <TextBlock Grid.Column="5" Text="C7" FontSize="9.5" Foreground="{StaticResource Text.Disabled}" HorizontalAlignment="Left" Margin="2,0,0,0" />
+                </Grid>
+
+                <!-- Piano Keys (5 Full Octaves + Top C = 36 White Keys, 25 Black Keys) -->
+                <Grid Grid.Row="1">
+                    <!-- Layer 1: White Keys (36 White keys, 19px wide each) -->
+                    <StackPanel Orientation="Horizontal">
+                        <!-- Octave 2 (C2-B2) -->
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+
+                        <!-- Octave 3 (C3-B3) -->
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+
+                        <!-- Octave 4 (C4-B4 with C4/E4/G4 Active Highlight) -->
+                        <Border Width="18" Margin="0,0,1,0" Background="{StaticResource Accent.Primary}" CornerRadius="0,0,3,3" BorderBrush="#58A6FF" BorderThickness="1,0,1,1" />
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+                        <Border Width="18" Margin="0,0,1,0" Background="{StaticResource Accent.Primary}" CornerRadius="0,0,3,3" BorderBrush="#58A6FF" BorderThickness="1,0,1,1" />
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+                        <Border Width="18" Margin="0,0,1,0" Background="{StaticResource Accent.Primary}" CornerRadius="0,0,3,3" BorderBrush="#58A6FF" BorderThickness="1,0,1,1" />
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+
+                        <!-- Octave 5 (C5-B5) -->
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+
+                        <!-- Octave 6 (C6-B6) -->
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+                        <Border Width="18" Margin="0,0,1,0" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+
+                        <!-- Top C7 -->
+                        <Border Width="18" Background="#E6EDF3" CornerRadius="0,0,3,3" BorderBrush="#30363D" BorderThickness="1,0,1,1" />
+                    </StackPanel>
+
+                    <!-- Layer 2: Black Keys (Canvas positioned overlay, 12px wide, 34px high) -->
+                    <Canvas Height="34" VerticalAlignment="Top" HorizontalAlignment="Left">
+                        <!-- Octave 2 Black Keys -->
+                        <Border Canvas.Left="13" Width="11" Height="34" Background="#161B22" CornerRadius="0,0,2,2" BorderBrush="#0D1117" BorderThickness="1" />
+                        <Border Canvas.Left="32" Width="11" Height="34" Background="#161B22" CornerRadius="0,0,2,2" BorderBrush="#0D1117" BorderThickness="1" />
+                        <Border Canvas.Left="70" Width="11" Height="34" Background="#161B22" CornerRadius="0,0,2,2" BorderBrush="#0D1117" BorderThickness="1" />
+                        <Border Canvas.Left="89" Width="11" Height="34" Background="#161B22" CornerRadius="0,0,2,2" BorderBrush="#0D1117" BorderThickness="1" />
+                        <Border Canvas.Left="108" Width="11" Height="34" Background="#161B22" CornerRadius="0,0,2,2" BorderBrush="#0D1117" BorderThickness="1" />
+
+                        <!-- Octave 3 Black Keys -->
+                        <Border Canvas.Left="146" Width="11" Height="34" Background="#161B22" CornerRadius="0,0,2,2" BorderBrush="#0D1117" BorderThickness="1" />
+                        <Border Canvas.Left="165" Width="11" Height="34" Background="#161B22" CornerRadius="0,0,2,2" BorderBrush="#0D1117" BorderThickness="1" />
+                        <Border Canvas.Left="203" Width="11" Height="34" Background="#161B22" CornerRadius="0,0,2,2" BorderBrush="#0D1117" BorderThickness="1" />
+                        <Border Canvas.Left="222" Width="11" Height="34" Background="#161B22" CornerRadius="0,0,2,2" BorderBrush="#0D1117" BorderThickness="1" />
+                        <Border Canvas.Left="241" Width="11" Height="34" Background="#161B22" CornerRadius="0,0,2,2" BorderBrush="#0D1117" BorderThickness="1" />
+
+                        <!-- Octave 4 Black Keys -->
+                        <Border Canvas.Left="279" Width="11" Height="34" Background="#161B22" CornerRadius="0,0,2,2" BorderBrush="#0D1117" BorderThickness="1" />
+                        <Border Canvas.Left="298" Width="11" Height="34" Background="#161B22" CornerRadius="0,0,2,2" BorderBrush="#0D1117" BorderThickness="1" />
+                        <Border Canvas.Left="336" Width="11" Height="34" Background="#161B22" CornerRadius="0,0,2,2" BorderBrush="#0D1117" BorderThickness="1" />
+                        <Border Canvas.Left="355" Width="11" Height="34" Background="#161B22" CornerRadius="0,0,2,2" BorderBrush="#0D1117" BorderThickness="1" />
+                        <Border Canvas.Left="374" Width="11" Height="34" Background="#161B22" CornerRadius="0,0,2,2" BorderBrush="#0D1117" BorderThickness="1" />
+
+                        <!-- Octave 5 Black Keys -->
+                        <Border Canvas.Left="412" Width="11" Height="34" Background="#161B22" CornerRadius="0,0,2,2" BorderBrush="#0D1117" BorderThickness="1" />
+                        <Border Canvas.Left="431" Width="11" Height="34" Background="#161B22" CornerRadius="0,0,2,2" BorderBrush="#0D1117" BorderThickness="1" />
+                        <Border Canvas.Left="469" Width="11" Height="34" Background="#161B22" CornerRadius="0,0,2,2" BorderBrush="#0D1117" BorderThickness="1" />
+                        <Border Canvas.Left="488" Width="11" Height="34" Background="#161B22" CornerRadius="0,0,2,2" BorderBrush="#0D1117" BorderThickness="1" />
+                        <Border Canvas.Left="507" Width="11" Height="34" Background="#161B22" CornerRadius="0,0,2,2" BorderBrush="#0D1117" BorderThickness="1" />
+
+                        <!-- Octave 6 Black Keys -->
+                        <Border Canvas.Left="545" Width="11" Height="34" Background="#161B22" CornerRadius="0,0,2,2" BorderBrush="#0D1117" BorderThickness="1" />
+                        <Border Canvas.Left="564" Width="11" Height="34" Background="#161B22" CornerRadius="0,0,2,2" BorderBrush="#0D1117" BorderThickness="1" />
+                        <Border Canvas.Left="602" Width="11" Height="34" Background="#161B22" CornerRadius="0,0,2,2" BorderBrush="#0D1117" BorderThickness="1" />
+                        <Border Canvas.Left="621" Width="11" Height="34" Background="#161B22" CornerRadius="0,0,2,2" BorderBrush="#0D1117" BorderThickness="1" />
+                        <Border Canvas.Left="640" Width="11" Height="34" Background="#161B22" CornerRadius="0,0,2,2" BorderBrush="#0D1117" BorderThickness="1" />
+                    </Canvas>
+                </Grid>
+            </Grid>
         </Border>
 
-        <!-- Transport Bar -->
-        <Border Grid.Row="3" Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="0,1,0,0" Padding="24,0">
+        <!-- 4. Transport Bar (Desktop Compact DAW Style) -->
+        <Border Grid.Row="3" Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="0,1,0,0" Padding="20,0">
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="200" />
+                    <ColumnDefinition Width="220" />
                     <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="200" />
+                    <ColumnDefinition Width="220" />
                 </Grid.ColumnDefinitions>
                 
-                <!-- Time & Status -->
+                <!-- Time & Playback Status -->
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Text="01:32" FontSize="13" Foreground="{StaticResource Text.Primary}" FontWeight="Medium" Margin="0,0,4,0"/>
-                    <TextBlock Text="/ 04:46" FontSize="13" Foreground="{StaticResource Text.Secondary}" Margin="0,0,16,0"/>
+                    <TextBlock Text="01:32" FontSize="13" Foreground="{StaticResource Text.Primary}" FontWeight="SemiBold" Margin="0,0,4,0"/>
+                    <TextBlock Text="/ 04:46" FontSize="12.5" Foreground="{StaticResource Text.Secondary}" Margin="0,0,12,0"/>
                     <Border Background="#1A2D21" BorderBrush="#238636" BorderThickness="1" CornerRadius="4" Padding="6,2">
-                        <TextBlock Text="Ready" FontSize="11" Foreground="#3FB950" />
+                        <TextBlock Text="Ready" FontSize="11" Foreground="#3FB950" FontWeight="Medium" />
                     </Border>
                 </StackPanel>
                 
-                <!-- Playback Controls -->
+                <!-- Center Playback Controls & Timeline -->
                 <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                    <Button Padding="8" Margin="0,0,8,0" Background="Transparent" BorderThickness="0">
-                        <Path Data="M6 6h2v12H6zm3.5 6l8.5 6V6z" Fill="{StaticResource Text.Primary}" Width="16" Height="16" Stretch="Uniform" />
+                    <Button Padding="8,6" Margin="0,0,6,0" Background="Transparent" BorderThickness="0" ToolTip="Previous Track">
+                        <Path Data="M6 6h2v12H6zm3.5 6l8.5 6V6z" Fill="{StaticResource Text.Primary}" Width="14" Height="14" Stretch="Uniform" />
                     </Button>
-                    <Button Padding="16,10" Margin="0,0,8,0" Background="{StaticResource Surface.Hover}" BorderBrush="{StaticResource Border.Default}" BorderThickness="1">
-                        <Path Data="M8 5v14l11-7z" Fill="{StaticResource Text.Primary}" Width="16" Height="16" Stretch="Uniform" />
+                    <Button Padding="14,8" Margin="0,0,6,0" Background="{StaticResource Surface.Hover}" BorderBrush="{StaticResource Border.Default}" BorderThickness="1" ToolTip="Play / Pause (F6)">
+                        <Path Data="M8 5v14l11-7z" Fill="{StaticResource Text.Primary}" Width="15" Height="15" Stretch="Uniform" />
                     </Button>
-                    <Button Padding="8" Margin="0,0,24,0" Background="Transparent" BorderThickness="0">
-                        <Path Data="M6 6h12v12H6z" Fill="{StaticResource Text.Primary}" Width="14" Height="14" Stretch="Uniform" />
+                    <Button Padding="8,6" Margin="0,0,20,0" Background="Transparent" BorderThickness="0" ToolTip="Stop (Esc)">
+                        <Path Data="M6 6h12v12H6z" Fill="{StaticResource Text.Primary}" Width="13" Height="13" Stretch="Uniform" />
                     </Button>
 
-                    <!-- Timeline Slider -->
-                    <Slider Width="300" VerticalAlignment="Center" Maximum="100" Value="32" Margin="0,0,24,0" />
+                    <!-- Timeline Seek Slider -->
+                    <Slider Width="280" VerticalAlignment="Center" Maximum="100" Value="32" Margin="0,0,16,0" />
                 </StackPanel>
                 
-                <!-- Modifiers -->
+                <!-- Modifiers (Speed & Transpose) -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                    <StackPanel Orientation="Horizontal" Margin="0,0,16,0">
-                        <TextBlock Text="Speed" FontSize="12" Foreground="{StaticResource Text.Secondary}" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                        <ComboBox Width="70" SelectedIndex="1">
+                    <StackPanel Orientation="Horizontal" Margin="0,0,12,0">
+                        <TextBlock Text="Speed" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <ComboBox Width="72" SelectedIndex="1">
                             <ComboBoxItem Content="0.50x"/>
                             <ComboBoxItem Content="1.00x"/>
+                            <ComboBoxItem Content="1.25x"/>
                             <ComboBoxItem Content="1.50x"/>
                         </ComboBox>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="Trans" FontSize="12" Foreground="{StaticResource Text.Secondary}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <TextBlock Text="Trans" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" VerticalAlignment="Center" Margin="0,0,6,0"/>
                         <ComboBox Width="60" SelectedIndex="1">
                             <ComboBoxItem Content="-1"/>
                             <ComboBoxItem Content="0"/>

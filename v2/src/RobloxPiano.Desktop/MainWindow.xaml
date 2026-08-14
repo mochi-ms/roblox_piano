@@ -6,6 +6,7 @@
         xmlns:vm="clr-namespace:RobloxPiano.Desktop.ViewModels"
         mc:Ignorable="d"
         Title="Roblox Piano" Height="768" Width="1366" MinHeight="680" MinWidth="1100"
+        Icon="/Resources/app_icon.ico"
         WindowStartupLocation="CenterScreen">
     <Window.DataContext>
         <vm:MainViewModel />
@@ -29,7 +30,7 @@
 
                 <!-- App Identity -->
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,32,0">
-                    <Path Data="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z" Fill="{StaticResource Text.Primary}" Width="16" Height="16" Stretch="Uniform" Margin="0,0,12,0" />
+                    <Path Data="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14zM7 7h2v6H7zm4 0h2v6h-2zm4 0h2v6h-2z" Fill="{StaticResource Accent.Primary}" Width="16" Height="16" Stretch="Uniform" Margin="0,0,10,0" />
                     <TextBlock Text="Roblox Piano" FontWeight="SemiBold" FontSize="15" VerticalAlignment="Center" />
                 </StackPanel>
 
@@ -43,11 +44,11 @@
 
                 <!-- Right Status / Actions -->
                 <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
-                    <!-- Roblox Status Indicator -->
-                    <Border Background="{StaticResource Surface.Base}" CornerRadius="12" Padding="12,6" Margin="0,0,16,0" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1">
+                    <!-- Roblox Status Indicator (Radius = 6, within <= 8 rule) -->
+                    <Border Background="{StaticResource Surface.Base}" CornerRadius="6" Padding="10,5" Margin="0,0,16,0" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1">
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                             <Ellipse Width="8" Height="8" Fill="{StaticResource Status.Offline}" Margin="0,0,8,0" />
-                            <TextBlock Text="Roblox 연결 안 됨" FontSize="12" Foreground="{StaticResource Text.Secondary}" />
+                            <TextBlock Text="Roblox 연결 안 됨" FontSize="12" Foreground="{StaticResource Text.Secondary}" VerticalAlignment="Center" />
                         </StackPanel>
                     </Border>
                     

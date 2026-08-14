@@ -3,43 +3,482 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:RobloxPiano.Desktop.ViewModels"
              mc:Ignorable="d" 
-             d:DesignHeight="600" d:DesignWidth="800">
-    <Grid Margin="32">
-        <StackPanel MaxWidth="600" HorizontalAlignment="Left">
-            <TextBlock Text="Settings" FontSize="24" FontWeight="SemiBold" Margin="0,0,0,24" />
-            
-            <TextBlock Text="Playback Engine" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,12" />
-            <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="16" Margin="0,0,0,24">
+             d:DesignHeight="700" d:DesignWidth="1000">
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="200" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <!-- 1. Left Section Navigation Pane (200 DIP) -->
+        <Border Grid.Column="0" Background="{StaticResource Surface.Base}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="0,0,1,0" Padding="16,20">
+            <StackPanel>
+                <TextBlock Text="Settings" FontSize="18" FontWeight="SemiBold" Margin="4,0,0,16" />
+
+                <!-- Navigation List -->
+                <RadioButton Content="General" Style="{StaticResource SideNavButtonStyle}" Command="{Binding SelectSectionCommand}" CommandParameter="General" IsChecked="True" />
+                <RadioButton Content="Playback" Style="{StaticResource SideNavButtonStyle}" Command="{Binding SelectSectionCommand}" CommandParameter="Playback" />
+                <RadioButton Content="Roblox" Style="{StaticResource SideNavButtonStyle}" Command="{Binding SelectSectionCommand}" CommandParameter="Roblox" />
+                <RadioButton Content="Hotkeys" Style="{StaticResource SideNavButtonStyle}" Command="{Binding SelectSectionCommand}" CommandParameter="Hotkeys" />
+                <RadioButton Content="Appearance" Style="{StaticResource SideNavButtonStyle}" Command="{Binding SelectSectionCommand}" CommandParameter="Appearance" />
+                <RadioButton Content="Advanced" Style="{StaticResource SideNavButtonStyle}" Command="{Binding SelectSectionCommand}" CommandParameter="Advanced" />
+            </StackPanel>
+        </Border>
+
+        <!-- 2. Right Detail Content Area -->
+        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="32,24">
+            <StackPanel MaxWidth="680" HorizontalAlignment="Left">
+
+                <!-- SECTION 1: GENERAL -->
                 <StackPanel>
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                        <TextBlock Text="Input Method" Width="150" VerticalAlignment="Center" Foreground="{StaticResource Text.Secondary}" />
-                        <ComboBox Width="200" SelectedIndex="0">
-                            <ComboBoxItem Content="Windows SendInput (Win32)"/>
-                            <ComboBoxItem Content="RawInput Hook"/>
-                        </ComboBox>
-                    </StackPanel>
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                        <TextBlock Text="Base Delay (ms)" Width="150" VerticalAlignment="Center" Foreground="{StaticResource Text.Secondary}" />
-                        <TextBox Width="80" Text="15" />
-                    </StackPanel>
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="Randomization (ms)" Width="150" VerticalAlignment="Center" Foreground="{StaticResource Text.Secondary}" />
-                        <TextBox Width="80" Text="5" />
-                    </StackPanel>
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedSection}" Value="General">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
+
+                    <TextBlock Text="General" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,4" />
+                    <TextBlock Text="Application startup and default behavior" FontSize="12.5" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,20" />
+
+                    <!-- Startup Group -->
+                    <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="16" Margin="0,0,0,16">
+                        <StackPanel>
+                            <Grid Margin="0,0,0,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Open last workspace on startup" FontSize="13" FontWeight="Medium" />
+                                    <TextBlock Text="Restore previously loaded score and player position" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                </StackPanel>
+                                <CheckBox Grid.Column="1" IsChecked="{Binding OpenLastWorkspace}" VerticalAlignment="Center" />
+                            </Grid>
+
+                            <Separator />
+
+                            <Grid Margin="0,0,0,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Check for updates automatically" FontSize="13" FontWeight="Medium" />
+                                    <TextBlock Text="Notify when newer versions of Roblox Piano are released" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                </StackPanel>
+                                <CheckBox Grid.Column="1" IsChecked="{Binding CheckForUpdates}" VerticalAlignment="Center" />
+                            </Grid>
+
+                            <Separator />
+
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="180" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Text="Default startup page" FontSize="13" FontWeight="Medium" />
+                                    <TextBlock Text="Initial view shown when launching the application" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                </StackPanel>
+                                <ComboBox Grid.Column="1" SelectedIndex="{Binding DefaultStartupPageIndex}" VerticalAlignment="Center">
+                                    <ComboBoxItem Content="Player" />
+                                    <ComboBoxItem Content="Library" />
+                                    <ComboBoxItem Content="Transcribe" />
+                                </ComboBox>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
-            </Border>
-            
-            <TextBlock Text="Library &amp; Storage" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,12" />
-            <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="16">
+
+                <!-- SECTION 2: PLAYBACK -->
                 <StackPanel>
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                        <TextBlock Text="Database Path" Width="150" VerticalAlignment="Center" Foreground="{StaticResource Text.Secondary}" />
-                        <TextBox Width="280" Text="%APPDATA%\RobloxPianoV2\library_v2.db" IsReadOnly="True" Foreground="{StaticResource Text.Disabled}"/>
-                        <Button Content="Open Folder" Margin="8,0,0,0" />
-                    </StackPanel>
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedSection}" Value="Playback">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
+
+                    <TextBlock Text="Playback" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,4" />
+                    <TextBlock Text="Note timing, speed, and sustain control" FontSize="12.5" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,20" />
+
+                    <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="16" Margin="0,0,0,16">
+                        <StackPanel>
+                            <Grid Margin="0,0,0,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="180" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Text="Default playback speed" FontSize="13" FontWeight="Medium" />
+                                    <TextBlock Text="Initial speed multiplier applied to loaded scores" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                </StackPanel>
+                                <ComboBox Grid.Column="1" SelectedIndex="{Binding DefaultSpeedIndex}" VerticalAlignment="Center">
+                                    <ComboBoxItem Content="0.50x" />
+                                    <ComboBoxItem Content="0.75x" />
+                                    <ComboBoxItem Content="1.00x" />
+                                    <ComboBoxItem Content="1.25x" />
+                                    <ComboBoxItem Content="1.50x" />
+                                </ComboBox>
+                            </Grid>
+
+                            <Separator />
+
+                            <Grid Margin="0,0,0,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="180" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Text="Default transpose (semitones)" FontSize="13" FontWeight="Medium" />
+                                    <TextBlock Text="Pitch shift offset applied automatically on load" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                </StackPanel>
+                                <TextBox Grid.Column="1" Text="{Binding DefaultTranspose}" Width="80" HorizontalAlignment="Right" VerticalContentAlignment="Center" TextAlignment="Center" />
+                            </Grid>
+
+                            <Separator />
+
+                            <Grid Margin="0,0,0,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="180" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Text="Sustain pedal behavior" FontSize="13" FontWeight="Medium" />
+                                    <TextBlock Text="Control how MIDI CC64 sustain messages are emitted" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                </StackPanel>
+                                <ComboBox Grid.Column="1" SelectedIndex="{Binding SustainBehaviorIndex}" VerticalAlignment="Center">
+                                    <ComboBoxItem Content="MIDI Sustain Events" />
+                                    <ComboBoxItem Content="Auto Sustain" />
+                                    <ComboBoxItem Content="Disabled" />
+                                </ComboBox>
+                            </Grid>
+
+                            <Separator />
+
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="180" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Text="Humanization timing jitter (ms)" FontSize="13" FontWeight="Medium" />
+                                    <TextBlock Text="Micro-timing variance to simulate natural performance" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                </StackPanel>
+                                <TextBox Grid.Column="1" Text="{Binding HumanizeJitterMs}" Width="80" HorizontalAlignment="Right" VerticalContentAlignment="Center" TextAlignment="Center" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
-            </Border>
-        </StackPanel>
+
+                <!-- SECTION 3: ROBLOX -->
+                <StackPanel>
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedSection}" Value="Roblox">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
+
+                    <TextBlock Text="Roblox Integration" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,4" />
+                    <TextBlock Text="Target window and virtual piano layout configuration" FontSize="12.5" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,20" />
+
+                    <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="16" Margin="0,0,0,16">
+                        <StackPanel>
+                            <Grid Margin="0,0,0,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="200" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Text="Virtual piano key layout" FontSize="13" FontWeight="Medium" />
+                                    <TextBlock Text="Roblox piano sheet key mapping mode" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                </StackPanel>
+                                <ComboBox Grid.Column="1" SelectedIndex="{Binding PianoLayoutIndex}" VerticalAlignment="Center">
+                                    <ComboBoxItem Content="61 Keys (Standard Sheet)" />
+                                    <ComboBoxItem Content="88 Keys (Full Grand)" />
+                                </ComboBox>
+                            </Grid>
+
+                            <Separator />
+
+                            <Grid Margin="0,0,0,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="200" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Text="Target window detection" FontSize="13" FontWeight="Medium" />
+                                    <TextBlock Text="Identification method for active Roblox client process" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                </StackPanel>
+                                <ComboBox Grid.Column="1" SelectedIndex="{Binding TargetModeIndex}" VerticalAlignment="Center">
+                                    <ComboBoxItem Content="Auto-detect Roblox Client" />
+                                    <ComboBoxItem Content="Foreground Window" />
+                                </ComboBox>
+                            </Grid>
+
+                            <Separator />
+
+                            <Grid Margin="0,0,0,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Stop playback when Roblox loses focus" FontSize="13" FontWeight="Medium" />
+                                    <TextBlock Text="Automatically pause note input if player switches windows" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                </StackPanel>
+                                <CheckBox Grid.Column="1" IsChecked="{Binding StopOnFocusLost}" VerticalAlignment="Center" />
+                            </Grid>
+
+                            <Separator />
+
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="200" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Text="Input simulation method" FontSize="13" FontWeight="Medium" />
+                                    <TextBlock Text="Windows API method used for low-latency keystroke injection" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                </StackPanel>
+                                <ComboBox Grid.Column="1" SelectedIndex="{Binding InputMethodIndex}" VerticalAlignment="Center">
+                                    <ComboBoxItem Content="Win32 SendInput (Direct)" />
+                                    <ComboBoxItem Content="Virtual Scan Codes" />
+                                </ComboBox>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- SECTION 4: HOTKEYS -->
+                <StackPanel>
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedSection}" Value="Hotkeys">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
+
+                    <TextBlock Text="Global Hotkeys" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,4" />
+                    <TextBlock Text="Configure shortcut keys for in-game playback control" FontSize="12.5" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,20" />
+
+                    <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="16" Margin="0,0,0,16">
+                        <StackPanel>
+                            <Grid Margin="0,0,0,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="100" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Text="Play / Pause" FontSize="13" FontWeight="Medium" />
+                                    <TextBlock Text="Start or pause automated piano playback" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                </StackPanel>
+                                <TextBox Grid.Column="1" Text="{Binding HotkeyPlayPause}" IsReadOnly="True" HorizontalAlignment="Right" Width="80" TextAlignment="Center" FontFamily="{StaticResource Font.Mono}" VerticalContentAlignment="Center" />
+                            </Grid>
+
+                            <Separator />
+
+                            <Grid Margin="0,0,0,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="100" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Text="Stop Playback" FontSize="13" FontWeight="Medium" />
+                                    <TextBlock Text="Halt playback and reset playhead to beginning" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                </StackPanel>
+                                <TextBox Grid.Column="1" Text="{Binding HotkeyStop}" IsReadOnly="True" HorizontalAlignment="Right" Width="80" TextAlignment="Center" FontFamily="{StaticResource Font.Mono}" VerticalContentAlignment="Center" />
+                            </Grid>
+
+                            <Separator />
+
+                            <Grid Margin="0,0,0,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="100" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Text="Toggle Overlay Window" FontSize="13" FontWeight="Medium" />
+                                    <TextBlock Text="Show or hide compact transparent HUD over Roblox" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                </StackPanel>
+                                <TextBox Grid.Column="1" Text="{Binding HotkeyOverlay}" IsReadOnly="True" HorizontalAlignment="Right" Width="80" TextAlignment="Center" FontFamily="{StaticResource Font.Mono}" VerticalContentAlignment="Center" />
+                            </Grid>
+
+                            <Separator />
+
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="100" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Text="Emergency Panic Stop" FontSize="13" FontWeight="Medium" />
+                                    <TextBlock Text="Instantly terminate all keystroke events and release keys" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                </StackPanel>
+                                <TextBox Grid.Column="1" Text="{Binding HotkeyPanic}" IsReadOnly="True" HorizontalAlignment="Right" Width="80" TextAlignment="Center" FontFamily="{StaticResource Font.Mono}" VerticalContentAlignment="Center" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- SECTION 5: APPEARANCE -->
+                <StackPanel>
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedSection}" Value="Appearance">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
+
+                    <TextBlock Text="Appearance" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,4" />
+                    <TextBlock Text="Visual personalization and display scaling" FontSize="12.5" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,20" />
+
+                    <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="16" Margin="0,0,0,16">
+                        <StackPanel>
+                            <Grid Margin="0,0,0,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="180" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Text="Application theme" FontSize="13" FontWeight="Medium" />
+                                    <TextBlock Text="Color mode for the user interface" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                </StackPanel>
+                                <ComboBox Grid.Column="1" SelectedIndex="{Binding ThemeIndex}" VerticalAlignment="Center">
+                                    <ComboBoxItem Content="Dark Graphite (Default)" />
+                                    <ComboBoxItem Content="Windows System" />
+                                </ComboBox>
+                            </Grid>
+
+                            <Separator />
+
+                            <Grid Margin="0,0,0,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="180" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Text="Accent color" FontSize="13" FontWeight="Medium" />
+                                    <TextBlock Text="Highlight color for active interactive elements" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                </StackPanel>
+                                <ComboBox Grid.Column="1" SelectedIndex="{Binding AccentIndex}" VerticalAlignment="Center">
+                                    <ComboBoxItem Content="Fluent Blue (#388BFD)" />
+                                    <ComboBoxItem Content="Obsidian Slate" />
+                                    <ComboBoxItem Content="Emerald Green" />
+                                </ComboBox>
+                            </Grid>
+
+                            <Separator />
+
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="180" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Text="UI display scaling" FontSize="13" FontWeight="Medium" />
+                                    <TextBlock Text="Adjust overall user interface scale factor" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                </StackPanel>
+                                <ComboBox Grid.Column="1" SelectedIndex="{Binding UiScaleIndex}" VerticalAlignment="Center">
+                                    <ComboBoxItem Content="100% (Standard)" />
+                                    <ComboBoxItem Content="125%" />
+                                    <ComboBoxItem Content="150%" />
+                                </ComboBox>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- SECTION 6: ADVANCED -->
+                <StackPanel>
+                    <StackPanel.Style>
+                        <Style TargetType="StackPanel">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedSection}" Value="Advanced">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </StackPanel.Style>
+
+                    <TextBlock Text="Advanced" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,4" />
+                    <TextBlock Text="Application diagnostics, storage paths, and maintenance" FontSize="12.5" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,20" />
+
+                    <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="16" Margin="0,0,0,16">
+                        <StackPanel>
+                            <Grid Margin="0,0,0,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="180" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Text="Diagnostic logging level" FontSize="13" FontWeight="Medium" />
+                                    <TextBlock Text="Verbosity level written to local debug logs" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                </StackPanel>
+                                <ComboBox Grid.Column="1" SelectedIndex="{Binding LogLevelIndex}" VerticalAlignment="Center">
+                                    <ComboBoxItem Content="Normal" />
+                                    <ComboBoxItem Content="Verbose" />
+                                    <ComboBoxItem Content="Debug" />
+                                </ComboBox>
+                            </Grid>
+
+                            <Separator />
+
+                            <Grid Margin="0,0,0,12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                                    <TextBlock Text="Database storage path" FontSize="13" FontWeight="Medium" />
+                                    <TextBox Text="{Binding DatabasePath}" IsReadOnly="True" Foreground="{StaticResource Text.Secondary}" Margin="0,4,0,0" VerticalContentAlignment="Center" />
+                                </StackPanel>
+                                <Button Grid.Column="1" Content="Open Folder" VerticalAlignment="Bottom" Padding="14,6" />
+                            </Grid>
+
+                            <Separator />
+
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                    <TextBlock Text="Reset application settings" FontSize="13" FontWeight="Medium" />
+                                    <TextBlock Text="Restore all configurations to their original defaults" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                </StackPanel>
+                                <Button Grid.Column="1" Content="Reset Settings" Foreground="{StaticResource Status.Error}" Padding="14,6" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+            </StackPanel>
+        </ScrollViewer>
     </Grid>
 </UserControl>
