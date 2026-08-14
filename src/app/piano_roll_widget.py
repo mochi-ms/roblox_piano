@@ -80,7 +80,7 @@ class PianoRollWidget(QWidget):
         if not self._timeline or not self._timeline.notes or self._timeline.duration <= 0:
             painter.setPen(QColor("#5A6272"))
             painter.setFont(QFont("Segoe UI", 11))
-            painter.drawText(self.rect(), Qt.AlignCenter, "No score loaded")
+            painter.drawText(self.rect(), Qt.AlignCenter, "불러온 악보가 없습니다")
             return
 
         margin_x = 20

@@ -47,7 +47,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Roblox Auto Piano Player")
+        self.setWindowTitle("로블록스 자동 피아노 연주기")
         self.resize(860, 720)
         self.setMinimumSize(780, 620)
         self.setAcceptDrops(True)
@@ -137,24 +137,24 @@ class MainWindow(QMainWindow):
 
         # Top Navigation Bar
         self.top_bar = QHBoxLayout()
-        self.lbl_app_title = QLabel("Roblox Piano Player")
+        self.lbl_app_title = QLabel("로블록스 피아노 연주기")
         self.lbl_app_title.setObjectName("title_label")
 
-        self.lbl_status_badge = QLabel("READY")
+        self.lbl_status_badge = QLabel("준비됨")
         self.lbl_status_badge.setStyleSheet(
             "background-color: #2D3748; color: #E2E8F0; font-weight: bold; padding: 4px 10px; border-radius: 6px; font-size: 11px;"
         )
 
-        self.lbl_roblox_status = QLabel("● Roblox checking...")
+        self.lbl_roblox_status = QLabel("● 로블록스 확인 중...")
         self.lbl_roblox_status.setStyleSheet("color: #94A3B8; font-size: 12px; margin-left: 10px;")
 
-        self.btn_overlay_toggle = QPushButton("HUD (F4)")
+        self.btn_overlay_toggle = QPushButton("오버레이 (F4)")
         self.btn_overlay_toggle.setObjectName("accent_toggle")
         self.btn_overlay_toggle.setCheckable(True)
         self.btn_overlay_toggle.setChecked(True)
         self.btn_overlay_toggle.clicked.connect(self._toggle_overlay)
 
-        self.btn_settings = QPushButton("⚙ Settings")
+        self.btn_settings = QPushButton("⚙ 설정")
         self.btn_settings.clicked.connect(self._open_settings)
 
         self.top_bar.addWidget(self.lbl_app_title)
@@ -189,20 +189,20 @@ class MainWindow(QMainWindow):
         lbl_icon.setStyleSheet("font-size: 48px;")
         lbl_icon.setAlignment(Qt.AlignCenter)
 
-        lbl_main = QLabel("Drag & Drop your score here")
+        lbl_main = QLabel("여기에 악보 파일을 드래그 앤 드롭하세요")
         lbl_main.setStyleSheet("font-size: 20px; font-weight: bold; color: #FFFFFF;")
         lbl_main.setAlignment(Qt.AlignCenter)
 
-        lbl_formats = QLabel("Supported: MIDI (.mid)  •  MusicXML (.xml, .mxl)  •  Numeric (.txt)  •  Image / PDF")
+        lbl_formats = QLabel("지원 포맷: MIDI (.mid)  •  MusicXML (.xml, .mxl)  •  숫자악보 (.txt)  •  이미지 / PDF")
         lbl_formats.setStyleSheet("font-size: 13px; color: #8C93A0;")
         lbl_formats.setAlignment(Qt.AlignCenter)
 
-        btn_browse = QPushButton("Browse Score File...")
+        btn_browse = QPushButton("악보 파일 찾기...")
         btn_browse.setObjectName("primary_btn")
         btn_browse.setFixedWidth(200)
         btn_browse.clicked.connect(self._browse_file)
 
-        btn_sample = QPushButton("Load Demo Sample (Canon in D)")
+        btn_sample = QPushButton("데모 곡 불러오기 (캐논 변주곡)")
         btn_sample.setFixedWidth(200)
         btn_sample.clicked.connect(self._load_sample_score)
 
@@ -231,10 +231,10 @@ class MainWindow(QMainWindow):
         # Left: Back btn & Song title
         left_info = QVBoxLayout()
         back_row = QHBoxLayout()
-        self.btn_back = QPushButton("← Load Another Score")
+        self.btn_back = QPushButton("← 다른 악보 불러오기")
         self.btn_back.setStyleSheet("font-size: 12px; padding: 4px 8px;")
         self.btn_back.clicked.connect(self._go_back_to_landing)
-        self.lbl_song_title = QLabel("Song Title")
+        self.lbl_song_title = QLabel("곡 제목")
         self.lbl_song_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #FFFFFF;")
         back_row.addWidget(self.btn_back)
         back_row.addWidget(self.lbl_song_title, 1)
@@ -249,28 +249,28 @@ class MainWindow(QMainWindow):
         v1 = QVBoxLayout()
         self.lbl_stat_dur = QLabel("00:00")
         self.lbl_stat_dur.setObjectName("stat_value")
-        l1 = QLabel("DURATION"); l1.setObjectName("stat_desc")
+        l1 = QLabel("재생 시간"); l1.setObjectName("stat_desc")
         v1.addWidget(self.lbl_stat_dur); v1.addWidget(l1)
 
         # BPM
         v2 = QVBoxLayout()
         self.lbl_stat_bpm = QLabel("120")
         self.lbl_stat_bpm.setObjectName("stat_value")
-        l2 = QLabel("BPM"); l2.setObjectName("stat_desc")
+        l2 = QLabel("속도(BPM)"); l2.setObjectName("stat_desc")
         v2.addWidget(self.lbl_stat_bpm); v2.addWidget(l2)
 
         # Total Notes
         v3 = QVBoxLayout()
         self.lbl_stat_notes = QLabel("0")
         self.lbl_stat_notes.setObjectName("stat_value")
-        l3 = QLabel("NOTES"); l3.setObjectName("stat_desc")
+        l3 = QLabel("노트 수"); l3.setObjectName("stat_desc")
         v3.addWidget(self.lbl_stat_notes); v3.addWidget(l3)
 
         # Range / Octave Fit
         v4 = QVBoxLayout()
         self.lbl_stat_range = QLabel("C2 — C7")
         self.lbl_stat_range.setObjectName("stat_value")
-        self.btn_octave_fit = QPushButton("Octave Fit")
+        self.btn_octave_fit = QPushButton("옥타브 맞춤")
         self.btn_octave_fit.setStyleSheet("font-size: 10px; padding: 2px 6px; background-color: #2D3748;")
         self.btn_octave_fit.clicked.connect(self._apply_octave_fit)
         v4.addWidget(self.lbl_stat_range)
@@ -305,11 +305,11 @@ class MainWindow(QMainWindow):
         row1 = QHBoxLayout()
 
         # Hands
-        self.chk_rh = QCheckBox("Right Hand (RH)")
+        self.chk_rh = QCheckBox("오른손 (RH)")
         self.chk_rh.setChecked(True)
         self.chk_rh.toggled.connect(self._toggle_hands)
 
-        self.chk_lh = QCheckBox("Left Hand (LH)")
+        self.chk_lh = QCheckBox("왼손 (LH)")
         self.chk_lh.setChecked(True)
         self.chk_lh.toggled.connect(self._toggle_hands)
 
@@ -318,7 +318,7 @@ class MainWindow(QMainWindow):
         row1.addSpacing(20)
 
         # Speed slider
-        row1.addWidget(QLabel("Speed:"))
+        row1.addWidget(QLabel("배속:"))
         self.slider_speed = QSlider(Qt.Horizontal)
         self.slider_speed.setRange(25, 200)  # 0.25x to 2.00x
         self.slider_speed.setValue(100)
@@ -331,7 +331,7 @@ class MainWindow(QMainWindow):
         row1.addSpacing(20)
 
         # Transpose slider
-        row1.addWidget(QLabel("Transpose:"))
+        row1.addWidget(QLabel("조옮김:"))
         self.slider_transpose = QSlider(Qt.Horizontal)
         self.slider_transpose.setRange(-12, 12)
         self.slider_transpose.setValue(0)
@@ -342,7 +342,7 @@ class MainWindow(QMainWindow):
         row1.addWidget(self.slider_transpose)
         row1.addWidget(self.lbl_transpose_val)
 
-        btn_reset_transpose = QPushButton("Reset")
+        btn_reset_transpose = QPushButton("초기화")
         btn_reset_transpose.setStyleSheet("font-size: 11px; padding: 2px 6px;")
         btn_reset_transpose.clicked.connect(lambda: self.slider_transpose.setValue(0))
         row1.addWidget(btn_reset_transpose)
@@ -353,16 +353,16 @@ class MainWindow(QMainWindow):
         # Row 2: Big Play / Pause / Stop Buttons
         row2 = QHBoxLayout()
 
-        self.btn_main_play = QPushButton("▶ Play (F6)")
+        self.btn_main_play = QPushButton("▶ 재생 (F6)")
         self.btn_main_play.setObjectName("primary_btn")
         self.btn_main_play.setFixedHeight(42)
         self.btn_main_play.clicked.connect(self._handle_play_button_click)
 
-        self.btn_main_stop = QPushButton("■ Stop (F8)")
+        self.btn_main_stop = QPushButton("■ 정지 (F8)")
         self.btn_main_stop.setFixedHeight(42)
         self.btn_main_stop.clicked.connect(self._handle_stop_button_click)
 
-        self.lbl_guide_text = QLabel("Press F6 in Roblox after sitting at the piano (3s countdown).")
+        self.lbl_guide_text = QLabel("로블록스 피아노에 앉은 후 F6을 누르세요 (3초 카운트다운).")
         self.lbl_guide_text.setStyleSheet("color: #94A3B8; font-size: 12px; margin-left: 12px;")
 
         row2.addWidget(self.btn_main_play, 2)
@@ -453,7 +453,7 @@ class MainWindow(QMainWindow):
 
     def load_score_file(self, file_path: str) -> None:
         if not os.path.isfile(file_path):
-            QMessageBox.warning(self, "File Error", f"File not found: {file_path}")
+            QMessageBox.warning(self, "파일 오류", f"파일을 찾을 수 없습니다: {file_path}")
             return
 
         ext = os.path.splitext(file_path)[1].lower()
@@ -470,14 +470,14 @@ class MainWindow(QMainWindow):
             elif ext in (".pdf",):
                 timeline = self.pdf_importer.import_score(file_path)
             else:
-                QMessageBox.warning(self, "Unsupported Format", f"Unsupported file extension: {ext}")
+                QMessageBox.warning(self, "지원하지 않는 포맷", f"지원하지 않는 파일 확장자입니다: {ext}")
                 return
 
             if timeline:
                 self._set_loaded_timeline(timeline)
 
         except Exception as e:
-            QMessageBox.critical(self, "Import Error", f"Failed to load score:\n{str(e)}")
+            QMessageBox.critical(self, "불러오기 오류", f"악보를 불러오는데 실패했습니다:\n{str(e)}")
 
     def _set_loaded_timeline(self, timeline: MusicTimeline) -> None:
         self.timeline = timeline
@@ -523,8 +523,8 @@ class MainWindow(QMainWindow):
         self.lbl_stat_range.setStyleSheet("color: #10B981; font-weight: bold;")
         self.btn_octave_fit.hide()
         QMessageBox.information(
-            self, "Octave Fit Applied",
-            f"Successfully adjusted {modified} notes to fit within the Roblox 61-key range."
+            self, "옥타브 맞춤 적용됨",
+            f"로블록스 61건반 범위에 맞게 {modified}개의 노트를 성공적으로 조정했습니다."
         )
 
     # ----------------------------------------------------
@@ -536,8 +536,8 @@ class MainWindow(QMainWindow):
             can_play, reason = self.target_window.check_can_play()
             if not can_play and self.config.target_window_safety and not self.config.dry_run_mode:
                 QMessageBox.information(
-                    self, "Roblox Focus Reminder",
-                    f"{reason}\n\nPlease bring Roblox to the foreground and press F6 to start!"
+                    self, "로블록스 활성화 확인",
+                    f"{reason}\n\n로블록스 창을 활성화(클릭)한 뒤 F6을 눌러 시작해주세요!"
                 )
                 return
             self.scheduler.play()
@@ -608,20 +608,20 @@ class MainWindow(QMainWindow):
         self.overlay.set_playback_state(state)
 
         if state == PlaybackState.PLAYING:
-            self.lbl_status_badge.setText("PLAYING")
+            self.lbl_status_badge.setText("연주 중")
             self.lbl_status_badge.setStyleSheet("background-color: #059669; color: #D1FAE5; font-weight: bold; padding: 4px 10px; border-radius: 6px;")
-            self.btn_main_play.setText("⏸ Pause (F7)")
+            self.btn_main_play.setText("⏸ 일시정지 (F7)")
         elif state == PlaybackState.PAUSED:
-            self.lbl_status_badge.setText("PAUSED")
+            self.lbl_status_badge.setText("일시정지됨")
             self.lbl_status_badge.setStyleSheet("background-color: #DC2626; color: #FEE2E2; font-weight: bold; padding: 4px 10px; border-radius: 6px;")
-            self.btn_main_play.setText("▶ Resume (F7)")
+            self.btn_main_play.setText("▶ 계속 (F7)")
         elif state == PlaybackState.COUNTDOWN:
-            self.lbl_status_badge.setText("COUNTDOWN")
+            self.lbl_status_badge.setText("카운트다운")
             self.lbl_status_badge.setStyleSheet("background-color: #D97706; color: #FEF3C7; font-weight: bold; padding: 4px 10px; border-radius: 6px;")
         else:
-            self.lbl_status_badge.setText("READY")
+            self.lbl_status_badge.setText("준비됨")
             self.lbl_status_badge.setStyleSheet("background-color: #2D3748; color: #E2E8F0; font-weight: bold; padding: 4px 10px; border-radius: 6px;")
-            self.btn_main_play.setText("▶ Play (F6)")
+            self.btn_main_play.setText("▶ 재생 (F6)")
 
     @Slot(float, float)
     def _on_playback_progress(self, current: float, total: float) -> None:
@@ -644,10 +644,10 @@ class MainWindow(QMainWindow):
 
     def _update_roblox_focus_status(self) -> None:
         if self.target_window.is_roblox_foreground():
-            self.lbl_roblox_status.setText("● Roblox In Focus")
+            self.lbl_roblox_status.setText("● 로블록스 창 활성화됨")
             self.lbl_roblox_status.setStyleSheet("color: #10B981; font-size: 12px; margin-left: 10px;")
         else:
-            self.lbl_roblox_status.setText("○ Roblox Not Active")
+            self.lbl_roblox_status.setText("○ 로블록스 창 비활성화됨")
             self.lbl_roblox_status.setStyleSheet("color: #94A3B8; font-size: 12px; margin-left: 10px;")
 
     def _toggle_overlay(self) -> None:

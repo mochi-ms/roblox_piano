@@ -31,7 +31,7 @@ class FloatingOverlay(QWidget):
         self._drag_position = QPoint()
         self._click_through: bool = False
 
-        self._song_title: str = "No Song"
+        self._song_title: str = "곡 없음"
         self._state: PlaybackState = PlaybackState.IDLE
         self._current_time: float = 0.0
         self._total_time: float = 0.0
@@ -74,7 +74,7 @@ class FloatingOverlay(QWidget):
         self.lbl_title = QLabel(self._song_title)
         self.lbl_title.setStyleSheet("font-weight: bold; font-size: 13px; color: #FFFFFF;")
 
-        self.lbl_status = QLabel("READY")
+        self.lbl_status = QLabel("준비됨")
         self.lbl_status.setStyleSheet("font-size: 10px; font-weight: bold; padding: 2px 6px; border-radius: 4px; background-color: #2D3748; color: #E2E8F0;")
 
         self.btn_toggle_mode = QPushButton("—")
@@ -109,7 +109,7 @@ class FloatingOverlay(QWidget):
         self.lbl_time = QLabel("00:00 / 00:00")
         self.lbl_time.setStyleSheet("font-size: 11px; color: #94A3B8; font-family: monospace;")
 
-        self.lbl_hands = QLabel("RH ●  LH ●")
+        self.lbl_hands = QLabel("오른손 ●  왼손 ●")
         self.lbl_hands.setStyleSheet("font-size: 11px; color: #38BDF8;")
 
         self.lbl_speed = QLabel("1.00×")
@@ -124,7 +124,7 @@ class FloatingOverlay(QWidget):
 
         # Controls: F6 Play/Pause, F8 Stop
         self.controls_layout = QHBoxLayout()
-        self.lbl_hotkeys_hint = QLabel("F6: Play/Pause  •  F8: Stop")
+        self.lbl_hotkeys_hint = QLabel("F6: 재생/일시정지  •  F8: 정지")
         self.lbl_hotkeys_hint.setStyleSheet("font-size: 10px; color: #64748B;")
 
         self.btn_play = QPushButton("▶ F6")
@@ -152,8 +152,8 @@ class FloatingOverlay(QWidget):
     def set_hands(self, rh: bool, lh: bool) -> None:
         self._rh_active = rh
         self._lh_active = lh
-        rh_str = "RH ●" if rh else "RH ○"
-        lh_str = "LH ●" if lh else "LH ○"
+        rh_str = "오른손 ●" if rh else "오른손 ○"
+        lh_str = "왼손 ●" if lh else "왼손 ○"
         self.lbl_hands.setText(f"{rh_str}  {lh_str}")
 
     def set_speed(self, speed: float) -> None:
@@ -163,7 +163,7 @@ class FloatingOverlay(QWidget):
     def set_countdown(self, sec: int) -> None:
         self._countdown = sec
         if sec > 0:
-            self.lbl_countdown.setText(f"Starting in {sec}")
+            self.lbl_countdown.setText(f"{sec}초 후 시작")
             self.lbl_countdown.show()
         else:
             self.lbl_countdown.hide()
@@ -185,14 +185,14 @@ class FloatingOverlay(QWidget):
     def set_playback_state(self, state: PlaybackState) -> None:
         self._state = state
         state_colors = {
-            PlaybackState.IDLE: ("READY", "#2D3748", "#E2E8F0"),
-            PlaybackState.COUNTDOWN: ("STARTING", "#D97706", "#FEF3C7"),
-            PlaybackState.PLAYING: ("PLAYING", "#059669", "#D1FAE5"),
-            PlaybackState.PAUSED: ("PAUSED", "#DC2626", "#FEE2E2"),
-            PlaybackState.STOPPED: ("STOPPED", "#475569", "#F1F5F9"),
-            PlaybackState.COMPLETED: ("DONE", "#2563EB", "#DBEAFE"),
+            PlaybackState.IDLE: ("준비됨", "#2D3748", "#E2E8F0"),
+            PlaybackState.COUNTDOWN: ("시작 대기", "#D97706", "#FEF3C7"),
+            PlaybackState.PLAYING: ("연주 중", "#059669", "#D1FAE5"),
+            PlaybackState.PAUSED: ("일시정지됨", "#DC2626", "#FEE2E2"),
+            PlaybackState.STOPPED: ("정지됨", "#475569", "#F1F5F9"),
+            PlaybackState.COMPLETED: ("완료됨", "#2563EB", "#DBEAFE"),
         }
-        text, bg, fg = state_colors.get(state, ("READY", "#2D3748", "#E2E8F0"))
+        text, bg, fg = state_colors.get(state, ("준비됨", "#2D3748", "#E2E8F0"))
         self.lbl_status.setText(text)
         self.lbl_status.setStyleSheet(f"font-size: 10px; font-weight: bold; padding: 2px 6px; border-radius: 4px; background-color: {bg}; color: {fg};")
 

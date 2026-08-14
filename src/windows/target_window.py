@@ -59,4 +59,4 @@ class TargetWindowManager:
             return True, "Roblox is foreground window"
 
         current_title = self.get_foreground_window_title() or "None"
-        return False, f"Roblox is not in focus (Active: '{current_title}')"
+        return False, f"로블록스 창이 활성화되어 있지 않습니다 (현재: '{current_title}')"

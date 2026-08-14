@@ -20,7 +20,7 @@ class SettingsDialog(QDialog):
         self.config_mgr = config_manager
         self.config: AppConfig = config_manager.config
 
-        self.setWindowTitle("Settings • Roblox Piano Player")
+        self.setWindowTitle("설정 • 로블록스 자동 피아노 연주기")
         self.setMinimumWidth(480)
         self.setModal(True)
         self._setup_ui()
@@ -58,20 +58,20 @@ class SettingsDialog(QDialog):
         self.spin_conflict_delay.setRange(2.0, 50.0)
         self.spin_conflict_delay.setSuffix(" ms")
 
-        self.chk_target_safety = QCheckBox("Prevent typing when Roblox is not in focus")
+        self.chk_target_safety = QCheckBox("로블록스가 비활성화 상태일 때 입력 방지")
         self.combo_focus_loss = QComboBox()
         self.combo_focus_loss.addItems(["PAUSE", "STOP", "CONTINUE"])
 
-        self.chk_dry_run = QCheckBox("Dry Run Mode (Simulate without sending real keystrokes)")
+        self.chk_dry_run = QCheckBox("테스트 모드 (실제 키보드 입력을 보내지 않음)")
 
-        form_general.addRow("Theme:", self.combo_theme)
-        form_general.addRow("Countdown Before Play:", self.spin_countdown)
-        form_general.addRow("Key Hold Duration:", self.spin_hold_dur)
-        form_general.addRow("Key Conflict Policy (e.g. q/Q):", self.combo_conflict)
-        form_general.addRow("Conflict Arpeggio Delay:", self.spin_conflict_delay)
-        form_general.addRow("Roblox Focus Safety:", self.chk_target_safety)
-        form_general.addRow("On Focus Lost:", self.combo_focus_loss)
-        form_general.addRow("Testing Mode:", self.chk_dry_run)
+        form_general.addRow("테마:", self.combo_theme)
+        form_general.addRow("시작 전 대기 시간(초):", self.spin_countdown)
+        form_general.addRow("기본 건반 누름 지속시간(ms):", self.spin_hold_dur)
+        form_general.addRow("동일 건반 충돌 정책:", self.combo_conflict)
+        form_general.addRow("충돌 시 분산화음(아르페지오) 지연:", self.spin_conflict_delay)
+        form_general.addRow("로블록스 포커스 안전성:", self.chk_target_safety)
+        form_general.addRow("포커스를 잃었을 때:", self.combo_focus_loss)
+        form_general.addRow("테스트 모드:", self.chk_dry_run)
 
         # Tab 2: Hotkeys & Overlay
         tab_hotkeys = QWidget()
@@ -88,14 +88,14 @@ class SettingsDialog(QDialog):
         self.spin_opacity.setRange(0.3, 1.0)
         self.spin_opacity.setSingleStep(0.05)
 
-        self.chk_click_through = QCheckBox("Enable Click-Through (Clicks pass to Roblox)")
+        self.chk_click_through = QCheckBox("클릭 무시 (클릭이 오버레이를 통과하여 로블록스에 적용됨)")
 
-        form_hotkeys.addRow("Play Hotkey:", self.edit_hk_play)
-        form_hotkeys.addRow("Pause/Resume Hotkey:", self.edit_hk_pause)
-        form_hotkeys.addRow("Emergency Stop Hotkey:", self.edit_hk_stop)
-        form_hotkeys.addRow("Toggle HUD Hotkey:", self.edit_hk_overlay)
-        form_hotkeys.addRow("HUD Opacity:", self.spin_opacity)
-        form_hotkeys.addRow("HUD Click-Through:", self.chk_click_through)
+        form_hotkeys.addRow("재생 단축키:", self.edit_hk_play)
+        form_hotkeys.addRow("일시정지/계속 단축키:", self.edit_hk_pause)
+        form_hotkeys.addRow("긴급 정지 단축키:", self.edit_hk_stop)
+        form_hotkeys.addRow("오버레이(HUD) 표시 단축키:", self.edit_hk_overlay)
+        form_hotkeys.addRow("오버레이 투명도:", self.spin_opacity)
+        form_hotkeys.addRow("오버레이 클릭 통과:", self.chk_click_through)
 
         # Tab 3: OMR (Score Recognition)
         tab_omr = QWidget()
@@ -106,18 +106,18 @@ class SettingsDialog(QDialog):
         self.lbl_omr_status = QLabel()
         audiveris = AudiverisBackend()
         if audiveris.is_available():
-            self.lbl_omr_status.setText("● Audiveris OMR is installed and available.")
+            self.lbl_omr_status.setText("● Audiveris OMR이 시스템에 설치되어 있습니다.")
             self.lbl_omr_status.setStyleSheet("color: #10B981; font-weight: bold;")
         else:
-            self.lbl_omr_status.setText("○ Audiveris OMR is not detected.\n(MIDI and MusicXML work without Audiveris)")
+            self.lbl_omr_status.setText("○ Audiveris OMR 경로가 감지되지 않았습니다.\n(이미지 악보 인식을 제외한 MIDI, MusicXML 등은 정상 작동합니다)")
             self.lbl_omr_status.setStyleSheet("color: #F59E0B;")
 
         layout_omr.addWidget(self.lbl_omr_status)
 
         path_layout = QHBoxLayout()
         self.edit_audiveris_path = QLineEdit()
-        self.edit_audiveris_path.setPlaceholderText("Path to audiveris.bat or executable...")
-        btn_browse_omr = QPushButton("Browse...")
+        self.edit_audiveris_path.setPlaceholderText("audiveris.bat 또는 실행 파일 경로를 지정하세요...")
+        btn_browse_omr = QPushButton("찾아보기...")
         btn_browse_omr.clicked.connect(self._browse_audiveris)
         path_layout.addWidget(self.edit_audiveris_path)
         path_layout.addWidget(btn_browse_omr)
@@ -125,18 +125,18 @@ class SettingsDialog(QDialog):
         layout_omr.addLayout(path_layout)
         layout_omr.addStretch()
 
-        self.tabs.addTab(tab_general, "Playback & Safety")
-        self.tabs.addTab(tab_hotkeys, "Hotkeys & HUD")
-        self.tabs.addTab(tab_omr, "OMR (Sheet Scanner)")
+        self.tabs.addTab(tab_general, "재생 및 안전성 설정")
+        self.tabs.addTab(tab_hotkeys, "단축키 및 오버레이 설정")
+        self.tabs.addTab(tab_omr, "악보 인식 (OMR) 설정")
 
         layout.addWidget(self.tabs)
 
         # Action buttons (Save, Cancel)
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-        btn_cancel = QPushButton("Cancel")
+        btn_cancel = QPushButton("취소")
         btn_cancel.clicked.connect(self.reject)
-        btn_save = QPushButton("Save Settings")
+        btn_save = QPushButton("설정 저장")
         btn_save.setObjectName("primary_btn")
         btn_save.clicked.connect(self._save_values)
 
@@ -146,7 +146,7 @@ class SettingsDialog(QDialog):
 
     def _browse_audiveris(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select Audiveris Executable", "", "Executables (*.exe *.bat);;All Files (*.*)"
+            self, "Audiveris 실행 파일 선택", "", "실행 파일 (*.exe *.bat);;모든 파일 (*.*)"
         )
         if path:
             self.edit_audiveris_path.setText(path)
