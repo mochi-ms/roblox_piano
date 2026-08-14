@@ -7,7 +7,8 @@ a = Analysis(
     binaries=[],
     datas=[
         ('src/piano/profiles', 'src/piano/profiles'),
-        ('src/resources', 'src/resources')
+        ('src/resources', 'src/resources'),
+        ('app_icon.ico', '.')
     ],
     hiddenimports=[],
     hookspath=[],

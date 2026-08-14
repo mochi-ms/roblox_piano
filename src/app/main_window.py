@@ -59,9 +59,10 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
 
         # Set window icon
-        icon_candidate = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "resources", "app_icon.png")
-        if os.path.exists(icon_candidate):
-            self.setWindowIcon(QIcon(icon_candidate))
+        from src.utils.icon_loader import get_app_qicon
+        app_icon = get_app_qicon()
+        if not app_icon.isNull():
+            self.setWindowIcon(app_icon)
 
         # 1. Config & Core Services
         self.config_mgr = ConfigManager()

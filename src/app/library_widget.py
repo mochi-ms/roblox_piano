@@ -55,7 +55,7 @@ class LibraryWidget(QWidget):
             QWidget {
                 background-color: #0D1117;
                 color: #C9D1D9;
-                font-family: 'Segoe UI Variable', 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+                font-family: 'Segoe UI Variable', 'Segoe UI', 'Malgun Gothic', -apple-system, BlinkMacSystemFont, sans-serif;
                 font-size: 13px;
             }
             QSplitter::handle {
@@ -70,7 +70,7 @@ class LibraryWidget(QWidget):
                 padding: 4px;
             }
             QTreeView::item {
-                padding: 4px 6px;
+                padding: 3px 6px;
                 min-height: 28px;
                 border-radius: 4px;
                 color: #C9D1D9;
@@ -80,9 +80,10 @@ class LibraryWidget(QWidget):
                 color: #F0F6FC;
             }
             QTreeView::item:selected {
-                background-color: #1F2A38;
-                color: #FFFFFF;
-                border-left: 2px solid #4C82F7;
+                background-color: #1C2B42;
+                color: #58A6FF;
+                font-weight: 600;
+                border-left: 2px solid #388BFD;
             }
             QTableView {
                 background-color: #0D1117;
@@ -96,7 +97,7 @@ class LibraryWidget(QWidget):
             }
             QTableView::item {
                 padding: 4px 8px;
-                min-height: 32px;
+                min-height: 34px;
                 border-radius: 4px;
             }
             QTableView::item:hover {
@@ -111,7 +112,7 @@ class LibraryWidget(QWidget):
                 color: #8B949E;
                 padding: 6px 10px;
                 border: none;
-                border-bottom: 1px solid #21262D;
+                border-bottom: 1px solid #30363D;
                 font-weight: 600;
                 font-size: 12px;
             }
@@ -120,9 +121,10 @@ class LibraryWidget(QWidget):
                 color: #C9D1D9;
                 border: 1px solid #30363D;
                 border-radius: 6px;
-                padding: 5px 11px;
-                font-size: 13px;
+                padding: 4px 10px;
+                font-size: 12px;
                 font-weight: 500;
+                min-height: 24px;
             }
             QPushButton:hover, QToolButton:hover {
                 background-color: #30363D;
@@ -137,12 +139,37 @@ class LibraryWidget(QWidget):
                 border-color: #21262D;
                 color: #484F58;
             }
+            #nav_btn {
+                background-color: transparent;
+                border: 1px solid transparent;
+                border-radius: 5px;
+                padding: 3px;
+                min-width: 28px;
+                min-height: 28px;
+                max-width: 28px;
+                max-height: 28px;
+            }
+            #nav_btn:hover {
+                background-color: #21262D;
+                border-color: #30363D;
+            }
+            #nav_btn:pressed {
+                background-color: #161B22;
+            }
+            #nav_btn:disabled {
+                background-color: transparent;
+                border-color: transparent;
+                color: #30363D;
+            }
             #cmd_btn {
                 background-color: transparent;
                 border: 1px solid transparent;
                 color: #C9D1D9;
-                padding: 5px 9px;
-                border-radius: 6px;
+                padding: 4px 8px;
+                border-radius: 5px;
+                font-size: 12px;
+                font-weight: 500;
+                min-height: 24px;
             }
             #cmd_btn:hover {
                 background-color: #21262D;
@@ -157,33 +184,47 @@ class LibraryWidget(QWidget):
                 border-color: transparent;
                 color: #484F58;
             }
+            #btn_new_primary {
+                background-color: #21262D;
+                border: 1px solid #388BFD;
+                color: #58A6FF;
+                font-weight: 600;
+                padding: 4px 10px;
+                border-radius: 5px;
+            }
+            #btn_new_primary:hover {
+                background-color: #1F3A60;
+                color: #FFFFFF;
+            }
             #address_bar {
                 background-color: #161B22;
                 border: 1px solid #30363D;
                 border-radius: 6px;
+                min-height: 28px;
             }
             #address_bar:focus-within {
-                border: 1px solid #4C82F7;
+                border: 1px solid #388BFD;
             }
             QLineEdit {
                 background-color: #161B22;
                 color: #F0F6FC;
                 border: 1px solid #30363D;
                 border-radius: 6px;
-                padding: 5px 10px;
-                font-size: 13px;
+                padding: 4px 10px;
+                font-size: 12px;
+                min-height: 24px;
             }
             QLineEdit:focus {
-                border: 1px solid #4C82F7;
+                border: 1px solid #388BFD;
                 background-color: #0D1117;
             }
             #crumb_btn {
                 background-color: transparent;
                 border: none;
                 color: #8B949E;
-                font-size: 13px;
+                font-size: 12px;
                 font-weight: 500;
-                padding: 3px 6px;
+                padding: 2px 6px;
                 border-radius: 4px;
             }
             #crumb_btn:hover {
@@ -194,17 +235,16 @@ class LibraryWidget(QWidget):
                 background-color: transparent;
                 border: none;
                 color: #F0F6FC;
-                font-size: 13px;
+                font-size: 12px;
                 font-weight: 600;
-                padding: 3px 6px;
+                padding: 2px 6px;
             }
             #statusBar {
-                background-color: #161B22;
+                background-color: transparent;
                 border-top: 1px solid #21262D;
                 color: #8B949E;
                 font-size: 12px;
-                padding: 4px 12px;
-                border-radius: 4px;
+                padding: 4px 8px;
             }
             QMenu {
                 background-color: #161B22;
@@ -213,9 +253,9 @@ class LibraryWidget(QWidget):
                 padding: 4px 0;
             }
             QMenu::item {
-                padding: 6px 24px 6px 20px;
+                padding: 5px 22px 5px 18px;
                 color: #C9D1D9;
-                font-size: 13px;
+                font-size: 12px;
             }
             QMenu::item:selected {
                 background-color: #1F3A60;
@@ -226,10 +266,15 @@ class LibraryWidget(QWidget):
                 background-color: #21262D;
                 margin: 4px 8px;
             }
+            QToolButton::menu-indicator {
+                subcontrol-origin: padding;
+                subcontrol-position: center right;
+                right: 4px;
+            }
         """)
         
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(12, 10, 12, 8)
+        main_layout.setContentsMargins(10, 8, 10, 6)
         main_layout.setSpacing(6)
         
         # =====================================================================
@@ -239,16 +284,19 @@ class LibraryWidget(QWidget):
         nav_row.setSpacing(6)
         
         self.btn_back = QToolButton(self)
+        self.btn_back.setObjectName("nav_btn")
         self.btn_back.setIcon(self.style().standardIcon(QStyle.SP_ArrowBack))
         self.btn_back.setToolTip("뒤로 가기 (Alt+Left)")
         self.btn_back.clicked.connect(self._go_back)
         
         self.btn_forward = QToolButton(self)
+        self.btn_forward.setObjectName("nav_btn")
         self.btn_forward.setIcon(self.style().standardIcon(QStyle.SP_ArrowForward))
         self.btn_forward.setToolTip("앞으로 가기 (Alt+Right)")
         self.btn_forward.clicked.connect(self._go_forward)
         
         self.btn_up = QToolButton(self)
+        self.btn_up.setObjectName("nav_btn")
         self.btn_up.setIcon(self.style().standardIcon(QStyle.SP_ArrowUp))
         self.btn_up.setToolTip("상위 폴더로 (Alt+Up)")
         self.btn_up.clicked.connect(self._go_up)
@@ -261,12 +309,12 @@ class LibraryWidget(QWidget):
         self.address_bar = QFrame(self)
         self.address_bar.setObjectName("address_bar")
         addr_layout = QHBoxLayout(self.address_bar)
-        addr_layout.setContentsMargins(6, 2, 6, 2)
+        addr_layout.setContentsMargins(6, 1, 6, 1)
         addr_layout.setSpacing(2)
         
         # Icon inside Address Bar
         lbl_loc_icon = QLabel(self.address_bar)
-        lbl_loc_icon.setPixmap(self.style().standardIcon(QStyle.SP_DirIcon).pixmap(16, 16))
+        lbl_loc_icon.setPixmap(self.style().standardIcon(QStyle.SP_DirIcon).pixmap(15, 15))
         addr_layout.addWidget(lbl_loc_icon)
         
         # Scrollable Breadcrumbs Container
@@ -283,8 +331,8 @@ class LibraryWidget(QWidget):
         self.search_bar.setPlaceholderText("라이브러리 검색 (Ctrl+F)...")
         self.search_bar.setClearButtonEnabled(True)
         self.search_bar.textChanged.connect(self._on_search)
-        self.search_bar.setMinimumWidth(180)
-        self.search_bar.setMaximumWidth(260)
+        self.search_bar.setMinimumWidth(160)
+        self.search_bar.setMaximumWidth(240)
         nav_row.addWidget(self.search_bar)
         
         main_layout.addLayout(nav_row)
@@ -293,10 +341,12 @@ class LibraryWidget(QWidget):
         # ROW 2: Command Bar (Windows 11 Explorer Command Ribbon)
         # =====================================================================
         cmd_bar = QHBoxLayout()
-        cmd_bar.setSpacing(4)
+        cmd_bar.setContentsMargins(0, 1, 0, 2)
+        cmd_bar.setSpacing(3)
         
-        # + 새로 만들기 Dropdown
+        # + 새로 만들기 Dropdown (Elevated)
         self.btn_new = QToolButton(self)
+        self.btn_new.setObjectName("btn_new_primary")
         self.btn_new.setText("+ 새로 만들기")
         self.btn_new.setPopupMode(QToolButton.InstantPopup)
         menu_new = QMenu(self.btn_new)
@@ -323,7 +373,8 @@ class LibraryWidget(QWidget):
         # Separator 1
         sep1 = QFrame(self)
         sep1.setFrameShape(QFrame.VLine)
-        sep1.setStyleSheet("color: #21262D; margin: 4px 4px;")
+        sep1.setStyleSheet("background-color: #30363D; margin: 4px 4px;")
+        sep1.setFixedWidth(1)
         cmd_bar.addWidget(sep1)
         
         # Edit Operations: Cut, Copy, Paste, Rename, Delete
@@ -360,12 +411,13 @@ class LibraryWidget(QWidget):
         # Separator 2
         sep2 = QFrame(self)
         sep2.setFrameShape(QFrame.VLine)
-        sep2.setStyleSheet("color: #21262D; margin: 4px 4px;")
+        sep2.setStyleSheet("background-color: #30363D; margin: 4px 4px;")
+        sep2.setFixedWidth(1)
         cmd_bar.addWidget(sep2)
         
-        # Sort Dropdown
+        # Sort Dropdown - NOTE: Only "정렬" text without ▼ to eliminate duplicate arrows!
         self.btn_sort = QToolButton(self)
-        self.btn_sort.setText("정렬 ▼")
+        self.btn_sort.setText("정렬")
         self.btn_sort.setObjectName("cmd_btn")
         self.btn_sort.setPopupMode(QToolButton.InstantPopup)
         menu_sort = QMenu(self.btn_sort)
@@ -382,9 +434,27 @@ class LibraryWidget(QWidget):
         
         cmd_bar.addStretch(1)
         
-        # MML Import Button
+        # MML Import Button (Polished Accent)
         btn_mml = QPushButton("MML 가져오기", self)
-        btn_mml.setStyleSheet("background-color: #2D4C7C; color: #FFFFFF; border: 1px solid #4C82F7; font-weight: 600; padding: 5px 12px;")
+        btn_mml.setStyleSheet("""
+            QPushButton {
+                background-color: #1F3A60;
+                color: #58A6FF;
+                border: 1px solid #388BFD;
+                font-weight: 600;
+                padding: 4px 12px;
+                border-radius: 5px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #2D4C7C;
+                color: #FFFFFF;
+                border-color: #58A6FF;
+            }
+            QPushButton:pressed {
+                background-color: #16263D;
+            }
+        """)
         btn_mml.clicked.connect(self._open_mml_dialog)
         cmd_bar.addWidget(btn_mml)
         
