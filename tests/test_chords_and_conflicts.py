@@ -23,32 +23,32 @@ def test_mixed_chord_shift_separation():
     engine.play_chord_notes([n1, n2])
 
     events = backend.events
-    # Check sequence
     # 1. 'q' down
-    # 2. 'shift' down
-    # 3. 'w' down
-    # 4. 'w' up
-    # 5. 'shift' up
-    # 6. 'q' up
+    # 2. 'q' up (micro arpeggio isolates completely!)
+    # 3. 'shift' down
+    # 4. 'w' down
+    # 5. 'w' up
+    # 6. 'shift' up
     action_sequence = [(act, key) for _, act, key in events]
 
     assert ("down", "q") in action_sequence
     assert ("down", "shift") in action_sequence
     assert ("down", "w") in action_sequence
 
-    # Verify 'q' down happens before 'shift' down
+    # Verify 'q' down and up happens BEFORE 'shift' down
     q_down_idx = action_sequence.index(("down", "q"))
-    shift_down_idx = action_sequence.index(("down", "shift"))
-    assert q_down_idx < shift_down_idx
-
-    # Verify 'shift' up happens before 'q' up
-    shift_up_idx = action_sequence.index(("up", "shift"))
     q_up_idx = action_sequence.index(("up", "q"))
-    assert shift_up_idx < q_up_idx
+    shift_down_idx = action_sequence.index(("down", "shift"))
+    assert q_down_idx < q_up_idx < shift_down_idx
+
+    # Verify 'w' up happens before 'shift' up
+    shift_up_idx = action_sequence.index(("up", "shift"))
+    w_up_idx = action_sequence.index(("up", "w"))
+    assert w_up_idx < shift_up_idx
 
     # Finally verify all keys are released
     assert len(key_state.active_keys) == 0
-    assert not key_state.shift_active
+    assert "SHIFT" not in key_state.active_modifiers
 
 
 def test_same_physical_key_conflict_micro_arpeggio():
@@ -81,4 +81,4 @@ def test_same_physical_key_conflict_micro_arpeggio():
 
     assert first_q_down < first_q_up < shift_down
     assert len(key_state.active_keys) == 0
-    assert not key_state.shift_active
+    assert "SHIFT" not in key_state.active_modifiers

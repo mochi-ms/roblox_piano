@@ -22,7 +22,7 @@ def qapp():
 
 def test_main_window_instantiation(qapp):
     window = MainWindow()
-    assert window.windowTitle() == "Roblox Auto Piano Player"
+    assert window.windowTitle() == "로블록스 자동 피아노 연주기"
     assert window.view_stack.currentIndex() == 0  # Landing view
 
     # Load sample demo
@@ -53,5 +53,5 @@ def test_floating_overlay_modes(qapp):
 def test_settings_dialog_instantiation(qapp):
     cfg_mgr = ConfigManager()
     dlg = SettingsDialog(cfg_mgr)
-    assert dlg.windowTitle().startswith("Settings")
+    assert dlg.windowTitle().startswith("설정")
     dlg.close()

@@ -165,5 +165,5 @@ class NumericImporter(BaseMusicImporter):
                 current_time += sec_per_beat
 
         HandAssigner.assign_hands_to_timeline(timeline)
-        timeline.sort_notes()
+        timeline.sort_events()
         return timeline

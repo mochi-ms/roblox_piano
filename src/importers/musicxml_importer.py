@@ -102,5 +102,5 @@ class MusicXmlImporter(BaseMusicImporter):
 
         # Assign hands and sort notes
         HandAssigner.assign_hands_to_timeline(timeline)
-        timeline.sort_notes()
+        timeline.sort_events()
         return timeline

@@ -16,7 +16,7 @@ def test_timeline_duration_and_sort():
     timeline.add_note(n2)
     timeline.add_note(n3)
 
-    timeline.sort_notes()
+    timeline.sort_events()
 
     assert timeline.total_notes == 3
     assert timeline.duration == 2.0

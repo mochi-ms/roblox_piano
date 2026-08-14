@@ -58,14 +58,14 @@ class MainWindow(QMainWindow):
         self.config: AppConfig = self.config_mgr.config
         self.mapper = RobloxPianoMapper()
 
-        # Keyboard & Playback Stack
-        self._init_playback_stack()
-
-        # Target Window Manager
+        # Target Window Manager (Must be created before Playback Stack so scheduler can use it)
         self.target_window = TargetWindowManager(
             policy=FocusLossPolicy(self.config.focus_loss_policy),
             enabled=self.config.target_window_safety
         )
+
+        # Keyboard & Playback Stack
+        self._init_playback_stack()
 
         # Importers
         self.midi_importer = MidiImporter()
