@@ -1,400 +1,355 @@
 import os
 import datetime
-import uuid
-import shutil
-from PySide6.QtCore import Qt, Signal, QPoint, QUrl, QMimeData, QDir
-from PySide6.QtGui import QAction, QIcon, QCursor, QDrag, QMouseEvent
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QLineEdit, QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
-    QComboBox, QMenu, QInputDialog, QStackedWidget, QFrame,
-    QSplitter, QTreeView, QAbstractItemView
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit,
+    QTreeView, QTableView, QHeaderView, QMenu, QInputDialog, QMessageBox,
+    QLabel, QSplitter, QAbstractItemView, QFrame, QToolButton
 )
-from PySide6.QtGui import QStandardItemModel, QStandardItem
+from PySide6.QtCore import Qt, QPoint, Signal, QModelIndex
+from PySide6.QtGui import QStandardItemModel, QStandardItem, QIcon, QAction, QDragEnterEvent, QDropEvent
+from typing import Optional
 
 from src.library.manager import LibraryManager
 from src.library.models import ScoreItem, FolderItem
 from src.app.mml_dialog import MmlDialog
 from src.importers.mml_importer import MmlImporter
 
-class DraggableTableWidget(QTableWidget):
-    dropped_urls = Signal(list)
-    
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.setAcceptDrops(True)
-        self.setDragEnabled(True)
-        self.setDragDropMode(QAbstractItemView.DragDrop)
-        self.setDefaultDropAction(Qt.CopyAction)
-        self._drag_start_pos = None
-
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
-            super().dragEnterEvent(event)
-
-    def dragMoveEvent(self, event):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
-            super().dragMoveEvent(event)
-
-    def dropEvent(self, event):
-        if event.mimeData().hasUrls():
-            urls = event.mimeData().urls()
-            self.dropped_urls.emit(urls)
-            event.acceptProposedAction()
-        else:
-            super().dropEvent(event)
-
-    def mousePressEvent(self, event: QMouseEvent):
-        if event.button() == Qt.LeftButton:
-            self._drag_start_pos = event.pos()
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event: QMouseEvent):
-        if not (event.buttons() & Qt.LeftButton) or not self._drag_start_pos:
-            return
-            
-        if (event.pos() - self._drag_start_pos).manhattanLength() < 5:
-            return
-            
-        selected_items = self.selectedItems()
-        if not selected_items:
-            return
-            
-        urls = []
-        for row in set(item.row() for item in selected_items):
-            item_data = self.item(row, 0).data(Qt.UserRole)
-            if isinstance(item_data, ScoreItem):
-                if os.path.exists(item_data.filepath):
-                    urls.append(QUrl.fromLocalFile(os.path.normpath(item_data.filepath)))
-        
-        if urls:
-            drag = QDrag(self)
-            mime_data = QMimeData()
-            mime_data.setUrls(urls)
-            drag.setMimeData(mime_data)
-            drag.exec(Qt.CopyAction)
-
-
 class LibraryWidget(QWidget):
     score_selected = Signal(ScoreItem)
-    add_external_requested = Signal()
 
-    def __init__(self, library_manager: LibraryManager, parent=None):
+    def __init__(self, manager: LibraryManager, parent=None):
         super().__init__(parent)
-        self.manager = library_manager
-        self.setAcceptDrops(True)
-        self.current_folder_id = None
+        self.manager = manager
         
+        # History for back/forward
+        self.history = []
+        self.history_idx = -1
+        
+        self.current_folder_id = None
         self._setup_ui()
-        self.refresh_library()
+        self._navigate(None)
 
     def _setup_ui(self):
-        self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(16, 16, 16, 16)
-        self.main_layout.setSpacing(12)
-
-        # Toolbar Area
-        toolbar_layout = QHBoxLayout()
-        toolbar_layout.setSpacing(8)
+        # Apply standard Windows 11 style, no emojis
+        self.setStyleSheet("""
+            QWidget {
+                background-color: #f3f3f3;
+                color: #1a1a1a;
+                font-family: 'Segoe UI Variable', 'Segoe UI', sans-serif;
+                font-size: 14px;
+            }
+            QSplitter::handle {
+                background-color: #e5e5e5;
+                width: 1px;
+            }
+            QTreeView, QTableView {
+                background-color: #ffffff;
+                border: 1px solid #e5e5e5;
+                border-radius: 4px;
+                outline: none;
+            }
+            QTreeView::item:selected, QTableView::item:selected {
+                background-color: #cce8ff;
+                color: #000000;
+            }
+            QHeaderView::section {
+                background-color: #f9f9f9;
+                padding: 4px;
+                border: none;
+                border-bottom: 1px solid #e5e5e5;
+                border-right: 1px solid #e5e5e5;
+            }
+            QPushButton, QToolButton {
+                background-color: #ffffff;
+                border: 1px solid #cccccc;
+                border-radius: 4px;
+                padding: 6px 12px;
+            }
+            QPushButton:hover, QToolButton:hover {
+                background-color: #f0f0f0;
+            }
+            QLineEdit {
+                background-color: #ffffff;
+                border: 1px solid #cccccc;
+                border-radius: 4px;
+                padding: 6px;
+            }
+            #breadcrumb {
+                background-color: #ffffff;
+                border: 1px solid #e5e5e5;
+                border-radius: 4px;
+                padding: 6px;
+            }
+            #breadcrumbLabel {
+                color: #0078d4;
+            }
+            #breadcrumbLabel:hover {
+                text-decoration: underline;
+                cursor: pointer;
+            }
+        """)
         
-        self.btn_back = QPushButton("◀ 뒤로")
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(10)
+        
+        # Toolbar
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(8)
+        
+        self.btn_back = QToolButton()
+        self.btn_back.setText("<")
         self.btn_back.clicked.connect(self._go_back)
-        self.btn_up = QPushButton("▲ 상위 폴더")
+        
+        self.btn_forward = QToolButton()
+        self.btn_forward.setText(">")
+        self.btn_forward.clicked.connect(self._go_forward)
+        
+        self.btn_up = QToolButton()
+        self.btn_up.setText("^")
         self.btn_up.clicked.connect(self._go_up)
         
-        self.lbl_breadcrumb = QLabel("내 라이브러리")
-        self.lbl_breadcrumb.setStyleSheet("font-size: 16px; font-weight: bold; color: #FFFFFF;")
+        toolbar.addWidget(self.btn_back)
+        toolbar.addWidget(self.btn_forward)
+        toolbar.addWidget(self.btn_up)
         
-        toolbar_layout.addWidget(self.btn_back)
-        toolbar_layout.addWidget(self.btn_up)
-        toolbar_layout.addWidget(self.lbl_breadcrumb)
-        toolbar_layout.addStretch()
+        self.breadcrumb = QLabel()
+        self.breadcrumb.setObjectName("breadcrumb")
+        toolbar.addWidget(self.breadcrumb, 1)
         
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("검색...")
-        self.search_input.setMinimumWidth(200)
-        self.search_input.textChanged.connect(self._on_search_changed)
+        self.search_bar = QLineEdit()
+        self.search_bar.setPlaceholderText("검색...")
+        self.search_bar.textChanged.connect(self._on_search)
+        self.search_bar.setFixedWidth(250)
+        toolbar.addWidget(self.search_bar)
         
-        self.sort_combo = QComboBox()
-        self.sort_combo.addItems(["이름순", "최신 추가순", "길이순"])
-        self.sort_combo.currentIndexChanged.connect(self._on_sort_changed)
-
-        btn_new_folder = QPushButton("새 폴더")
-        btn_new_folder.clicked.connect(self._create_folder)
+        btn_add_folder = QPushButton("새 폴더")
+        btn_add_folder.clicked.connect(self._create_folder)
+        toolbar.addWidget(btn_add_folder)
         
-        btn_add_file = QPushButton("파일 추가")
-        btn_add_file.clicked.connect(self.add_external_requested.emit)
-        
-        btn_mml = QPushButton("MML 붙여넣기")
+        btn_mml = QPushButton("MML 추가")
         btn_mml.clicked.connect(self._open_mml_dialog)
-        btn_mml.setObjectName("primary_btn")
-
-        toolbar_layout.addWidget(self.search_input)
-        toolbar_layout.addWidget(self.sort_combo)
-        toolbar_layout.addWidget(btn_new_folder)
-        toolbar_layout.addWidget(btn_add_file)
-        toolbar_layout.addWidget(btn_mml)
+        toolbar.addWidget(btn_mml)
         
-        self.main_layout.addLayout(toolbar_layout)
-
-        # Splitter for Tree and Table
+        main_layout.addLayout(toolbar)
+        
+        # Splitter
         self.splitter = QSplitter(Qt.Horizontal)
-        self.main_layout.addWidget(self.splitter, 1)
-
+        main_layout.addWidget(self.splitter, 1)
+        
         # Left: TreeView
         self.tree_view = QTreeView()
         self.tree_view.setHeaderHidden(True)
-        self.tree_model = QStandardItemModel()
-        self.tree_view.setModel(self.tree_model)
+        self.tree_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.tree_view.clicked.connect(self._on_tree_clicked)
-        self.tree_view.setStyleSheet("""
-            QTreeView {
-                background-color: #0F172A;
-                color: #E2E8F0;
-                border: 1px solid #1E293B;
-                border-radius: 8px;
-            }
-            QTreeView::item:selected {
-                background-color: #3B82F6;
-            }
-        """)
         self.splitter.addWidget(self.tree_view)
-
-        # Right: TableWidget
-        self.table = DraggableTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["이름", "형식", "재생 시간", "노트 수", "수정한 날짜"])
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
         
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.table.setStyleSheet("""
-            QTableWidget {
-                border: 1px solid #1E293B;
-                border-radius: 8px;
-                background-color: #0F172A;
-                gridline-color: #1E293B;
-                color: #E2E8F0;
-                selection-background-color: #3B82F6;
-            }
-            QHeaderView::section {
-                background-color: #1E293B;
-                color: #94A3B8;
-                border: none;
-                font-weight: bold;
-                padding: 4px;
-            }
-        """)
+        # Right: TableView
+        self.table_view = QTableView()
+        self.table_view.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table_view.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.table_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table_view.verticalHeader().setVisible(False)
+        self.table_view.setShowGrid(False)
+        self.table_view.setAlternatingRowColors(True)
+        self.table_view.doubleClicked.connect(self._on_table_double_clicked)
+        self.table_view.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table_view.customContextMenuRequested.connect(self._show_context_menu)
         
-        self.table.itemDoubleClicked.connect(self._on_item_double_clicked)
-        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.table.customContextMenuRequested.connect(self._show_context_menu)
-        self.table.dropped_urls.connect(self._on_files_dropped)
-
-        self.splitter.addWidget(self.table)
+        # Enable Drag and Drop
+        self.table_view.setAcceptDrops(True)
+        self.table_view.setDragEnabled(True)
+        self.table_view.setDropIndicatorShown(True)
+        self.table_view.setDragDropMode(QAbstractItemView.DragDrop)
+        self.table_view.viewport().installEventFilter(self)
+        
+        self.splitter.addWidget(self.table_view)
         self.splitter.setSizes([200, 600])
 
-        self._folder_history = []
-        self._build_tree()
+        self.tree_model = QStandardItemModel()
+        self.tree_view.setModel(self.tree_model)
+        
+        self.table_model = QStandardItemModel()
+        self.table_model.setHorizontalHeaderLabels(["이름", "유형", "길이", "노트 수", "수정 날짜"])
+        self.table_view.setModel(self.table_model)
+        self.table_view.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
 
-    def _build_tree(self):
+    def _update_tree(self):
         self.tree_model.clear()
-        root_item = QStandardItem("내 라이브러리")
-        root_item.setData(None, Qt.UserRole)
-        self.tree_model.appendRow(root_item)
+        root = self.tree_model.invisibleRootItem()
         
         folders = self.manager.get_all_folders()
         folder_dict = {f.id: f for f in folders}
-        item_dict = {None: root_item}
+        item_dict = {}
         
-        # Build hierarchy
+        # Add a special "Library Root"
+        root_item = QStandardItem("Library")
+        root_item.setData(None, Qt.UserRole)
+        root.appendRow(root_item)
+        item_dict[None] = root_item
+
         for f in folders:
-            item = QStandardItem(f"📁 {f.name}")
+            item = QStandardItem(f.name)
             item.setData(f.id, Qt.UserRole)
             item_dict[f.id] = item
-            
+
         for f in folders:
             parent_item = item_dict.get(f.parent_id, root_item)
             parent_item.appendRow(item_dict[f.id])
             
         self.tree_view.expandAll()
 
-    def refresh_library(self):
-        self._build_tree()
-        self._apply_filters()
-        self._update_breadcrumb()
-
     def _update_breadcrumb(self):
         if not self.current_folder_id:
-            self.lbl_breadcrumb.setText("내 라이브러리")
-        else:
-            folder = self.manager.db.get_folder(self.current_folder_id)
-            path = []
-            while folder:
-                path.insert(0, folder.name)
-                folder = self.manager.db.get_folder(folder.parent_id) if folder.parent_id else None
-            self.lbl_breadcrumb.setText("내 라이브러리 > " + " > ".join(path))
+            self.breadcrumb.setText("Library")
+            return
             
-        self.btn_back.setEnabled(len(self._folder_history) > 0)
-        self.btn_up.setEnabled(self.current_folder_id is not None)
+        path = []
+        curr = self.current_folder_id
+        while curr:
+            f = self.manager.db.get_folder(curr)
+            if not f: break
+            path.append(f.name)
+            curr = f.parent_id
+            
+        path.reverse()
+        self.breadcrumb.setText("Library > " + " > ".join(path))
 
-    def _on_search_changed(self, text: str):
-        self._apply_filters()
-
-    def _on_sort_changed(self, index: int):
-        self._apply_filters()
-
-    def _go_back(self):
-        if self._folder_history:
-            self.current_folder_id = self._folder_history.pop()
-            self._apply_filters()
-            self._update_breadcrumb()
-
-    def _go_up(self):
-        if self.current_folder_id:
-            self._folder_history.append(self.current_folder_id)
-            folder = self.manager.db.get_folder(self.current_folder_id)
-            self.current_folder_id = folder.parent_id if folder else None
-            self._apply_filters()
-            self._update_breadcrumb()
-
-    def _on_tree_clicked(self, index):
-        item = self.tree_model.itemFromIndex(index)
-        folder_id = item.data(Qt.UserRole)
-        if self.current_folder_id != folder_id:
-            if self.current_folder_id is not None:
-                self._folder_history.append(self.current_folder_id)
-            self.current_folder_id = folder_id
-            self._apply_filters()
-            self._update_breadcrumb()
-
-    def _apply_filters(self):
-        search_text = self.search_input.text().strip().lower()
+    def _update_table(self, keyword=""):
+        self.table_model.removeRows(0, self.table_model.rowCount())
         
-        if search_text:
-            items = self.manager.search(search_text)
-            # Find folders matching search
-            all_folders = self.manager.get_all_folders()
-            folders = [f for f in all_folders if search_text in f.name.lower()]
+        if keyword:
+            # Search mode
+            scores = self.manager.search(keyword)
+            folders = [f for f in self.manager.get_all_folders() if keyword.lower() in f.name.lower()]
         else:
-            all_items = self.manager.get_all()
-            items = [it for it in all_items if it.folder_id == self.current_folder_id]
-            all_folders = self.manager.get_all_folders()
-            folders = [f for f in all_folders if f.parent_id == self.current_folder_id]
-
-        sort_idx = self.sort_combo.currentIndex()
-        if sort_idx == 0: # Name
-            items.sort(key=lambda x: x.title.lower())
-            folders.sort(key=lambda x: x.name.lower())
-        elif sort_idx == 1: # Newest
-            items.sort(key=lambda x: x.created_at, reverse=True)
-            folders.sort(key=lambda x: x.created_at, reverse=True)
-        elif sort_idx == 2: # Duration
-            items.sort(key=lambda x: x.duration, reverse=True)
-
-        self._populate_table(folders, items)
-
-    def _populate_table(self, folders: list[FolderItem], scores: list[ScoreItem]):
-        self.table.setRowCount(0)
-        
-        row = 0
+            # Normal browse mode
+            folders = [f for f in self.manager.get_all_folders() if f.parent_id == self.current_folder_id]
+            scores = self.manager.get_folder_scores(self.current_folder_id)
+            
+        # Add folders
         for f in folders:
-            self.table.insertRow(row)
-            
-            title_widget = QTableWidgetItem(f"📁 {f.name}")
-            title_widget.setData(Qt.UserRole, f)
-            self.table.setItem(row, 0, title_widget)
-            self.table.setItem(row, 1, QTableWidgetItem("폴더"))
-            self.table.setItem(row, 2, QTableWidgetItem("-"))
-            self.table.setItem(row, 3, QTableWidgetItem("-"))
+            item_name = QStandardItem(f.name)
+            item_name.setData(("folder", f), Qt.UserRole)
+            item_type = QStandardItem("파일 폴더")
             
             dt = datetime.datetime.fromtimestamp(f.updated_at if f.updated_at else f.created_at)
-            self.table.setItem(row, 4, QTableWidgetItem(dt.strftime("%Y-%m-%d %H:%M")))
-            row += 1
+            item_date = QStandardItem(dt.strftime("%Y-%m-%d %H:%M"))
             
-        for item in scores:
-            self.table.insertRow(row)
+            self.table_model.appendRow([item_name, item_type, QStandardItem(""), QStandardItem(""), item_date])
             
-            title_text = item.title
-            if item.original_filename and item.original_filename != item.title:
-                title_text += f" ({item.original_filename})"
-            title_widget = QTableWidgetItem(f"🎵 {title_text}")
-            title_widget.setData(Qt.UserRole, item)
-            self.table.setItem(row, 0, title_widget)
+        # Add scores
+        for s in scores:
+            item_name = QStandardItem(s.title)
+            item_name.setData(("score", s), Qt.UserRole)
+            item_type = QStandardItem(s.file_extension.upper()[1:] if s.file_extension else "File")
             
-            fmt_str = item.file_extension.upper().replace(".", "") if item.file_extension else item.source_type
-            self.table.setItem(row, 1, QTableWidgetItem(fmt_str))
+            mins, secs = divmod(int(s.duration), 60)
+            item_dur = QStandardItem(f"{mins:02d}:{secs:02d}")
+            item_notes = QStandardItem(f"{s.total_notes:,}")
             
-            mins, secs = divmod(int(item.duration), 60)
-            self.table.setItem(row, 2, QTableWidgetItem(f"{mins:02d}:{secs:02d}"))
-            self.table.setItem(row, 3, QTableWidgetItem(f"{item.total_notes:,}"))
+            dt = datetime.datetime.fromtimestamp(s.created_at)
+            item_date = QStandardItem(dt.strftime("%Y-%m-%d %H:%M"))
             
-            dt = datetime.datetime.fromtimestamp(item.created_at)
-            self.table.setItem(row, 4, QTableWidgetItem(dt.strftime("%Y-%m-%d %H:%M")))
-            row += 1
+            self.table_model.appendRow([item_name, item_type, item_dur, item_notes, item_date])
+
+    def refresh_library(self):
+        self._update_tree()
+        self._update_table()
+        self._update_breadcrumb()
+        self._update_nav_buttons()
+
+    def _navigate(self, folder_id: Optional[str], record_history=True):
+        if record_history:
+            # Truncate future history
+            self.history = self.history[:self.history_idx+1]
+            if not self.history or self.history[-1] != folder_id:
+                self.history.append(folder_id)
+                self.history_idx = len(self.history) - 1
+                
+        self.current_folder_id = folder_id
+        self.refresh_library()
+        
+    def _go_back(self):
+        if self.history_idx > 0:
+            self.history_idx -= 1
+            self._navigate(self.history[self.history_idx], record_history=False)
+            
+    def _go_forward(self):
+        if self.history_idx < len(self.history) - 1:
+            self.history_idx += 1
+            self._navigate(self.history[self.history_idx], record_history=False)
+            
+    def _go_up(self):
+        if self.current_folder_id:
+            f = self.manager.db.get_folder(self.current_folder_id)
+            if f:
+                self._navigate(f.parent_id)
+                
+    def _update_nav_buttons(self):
+        self.btn_back.setEnabled(self.history_idx > 0)
+        self.btn_forward.setEnabled(self.history_idx < len(self.history) - 1)
+        self.btn_up.setEnabled(self.current_folder_id is not None)
+
+    def _on_tree_clicked(self, index: QModelIndex):
+        folder_id = self.tree_model.itemFromIndex(index).data(Qt.UserRole)
+        self._navigate(folder_id)
+
+    def _on_table_double_clicked(self, index: QModelIndex):
+        item_data = self.table_model.item(index.row(), 0).data(Qt.UserRole)
+        if not item_data: return
+        
+        itype, obj = item_data
+        if itype == "folder":
+            self._navigate(obj.id)
+        elif itype == "score":
+            if obj.analysis_status == "READY":
+                self.score_selected.emit(obj)
+            else:
+                QMessageBox.warning(self, "재생 불가", "해당 악보는 아직 분석이 완료되지 않았거나 실패했습니다.")
+
+    def _on_search(self, text):
+        self._update_table(text)
 
     def _get_selected_data(self) -> list:
-        selected_rows = set(idx.row() for idx in self.table.selectionModel().selectedRows())
+        selected_rows = set(idx.row() for idx in self.table_view.selectionModel().selectedRows())
         items = []
         for r in selected_rows:
-            item = self.table.item(r, 0).data(Qt.UserRole)
-            if item:
-                items.append(item)
+            data = self.table_model.item(r, 0).data(Qt.UserRole)
+            if data:
+                items.append(data)
         return items
-
-    def _load_selected(self, item: ScoreItem):
-        if item.analysis_status == "READY":
-            self.score_selected.emit(item)
-        else:
-            QMessageBox.warning(self, "재생 불가", "해당 악보는 아직 분석이 완료되지 않았거나 분석에 실패했습니다.")
-
-    def _on_item_double_clicked(self, table_item: QTableWidgetItem):
-        item = self.table.item(table_item.row(), 0).data(Qt.UserRole)
-        if isinstance(item, FolderItem):
-            self._folder_history.append(self.current_folder_id)
-            self.current_folder_id = item.id
-            self._apply_filters()
-            self._update_breadcrumb()
-        elif isinstance(item, ScoreItem):
-            self._load_selected(item)
 
     def _show_context_menu(self, pos: QPoint):
         items = self._get_selected_data()
         if not items:
+            # Context menu for background (empty space)
+            menu = QMenu(self)
+            action_new_folder = menu.addAction("새 폴더")
+            action_new_folder.triggered.connect(self._create_folder)
+            menu.exec(self.table_view.viewport().mapToGlobal(pos))
             return
 
         menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu { background-color: #1E293B; border: 1px solid #334155; color: #F8FAFC; }
-            QMenu::item { padding: 6px 24px; }
-            QMenu::item:selected { background-color: #3B82F6; }
-        """)
 
         if len(items) == 1:
-            item = items[0]
-            if isinstance(item, ScoreItem):
+            itype, obj = items[0]
+            if itype == "score":
                 action_load = menu.addAction("재생")
-                action_load.triggered.connect(lambda: self._load_selected(item))
+                action_load.triggered.connect(lambda: self.score_selected.emit(obj))
                 menu.addSeparator()
                 action_open_dir = menu.addAction("파일 위치 열기")
-                action_open_dir.triggered.connect(lambda: self._open_file_location(item))
+                action_open_dir.triggered.connect(lambda: self._open_file_location(obj))
                 
-            action_rename = menu.addAction("이름 변경 (F2)")
-            action_rename.triggered.connect(lambda: self._rename_item(item))
+            action_rename = menu.addAction("이름 변경(F2)")
+            action_rename.triggered.connect(lambda: self._rename_item(itype, obj))
             
             menu.addSeparator()
 
         action_delete = menu.addAction(f"삭제 ({len(items)}개)")
         action_delete.triggered.connect(lambda: self._delete_items(items))
 
-        menu.exec(self.table.viewport().mapToGlobal(pos))
+        menu.exec(self.table_view.viewport().mapToGlobal(pos))
 
     def _create_folder(self):
         name, ok = QInputDialog.getText(self, "새 폴더", "폴더 이름을 입력하세요:")
@@ -402,20 +357,20 @@ class LibraryWidget(QWidget):
             self.manager.create_folder(name.strip(), self.current_folder_id)
             self.refresh_library()
 
-    def _rename_item(self, item):
-        if isinstance(item, FolderItem):
-            name, ok = QInputDialog.getText(self, "이름 변경", "새 이름을 입력하세요:", QLineEdit.Normal, item.name)
+    def _rename_item(self, itype, obj):
+        if itype == "folder":
+            name, ok = QInputDialog.getText(self, "이름 변경", "새 이름을 입력하세요:", QLineEdit.Normal, obj.name)
             if ok and name.strip():
-                item.name = name.strip()
-                item.updated_at = datetime.datetime.now().timestamp()
-                self.manager.update_folder(item)
+                obj.name = name.strip()
+                obj.updated_at = datetime.datetime.now().timestamp()
+                self.manager.update_folder(obj)
                 self.refresh_library()
-        elif isinstance(item, ScoreItem):
-            new_title, ok = QInputDialog.getText(self, "제목 변경", "새로운 제목을 입력하세요:", QLineEdit.Normal, item.title)
+        elif itype == "score":
+            new_title, ok = QInputDialog.getText(self, "제목 변경", "새로운 제목을 입력하세요:", QLineEdit.Normal, obj.title)
             if ok and new_title.strip():
-                item.title = new_title.strip()
-                item.updated_at = datetime.datetime.now().timestamp()
-                self.manager.db.update_score(item)
+                obj.title = new_title.strip()
+                obj.updated_at = datetime.datetime.now().timestamp()
+                self.manager.db.update_score(obj)
                 self.refresh_library()
 
     def _open_file_location(self, item: ScoreItem):
@@ -429,15 +384,15 @@ class LibraryWidget(QWidget):
         if not items:
             return
             
-        msg = f"선택한 항목 {len(items)}개를 삭제하시겠습니까?\\n(악보의 경우 로컬 파일도 함께 삭제됩니다)"
+        msg = f"선택한 {len(items)}개를 삭제하시겠습니까?\n(물리적 파일과 폴더가 휴지통으로 이동합니다)"
         ans = QMessageBox.question(self, "삭제 확인", msg, QMessageBox.Yes | QMessageBox.No)
         
         if ans == QMessageBox.Yes:
-            for item in items:
-                if isinstance(item, FolderItem):
-                    self.manager.delete_folder(item.id)
-                elif isinstance(item, ScoreItem):
-                    self.manager.delete_score(item.id)
+            for itype, obj in items:
+                if itype == "folder":
+                    self.manager.delete_folder(obj.id)
+                elif itype == "score":
+                    self.manager.delete_score(obj.id)
             self.refresh_library()
 
     def _open_mml_dialog(self):
@@ -446,21 +401,47 @@ class LibraryWidget(QWidget):
             mml_code = dialog.get_mml_code()
             if mml_code:
                 try:
-                    title, ok = QInputDialog.getText(self, "MML 제목", "악보 제목을 입력하세요:", QLineEdit.Normal, "새로운 MML 악보")
-                    if not ok or not title.strip():
-                        title = f"MML 악보 {datetime.datetime.now().strftime('%Y-%m-%d %H%M')}"
+                    title = dialog.get_title()
                     
                     importer = MmlImporter()
-                    temp_midi = os.path.join(self.manager.library_dir, "temp_mml_import.mid")
+                    import tempfile
+                    fd, temp_midi = tempfile.mkstemp(suffix=".mid")
+                    os.close(fd)
+                    
                     importer.convert_to_midi(mml_code, temp_midi)
                     
-                    self.manager.import_external_file(temp_midi, source_type="MML", folder_id=self.current_folder_id)
-                    os.remove(temp_midi)
+                    # Instead of direct conversion, create a dummy file with title name in temp?
+                    # No, import_external_file copies it. We can just rename it during import by overriding original_filename.
+                    # Or we just rename the tempfile first.
+                    renamed_temp = os.path.join(os.path.dirname(temp_midi), title + ".mid")
+                    if os.path.exists(renamed_temp): os.remove(renamed_temp) # Just in case
+                    os.rename(temp_midi, renamed_temp)
+                    
+                    item = self.manager.import_external_file(renamed_temp, source_type="MML", folder_id=self.current_folder_id)
+                    os.remove(renamed_temp)
                     
                     self.refresh_library()
                     QMessageBox.information(self, "완료", "MML 악보가 성공적으로 추가되었습니다.")
+                    
+                    if dialog.should_play():
+                        self.score_selected.emit(item)
+                        
                 except Exception as e:
-                    QMessageBox.critical(self, "오류", f"MML 변환 중 오류가 발생했습니다:\\n{e}")
+                    QMessageBox.critical(self, "오류", f"MML 변환 중 오류가 발생했습니다:\n{e}")
+
+    # --- Drag and Drop for TableView Viewport ---
+    def eventFilter(self, source, event):
+        if source is self.table_view.viewport():
+            if event.type() == event.Type.DragEnter:
+                if event.mimeData().hasUrls():
+                    event.acceptProposedAction()
+                    return True
+            elif event.type() == event.Type.Drop:
+                if event.mimeData().hasUrls():
+                    self._on_files_dropped(event.mimeData().urls())
+                    event.acceptProposedAction()
+                    return True
+        return super().eventFilter(source, event)
 
     def _on_files_dropped(self, urls: list):
         for url in urls:
@@ -473,32 +454,21 @@ class LibraryWidget(QWidget):
                             mml_code = f.read()
                         
                         importer = MmlImporter()
-                        temp_midi = os.path.join(self.manager.library_dir, "temp_mml_import.mid")
+                        import tempfile
+                        fd, temp_midi = tempfile.mkstemp(suffix=".mid")
+                        os.close(fd)
                         importer.convert_to_midi(mml_code, temp_midi)
                         
-                        item = self.manager.import_external_file(temp_midi, source_type="MML", folder_id=self.current_folder_id)
-                        # Fix title to match original MML filename
-                        item.title = os.path.splitext(os.path.basename(filepath))[0]
-                        item.original_filename = os.path.basename(filepath)
-                        self.manager.db.update_score(item)
+                        title = os.path.splitext(os.path.basename(filepath))[0]
+                        renamed_temp = os.path.join(os.path.dirname(temp_midi), title + ".mid")
+                        if os.path.exists(renamed_temp): os.remove(renamed_temp)
+                        os.rename(temp_midi, renamed_temp)
                         
-                        os.remove(temp_midi)
+                        item = self.manager.import_external_file(renamed_temp, source_type="MML", folder_id=self.current_folder_id)
+                        os.remove(renamed_temp)
                     else:
                         self.manager.import_external_file(filepath, folder_id=self.current_folder_id)
                 except Exception as e:
                     print(f"Failed to import dropped file {filepath}: {e}")
                     
         self.refresh_library()
-
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
-            super().dragEnterEvent(event)
-
-    def dropEvent(self, event):
-        if event.mimeData().hasUrls():
-            self._on_files_dropped(event.mimeData().urls())
-            event.acceptProposedAction()
-        else:
-            super().dropEvent(event)

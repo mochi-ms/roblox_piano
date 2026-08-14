@@ -6,6 +6,16 @@ from src.importers.base import BaseMusicImporter
 from src.importers.midi_importer import MidiImporter
 from src.music.timeline import MusicTimeline
 
+class MmlParseError(Exception):
+    def __init__(self, track_idx: int, position: int, token: str, message: str = ""):
+        self.track_idx = track_idx
+        self.position = position
+        self.token = token
+        msg = f"Track {track_idx+1}, Position {position}: Unexpected token '{token}'"
+        if message:
+            msg += f" ({message})"
+        super().__init__(msg)
+
 class MmlImporter(BaseMusicImporter):
     """
     Parses MML format strings/files into standard MIDI files,
@@ -45,18 +55,27 @@ class MmlImporter(BaseMusicImporter):
         return self.midi_importer.import_score(out_midi_path)
 
     def convert_to_midi(self, mml_text: str, out_filepath: str):
+        original_text = mml_text
         mml_text = mml_text.strip()
+        
         if mml_text.startswith("MML@"):
             mml_text = mml_text[4:]
         if mml_text.endswith(";"):
             mml_text = mml_text[:-1]
 
-        # Ignore whitespaces and newlines
-        mml_text = re.sub(r'\s+', '', mml_text)
-        
         tracks_mml = mml_text.split(',')
         
         mid = mido.MidiFile(ticks_per_beat=480)
+        
+        # Tokenizer regex: matches valid commands or a single character fallback for invalid tokens
+        # Valid commands:
+        # A-G followed by optional +,-,# followed by optional length digits and dots, followed by optional &
+        # R followed by optional length digits and dots, followed by optional &
+        # V, T, L, O followed by digits and optional dots
+        # >, <
+        # whitespace
+        # \S (anything else is invalid)
+        token_pattern = re.compile(r'\s+|([A-Ga-g][+#-]?[\d\.]*&?|[Rr][\d\.]*&?|[VvTtLlOo][\d\.]*|[><])|(\S)')
         
         for track_idx, track_str in enumerate(tracks_mml):
             track = mido.MidiTrack()
@@ -68,38 +87,29 @@ class MmlImporter(BaseMusicImporter):
             volume = 100
             current_time_ticks = 0
             
-            # Tokenize MML
-            pattern = re.compile(r'([A-Ga-g][+#-]?|[VvTtLlOo<>]|R|r)([\d\.]*)(&?)')
-            pos = 0
-            
             last_event_ticks = 0
             
             def add_note_events(pitch: int, duration_ticks: int):
                 nonlocal last_event_ticks
-                # Note On
                 delta_on = current_time_ticks - last_event_ticks
                 track.append(mido.Message('note_on', note=pitch, velocity=volume, time=delta_on))
                 last_event_ticks = current_time_ticks
                 
-                # Note Off
                 delta_off = duration_ticks
                 track.append(mido.Message('note_off', note=pitch, velocity=0, time=delta_off))
                 last_event_ticks = current_time_ticks + duration_ticks
                 
-            def parse_length(length_str: str) -> int:
-                if not length_str:
-                    return int(480 * 4 / default_length)
-                
+            def parse_length(arg_str: str) -> int:
                 ticks = 0
-                base_len_match = re.match(r'(\d+)', length_str)
+                base_len_match = re.search(r'(\d+)', arg_str)
                 if base_len_match:
                     base_len = int(base_len_match.group(1))
-                    dots = length_str.count('.')
                 else:
                     base_len = default_length
-                    dots = length_str.count('.')
                     
                 if base_len == 0: base_len = default_length
+                
+                dots = arg_str.count('.')
                 
                 base_ticks = int(480 * 4 / base_len)
                 ticks = base_ticks
@@ -109,69 +119,103 @@ class MmlImporter(BaseMusicImporter):
                     add //= 2
                 return ticks
 
-            tokens = pattern.finditer(track_str)
             tied_pitch = -1
             tied_duration = 0
             
-            for match in tokens:
-                cmd = match.group(1).upper()
-                arg_str = match.group(2)
-                is_tie = match.group(3) == '&'
+            pos = 0
+            while pos < len(track_str):
+                match = token_pattern.match(track_str, pos)
+                if not match:
+                    # Should be impossible due to \S fallback
+                    raise MmlParseError(track_idx, pos, track_str[pos])
                 
-                if cmd in "ABCDEFG":
-                    note_map = {'C': 0, 'D': 2, 'E': 4, 'F': 5, 'G': 7, 'A': 9, 'B': 11}
-                    pitch = (octave + 1) * 12 + note_map[cmd[0]]
-                    if len(cmd) > 1:
-                        if cmd[1] in '+#': pitch += 1
-                        elif cmd[1] == '-': pitch -= 1
-                        
-                    # clamp pitch to 0-127
-                    pitch = max(0, min(127, pitch))
-                        
-                    duration_ticks = parse_length(arg_str)
+                token = match.group(0)
+                valid_cmd = match.group(1)
+                invalid_cmd = match.group(2)
+                
+                if invalid_cmd:
+                    raise MmlParseError(track_idx, pos, invalid_cmd)
                     
-                    if tied_pitch == pitch:
-                        tied_duration += duration_ticks
-                    else:
+                if valid_cmd:
+                    cmd_char = valid_cmd[0].upper()
+                    
+                    if cmd_char in "ABCDEFG":
+                        is_tie = valid_cmd.endswith('&')
+                        
+                        note_map = {'C': 0, 'D': 2, 'E': 4, 'F': 5, 'G': 7, 'A': 9, 'B': 11}
+                        pitch = (octave + 1) * 12 + note_map[cmd_char]
+                        
+                        arg_idx = 1
+                        if len(valid_cmd) > 1 and valid_cmd[1] in "+#-":
+                            if valid_cmd[1] in '+#': pitch += 1
+                            elif valid_cmd[1] == '-': pitch -= 1
+                            arg_idx = 2
+                            
+                        # clamp pitch to 0-127
+                        if pitch < 0 or pitch > 127:
+                            raise MmlParseError(track_idx, pos, valid_cmd, "MIDI pitch out of bounds (0-127)")
+                            
+                        duration_ticks = parse_length(valid_cmd[arg_idx:])
+                        
+                        if tied_pitch == pitch:
+                            tied_duration += duration_ticks
+                        else:
+                            if tied_pitch != -1:
+                                add_note_events(tied_pitch, tied_duration)
+                                current_time_ticks += tied_duration
+                            tied_pitch = pitch
+                            tied_duration = duration_ticks
+                            
+                        if not is_tie:
+                            add_note_events(tied_pitch, tied_duration)
+                            current_time_ticks += tied_duration
+                            tied_pitch = -1
+                            tied_duration = 0
+                            
+                    elif cmd_char == 'R':
+                        is_tie = valid_cmd.endswith('&')
+                        duration_ticks = parse_length(valid_cmd[1:])
+                        
                         if tied_pitch != -1:
                             add_note_events(tied_pitch, tied_duration)
                             current_time_ticks += tied_duration
-                        tied_pitch = pitch
-                        tied_duration = duration_ticks
+                            tied_pitch = -1
+                            tied_duration = 0
+                            
+                        current_time_ticks += duration_ticks
                         
-                    if not is_tie:
-                        add_note_events(tied_pitch, tied_duration)
-                        current_time_ticks += tied_duration
-                        tied_pitch = -1
-                        tied_duration = 0
-                        
-                elif cmd == 'R':
-                    duration_ticks = parse_length(arg_str)
-                    if tied_pitch != -1:
-                        add_note_events(tied_pitch, tied_duration)
-                        current_time_ticks += tied_duration
-                        tied_pitch = -1
-                        tied_duration = 0
-                    current_time_ticks += duration_ticks
-                    
-                elif cmd == 'O':
-                    if arg_str: octave = int(arg_str)
-                elif cmd == '>':
-                    octave += 1
-                elif cmd == '<':
-                    octave -= 1
-                elif cmd == 'L':
-                    if arg_str: default_length = int(arg_str.replace('.','')) # simplification
-                elif cmd == 'V':
-                    if arg_str:
-                        vol = int(arg_str)
-                        volume = min(127, int(vol * 127 / 15))
-                elif cmd == 'T':
-                    if arg_str and track_idx == 0:
-                        tempo = mido.bpm2tempo(int(arg_str))
-                        delta = current_time_ticks - last_event_ticks
-                        track.append(mido.MetaMessage('set_tempo', tempo=tempo, time=delta))
-                        last_event_ticks = current_time_ticks
+                    elif cmd_char == 'O':
+                        val_str = valid_cmd[1:]
+                        if val_str: octave = int(val_str)
+                    elif cmd_char == '>':
+                        octave += 1
+                    elif cmd_char == '<':
+                        octave -= 1
+                    elif cmd_char == 'L':
+                        val_str = valid_cmd[1:]
+                        if val_str:
+                            match_d = re.match(r'(\d+)', val_str)
+                            if match_d:
+                                default_length = int(match_d.group(1))
+                    elif cmd_char == 'V':
+                        val_str = valid_cmd[1:]
+                        if val_str:
+                            vol = int(val_str)
+                            if vol < 0 or vol > 15:
+                                raise MmlParseError(track_idx, pos, valid_cmd, "Volume must be 0-15")
+                            volume = int(vol * 127 / 15)
+                    elif cmd_char == 'T':
+                        val_str = valid_cmd[1:]
+                        if val_str and track_idx == 0:
+                            tempo_val = int(val_str)
+                            if tempo_val <= 0:
+                                raise MmlParseError(track_idx, pos, valid_cmd, "Tempo must be > 0")
+                            tempo = mido.bpm2tempo(tempo_val)
+                            delta = current_time_ticks - last_event_ticks
+                            track.append(mido.MetaMessage('set_tempo', tempo=tempo, time=delta))
+                            last_event_ticks = current_time_ticks
+                
+                pos = match.end()
             
             if tied_pitch != -1:
                 add_note_events(tied_pitch, tied_duration)
@@ -180,7 +224,7 @@ class MmlImporter(BaseMusicImporter):
         mid.save(out_filepath)
 
     def extract_metadata(self, mml_text: str) -> dict:
-        """Utility to get tracks count, tempo, etc without saving file"""
+        """Utility to get tracks count, tempo, etc without saving file. Will throw MmlParseError if invalid."""
         mml_text = mml_text.strip()
         if mml_text.startswith("MML@"):
             mml_text = mml_text[4:]
@@ -189,7 +233,7 @@ class MmlImporter(BaseMusicImporter):
         
         tracks = mml_text.split(',')
         tempo = 120
-        t_match = re.search(r'[Tt](\d+)', tracks[0])
+        t_match = re.search(r'[Tt]\s*(\d+)', tracks[0])
         if t_match:
             tempo = int(t_match.group(1))
             

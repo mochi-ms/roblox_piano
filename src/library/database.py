@@ -19,6 +19,7 @@ class ScoreDatabase:
         # Enable row_factory to easily map rows to dicts
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
         return closing(conn)
 
     def _init_db(self):
