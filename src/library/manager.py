@@ -10,6 +10,54 @@ from src.library.database import ScoreDatabase
 from src.utils.config import ConfigManager
 from src.music.timeline import MusicTimeline
 
+def _send_to_recycle_bin(filepath: str) -> None:
+    """Moves a file or folder to Windows Recycle Bin safely using native SHFileOperationW or send2trash."""
+    try:
+        import send2trash
+        send2trash.send2trash(os.path.normpath(filepath))
+        return
+    except ImportError:
+        pass
+
+    import ctypes
+    from ctypes import wintypes
+
+    FO_DELETE = 3
+    FOF_ALLOWUNDO = 0x0040
+    FOF_NOCONFIRMATION = 0x0010
+    FOF_SILENT = 0x0004
+    FOF_NOERRORUI = 0x0400
+
+    class SHFILEOPSTRUCTW(ctypes.Structure):
+        _fields_ = [
+            ("hwnd", wintypes.HWND),
+            ("wFunc", wintypes.UINT),
+            ("pFrom", wintypes.LPCWSTR),
+            ("pTo", wintypes.LPCWSTR),
+            ("fFlags", wintypes.WORD),
+            ("fAnyOperationsAborted", wintypes.BOOL),
+            ("hNameMappings", wintypes.LPVOID),
+            ("lpszProgressTitle", wintypes.LPCWSTR),
+        ]
+
+    abs_path = os.path.abspath(filepath)
+    buffer = abs_path + '\0\0'
+
+    fileop = SHFILEOPSTRUCTW()
+    fileop.hwnd = None
+    fileop.wFunc = FO_DELETE
+    fileop.pFrom = buffer
+    fileop.pTo = None
+    fileop.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI
+    fileop.fAnyOperationsAborted = False
+    fileop.hNameMappings = None
+    fileop.lpszProgressTitle = None
+
+    res = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(fileop))
+    if res != 0 or fileop.fAnyOperationsAborted:
+        raise OSError(f"SHFileOperation failed to recycle {filepath} with code {res}")
+
+
 class LibraryManager:
     """
     High-level manager for the score library.
@@ -311,10 +359,46 @@ class LibraryManager:
             dest_filepath = os.path.join(target_dir, dest_filename)
             shutil.copy2(source_filepath, dest_filepath)
         
-        # Default statuses
+        # Default statuses and metadata extraction
         status = "READY"
+        duration = 0.0
+        bpm = 120.0
+        total_notes = 0
+        
         if ext in [".pdf", ".png", ".jpg", ".jpeg"]:
             status = "ANALYZING"
+        elif ext in [".mid", ".midi"]:
+            try:
+                from src.importers.midi_importer import MidiImporter
+                importer = MidiImporter()
+                timeline = importer.import_score(dest_filepath)
+                duration = timeline.duration
+                bpm = timeline.initial_bpm
+                total_notes = timeline.total_notes
+            except Exception as e:
+                print(f"Could not extract MIDI metadata for {dest_filepath}: {e}")
+        elif ext in [".mml", ".txt"]:
+            try:
+                from src.importers.mml_importer import MmlImporter
+                importer = MmlImporter()
+                if importer.can_import(dest_filepath):
+                    with open(dest_filepath, "r", encoding="utf-8") as f:
+                        meta = importer.extract_metadata(f.read())
+                    duration = meta.get("duration", 0.0)
+                    bpm = meta.get("bpm", 120.0)
+                    total_notes = meta.get("notes", 0)
+            except Exception as e:
+                print(f"Could not extract MML metadata for {dest_filepath}: {e}")
+        elif ext in [".musicxml", ".xml", ".mxl"]:
+            try:
+                from src.importers.musicxml_importer import MusicXmlImporter
+                importer = MusicXmlImporter()
+                timeline = importer.import_score(dest_filepath)
+                duration = timeline.duration
+                bpm = timeline.initial_bpm
+                total_notes = timeline.total_notes
+            except Exception as e:
+                print(f"Could not extract MusicXML metadata for {dest_filepath}: {e}")
             
         item = ScoreItem(
             id=score_id,
@@ -325,9 +409,9 @@ class LibraryManager:
             original_filename=dest_filename,
             file_extension=ext,
             folder_id=folder_id,
-            duration=0.0,
-            bpm=120.0,
-            total_notes=0,
+            duration=duration,
+            bpm=bpm,
+            total_notes=total_notes,
             tags="imported",
             analysis_status=status
         )
@@ -483,15 +567,13 @@ class LibraryManager:
                         os.remove(item.filepath)
                     except Exception as e:
                         print(f"Failed to permanently delete {item.filepath}: {e}")
+                        raise
                 else:
                     try:
-                        import send2trash
-                        send2trash.send2trash(os.path.normpath(item.filepath))
-                    except Exception:
-                        try:
-                            os.remove(item.filepath)
-                        except Exception as e:
-                            print(f"Failed to delete {item.filepath}: {e}")
+                        _send_to_recycle_bin(item.filepath)
+                    except Exception as e:
+                        print(f"Failed to move to Recycle Bin {item.filepath}: {e}")
+                        raise
             self.db.delete_score(score_id)
 
     def create_folder(self, name: str, parent_id: Optional[str] = None) -> FolderItem:
@@ -555,7 +637,7 @@ class LibraryManager:
             
         scores = self.get_folder_scores(folder_id)
         for s in scores:
-            self.db.delete_score(s.id)
+            self.delete_score(s.id, permanent=permanent)
             
         physical_path = self._get_folder_path(folder_id)
         if os.path.exists(physical_path):
@@ -564,15 +646,13 @@ class LibraryManager:
                     shutil.rmtree(physical_path)
                 except Exception as e:
                     print(f"Failed to delete folder {physical_path}: {e}")
+                    raise
             else:
                 try:
-                    import send2trash
-                    send2trash.send2trash(os.path.normpath(physical_path))
-                except Exception:
-                    try:
-                        shutil.rmtree(physical_path)
-                    except Exception as e:
-                        print(f"Failed to delete folder {physical_path}: {e}")
+                    _send_to_recycle_bin(physical_path)
+                except Exception as e:
+                    print(f"Failed to move folder to Recycle Bin {physical_path}: {e}")
+                    raise
                         
         self.db.delete_folder(folder_id)
 

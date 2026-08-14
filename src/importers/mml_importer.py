@@ -83,9 +83,9 @@ class MmlImporter(BaseMusicImporter):
         # Robust token pattern matching all MML commands and dialect variants
         token_regex = re.compile(
             r'\s+|'
-            r'([A-Ga-g][+#-]?(?:[Ll]?\d+)?\.{0,5}&?)|'
-            r'([Nn]-?\d+(?:[Ll]?\d+)?\.{0,5}&?)|'
-            r'([Rr](?:[Ll]?\d+)?\.{0,5}&?)|'
+            r'([A-Ga-g][+#-]?(?:\d+)?\.{0,5}&?)|'
+            r'([Nn]-?\d+\.{0,5}&?)|'
+            r'([Rr](?:\d+)?\.{0,5}&?)|'
             r'([Ll]\d*\.{0,5})|'
             r'([Oo]\d*)|'
             r'([><])|'
@@ -119,9 +119,9 @@ class MmlImporter(BaseMusicImporter):
             active_note: Optional[List[int]] = None
             pending_tie = False
             
-            def calc_duration(len_num: Optional[int], dots: int) -> int:
+            def calc_duration(len_num: Optional[int], dots: int, explicit_dots: bool = False) -> int:
                 base_len = len_num if (len_num is not None and len_num > 0) else default_length
-                d_count = dots if (len_num is not None or dots > 0) else default_dots
+                d_count = dots if (len_num is not None or explicit_dots) else default_dots
                 
                 base_ticks = max(1, int(480 * 4 / base_len))
                 ticks = base_ticks
@@ -186,30 +186,28 @@ class MmlImporter(BaseMusicImporter):
                         raise MmlParseError(track_idx, pos, note_tok, "MIDI pitch out of bounds (음고 범위 초과: 0~127)")
                     
                     rem = clean[idx:]
-                    digits_match = re.search(r'\d+', rem)
-                    len_val = int(digits_match.group(0)) if digits_match else None
-                    dots_val = rem.count('.')
+                    digits_match = re.match(r'(\d+)', rem)
+                    len_val = int(digits_match.group(1)) if digits_match else None
+                    dots_str = rem[len(digits_match.group(1)):] if digits_match else rem
+                    dots_val = dots_str.count('.')
+                    has_explicit_dots = (dots_val > 0)
                     
-                    dur = calc_duration(len_val, dots_val)
+                    dur = calc_duration(len_val, dots_val, explicit_dots=has_explicit_dots)
                     
-                    if active_note and (pending_tie or is_tie) and active_note[0] == pitch:
+                    if active_note and pending_tie and active_note[0] == pitch:
                         active_note[2] += dur
                     else:
                         commit_active_note()
                         active_note = [pitch, current_tick, dur, volume]
                         
                     pending_tie = is_tie
-                    if not is_tie and not pending_tie:
-                        commit_active_note()
-                        
                     current_tick += dur
 
                 elif num_note_tok:
                     is_tie = num_note_tok.endswith('&')
                     clean = num_note_tok[:-1] if is_tie else num_note_tok
                     
-                    # Pattern: N<pitch>[L<len>][dots]
-                    m_n = re.match(r'[Nn](-?\d+)(?:[Ll]?(\d+))?(\.*)', clean)
+                    m_n = re.match(r'[Nn](-?\d+)(\.*)', clean)
                     if not m_n:
                         raise MmlParseError(track_idx, pos, num_note_tok, "Invalid N command format (N 명령어 형식 오류)")
                         
@@ -217,45 +215,43 @@ class MmlImporter(BaseMusicImporter):
                     if pitch < 0 or pitch > 127:
                         raise MmlParseError(track_idx, pos, num_note_tok, "MIDI pitch out of bounds (음고 범위 초과: 0~127)")
                         
-                    len_str = m_n.group(2)
-                    len_val = int(len_str) if len_str else None
-                    dots_val = len(m_n.group(3)) if m_n.group(3) else 0
+                    dots_val = len(m_n.group(2)) if m_n.group(2) else 0
+                    has_explicit_dots = (dots_val > 0)
                     
-                    dur = calc_duration(len_val, dots_val)
+                    dur = calc_duration(None, dots_val, explicit_dots=has_explicit_dots)
                     
-                    if active_note and (pending_tie or is_tie) and active_note[0] == pitch:
+                    if active_note and pending_tie and active_note[0] == pitch:
                         active_note[2] += dur
                     else:
                         commit_active_note()
                         active_note = [pitch, current_tick, dur, volume]
                         
                     pending_tie = is_tie
-                    if not is_tie and not pending_tie:
-                        commit_active_note()
-                        
                     current_tick += dur
 
                 elif rest_tok:
                     is_tie = rest_tok.endswith('&')
                     clean = rest_tok[:-1] if is_tie else rest_tok
                     rem = clean[1:]
-                    digits_match = re.search(r'\d+', rem)
-                    len_val = int(digits_match.group(0)) if digits_match else None
-                    dots_val = rem.count('.')
-                    dur = calc_duration(len_val, dots_val)
+                    digits_match = re.match(r'(\d+)', rem)
+                    len_val = int(digits_match.group(1)) if digits_match else None
+                    dots_str = rem[len(digits_match.group(1)):] if digits_match else rem
+                    dots_val = dots_str.count('.')
+                    has_explicit_dots = (dots_val > 0)
+                    
+                    dur = calc_duration(len_val, dots_val, explicit_dots=has_explicit_dots)
                     
                     commit_active_note()
                     pending_tie = False
                     current_tick += dur
 
                 elif len_tok:
-                    clean = len_tok[1:]
-                    digits_match = re.search(r'\d+', clean)
-                    if digits_match:
-                        l_val = int(digits_match.group(0))
+                    m_l = re.match(r'[Ll](\d+)(\.*)', len_tok)
+                    if m_l:
+                        l_val = int(m_l.group(1))
                         if l_val > 0:
                             default_length = l_val
-                            default_dots = clean.count('.')
+                            default_dots = len(m_l.group(2)) if m_l.group(2) else 0
 
                 elif oct_tok:
                     val_str = oct_tok[1:]
@@ -286,7 +282,7 @@ class MmlImporter(BaseMusicImporter):
                         global_tempo_map[current_tick] = t_val
 
                 elif standalone_tie:
-                    if active_note is not None or len(raw_events) > 0:
+                    if active_note is not None:
                         pending_tie = True
 
                 pos = match.end()
