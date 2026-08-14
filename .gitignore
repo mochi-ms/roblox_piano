@@ -7,3 +7,7 @@ build/
 dist/
 *.spec
 
+
+library_rename_report.json
+*.backup_migrate
+user_library/

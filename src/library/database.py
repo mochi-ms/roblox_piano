@@ -1,7 +1,7 @@
 import sqlite3
 import os
 from typing import List, Optional
-from src.library.models import ScoreItem
+from src.library.models import ScoreItem, FolderItem
 
 
 from contextlib import closing
@@ -25,6 +25,15 @@ class ScoreDatabase:
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         with self._get_connection() as conn:
             conn.execute("""
+                CREATE TABLE IF NOT EXISTS folders (
+                    id TEXT PRIMARY KEY,
+                    parent_id TEXT,
+                    name TEXT NOT NULL,
+                    created_at REAL,
+                    updated_at REAL DEFAULT 0.0
+                )
+            """)
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS scores (
                     id TEXT PRIMARY KEY,
                     title TEXT NOT NULL,
@@ -33,6 +42,7 @@ class ScoreDatabase:
                     filepath TEXT NOT NULL,
                     original_filename TEXT DEFAULT '',
                     file_extension TEXT DEFAULT '',
+                    folder_id TEXT DEFAULT NULL,
                     duration REAL DEFAULT 0.0,
                     bpm REAL DEFAULT 120.0,
                     total_notes INTEGER DEFAULT 0,
@@ -42,7 +52,8 @@ class ScoreDatabase:
                     favorite BOOLEAN DEFAULT 0,
                     created_at REAL,
                     updated_at REAL DEFAULT 0.0,
-                    last_played_at REAL DEFAULT 0.0
+                    last_played_at REAL DEFAULT 0.0,
+                    FOREIGN KEY(folder_id) REFERENCES folders(id) ON DELETE SET NULL
                 )
             """)
             conn.commit()
@@ -54,6 +65,7 @@ class ScoreDatabase:
         new_columns = {
             'original_filename': "TEXT DEFAULT ''",
             'file_extension': "TEXT DEFAULT ''",
+            'folder_id': "TEXT DEFAULT NULL",
             'analysis_status': "TEXT DEFAULT 'READY'",
             'analysis_error': "TEXT DEFAULT ''",
             'favorite': "BOOLEAN DEFAULT 0",
@@ -72,13 +84,13 @@ class ScoreDatabase:
         with self._get_connection() as conn:
             conn.execute("""
                 INSERT OR REPLACE INTO scores 
-                (id, title, source_type, source_url, filepath, original_filename, file_extension,
+                (id, title, source_type, source_url, filepath, original_filename, file_extension, folder_id,
                  duration, bpm, total_notes, tags, analysis_status, analysis_error, favorite,
                  created_at, updated_at, last_played_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 score.id, score.title, score.source_type, score.source_url, 
-                score.filepath, score.original_filename, score.file_extension,
+                score.filepath, score.original_filename, score.file_extension, score.folder_id,
                 score.duration, score.bpm, score.total_notes, 
                 score.tags, score.analysis_status, score.analysis_error, score.favorite,
                 score.created_at, score.updated_at, score.last_played_at
@@ -111,7 +123,36 @@ class ScoreDatabase:
         with self._get_connection() as conn:
             cur = conn.execute("""
                 SELECT * FROM scores 
-                WHERE title LIKE ? OR tags LIKE ? 
+                WHERE title LIKE ? OR tags LIKE ? OR original_filename LIKE ?
                 ORDER BY created_at DESC
-            """, (like_kw, like_kw))
+            """, (like_kw, like_kw, like_kw))
             return [ScoreItem(**dict(row)) for row in cur.fetchall()]
+            
+    def insert_folder(self, folder: FolderItem) -> None:
+        with self._get_connection() as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO folders 
+                (id, parent_id, name, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+            """, (folder.id, folder.parent_id, folder.name, folder.created_at, folder.updated_at))
+            conn.commit()
+
+    def get_all_folders(self) -> List[FolderItem]:
+        with self._get_connection() as conn:
+            cur = conn.execute("SELECT * FROM folders ORDER BY name ASC")
+            return [FolderItem(**dict(row)) for row in cur.fetchall()]
+            
+    def get_folder(self, folder_id: str) -> Optional[FolderItem]:
+        with self._get_connection() as conn:
+            cur = conn.execute("SELECT * FROM folders WHERE id = ?", (folder_id,))
+            row = cur.fetchone()
+            if row:
+                return FolderItem(**dict(row))
+        return None
+
+    def delete_folder(self, folder_id: str) -> None:
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM folders WHERE id = ?", (folder_id,))
+            # also cascade delete or update children? 
+            # The schema doesn't have ON DELETE CASCADE for parent_id but we can manage it in app logic
+            conn.commit()

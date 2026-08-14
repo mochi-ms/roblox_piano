@@ -4,6 +4,17 @@ from typing import List, Optional
 
 
 @dataclass
+class FolderItem:
+    """
+    Represents a folder in the local library.
+    """
+    id: str
+    parent_id: Optional[str]
+    name: str
+    created_at: float = field(default_factory=time.time)
+    updated_at: float = 0.0
+
+@dataclass
 class ScoreItem:
     """
     Represents a single score entry in the local library.
@@ -15,6 +26,7 @@ class ScoreItem:
     filepath: str     # Path to the actual .xml or .mid file inside Library dir
     original_filename: str = ""
     file_extension: str = ""
+    folder_id: Optional[str] = None
     duration: float = 0.0
     bpm: float = 120.0
     total_notes: int = 0
