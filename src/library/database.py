@@ -1,0 +1,85 @@
+import sqlite3
+import os
+from typing import List, Optional
+from src.library.models import ScoreItem
+
+
+from contextlib import closing
+
+class ScoreDatabase:
+    """
+    SQLite Database wrapper for Roblox Piano Player library.
+    Manages the `scores` table.
+    """
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+        self._init_db()
+
+    def _get_connection(self):
+        # Enable row_factory to easily map rows to dicts
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return closing(conn)
+
+    def _init_db(self):
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        with self._get_connection() as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS scores (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    source_type TEXT,
+                    source_url TEXT,
+                    filepath TEXT NOT NULL,
+                    duration REAL,
+                    bpm REAL,
+                    total_notes INTEGER,
+                    tags TEXT,
+                    created_at REAL
+                )
+            """)
+            conn.commit()
+
+    def insert_score(self, score: ScoreItem) -> None:
+        with self._get_connection() as conn:
+            conn.execute("""
+                INSERT OR REPLACE INTO scores 
+                (id, title, source_type, source_url, filepath, duration, bpm, total_notes, tags, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                score.id, score.title, score.source_type, score.source_url, 
+                score.filepath, score.duration, score.bpm, score.total_notes, 
+                score.tags, score.created_at
+            ))
+            conn.commit()
+
+    def update_score(self, score: ScoreItem) -> None:
+        self.insert_score(score)
+
+    def delete_score(self, score_id: str) -> None:
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM scores WHERE id = ?", (score_id,))
+            conn.commit()
+
+    def get_score(self, score_id: str) -> Optional[ScoreItem]:
+        with self._get_connection() as conn:
+            cur = conn.execute("SELECT * FROM scores WHERE id = ?", (score_id,))
+            row = cur.fetchone()
+            if row:
+                return ScoreItem(**dict(row))
+        return None
+
+    def get_all_scores(self) -> List[ScoreItem]:
+        with self._get_connection() as conn:
+            cur = conn.execute("SELECT * FROM scores ORDER BY created_at DESC")
+            return [ScoreItem(**dict(row)) for row in cur.fetchall()]
+
+    def search_scores(self, keyword: str) -> List[ScoreItem]:
+        like_kw = f"%{keyword}%"
+        with self._get_connection() as conn:
+            cur = conn.execute("""
+                SELECT * FROM scores 
+                WHERE title LIKE ? OR tags LIKE ? 
+                ORDER BY created_at DESC
+            """, (like_kw, like_kw))
+            return [ScoreItem(**dict(row)) for row in cur.fetchall()]

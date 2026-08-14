@@ -37,6 +37,7 @@ class AppConfig:
     pedal_x_ratio: float = 0.5
     pedal_y_ratio: float = 0.5
     pedal_mode: str = "toggle"
+    library_dir: str = ""
 
 
 class ConfigManager:
@@ -48,17 +49,22 @@ class ConfigManager:
         self.config: AppConfig = self.load_config()
 
     def load_config(self) -> AppConfig:
-        if not os.path.exists(self.config_path):
-            cfg = AppConfig()
+        cfg = AppConfig()
+        if os.path.exists(self.config_path):
+            try:
+                with open(self.config_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                cfg = AppConfig(**{k: v for k, v in data.items() if k in AppConfig.__annotations__})
+            except Exception:
+                pass
+        
+        # Ensure library_dir is set to default LOCALAPPDATA path if empty
+        if not cfg.library_dir:
+            local_app_data = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
+            cfg.library_dir = os.path.join(local_app_data, "RobloxPianoPlayer", "Library")
             self.save_config(cfg)
-            return cfg
-
-        try:
-            with open(self.config_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return AppConfig(**{k: v for k, v in data.items() if k in AppConfig.__annotations__})
-        except Exception:
-            return AppConfig()
+            
+        return cfg
 
     def save_config(self, config: Optional[AppConfig] = None) -> None:
         cfg = config or self.config

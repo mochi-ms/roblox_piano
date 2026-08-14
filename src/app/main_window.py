@@ -8,7 +8,7 @@ from PySide6.QtGui import QDragEnterEvent, QDropEvent, QIcon, QFont
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QStackedWidget, QFileDialog, QSlider, QFrame, QMessageBox, QDialog,
-    QScrollArea, QCheckBox
+    QScrollArea, QCheckBox, QTabWidget
 )
 
 from src.music.events import NoteEvent, HandType
@@ -37,6 +37,11 @@ from src.app.piano_roll_widget import PianoRollWidget
 from src.app.virtual_piano_widget import VirtualPianoWidget
 from src.app.floating_overlay import FloatingOverlay
 from src.app.settings_window import SettingsDialog
+from src.library.manager import LibraryManager
+from src.app.library_widget import LibraryWidget
+from src.app.import_widget import ImportWidget
+from src.video.pipeline import VideoAnalysisWorker
+from src.library.models import ScoreItem
 
 
 class MainWindow(QMainWindow):
@@ -73,6 +78,10 @@ class MainWindow(QMainWindow):
         self.numeric_importer = NumericImporter()
         self.image_importer = ImageImporter()
         self.pdf_importer = PdfImporter()
+
+        # Library
+        self.library_manager = LibraryManager(self.config_mgr)
+        self.active_worker: Optional[VideoAnalysisWorker] = None
 
         # State
         self.timeline: Optional[MusicTimeline] = None
@@ -179,11 +188,32 @@ class MainWindow(QMainWindow):
 
         self.root_layout.addLayout(self.top_bar)
 
-        # Stacked Views (0: Landing Drop View, 1: Player View)
-        self.view_stack = QStackedWidget(self)
+        # Tabs
+        self.tabs = QTabWidget(self)
+        self.tabs.setDocumentMode(True)
+        self.tabs.setStyleSheet("QTabWidget::pane { border: none; }")
+        self.root_layout.addWidget(self.tabs, 1)
+
+        # Tab 0: Player Stack (Landing Drop View + Player View)
+        self.player_container = QWidget()
+        player_layout = QVBoxLayout(self.player_container)
+        player_layout.setContentsMargins(0,0,0,0)
+        self.view_stack = QStackedWidget()
+        player_layout.addWidget(self.view_stack)
+        
         self._build_landing_view()
         self._build_player_view()
-        self.root_layout.addWidget(self.view_stack, 1)
+        self.tabs.addTab(self.player_container, "🎹 플레이어")
+
+        # Tab 1: Library
+        self.library_widget = LibraryWidget(self.library_manager, self)
+        self.library_widget.score_selected.connect(self._on_library_score_selected)
+        self.tabs.addTab(self.library_widget, "📚 라이브러리")
+
+        # Tab 2: Import
+        self.import_widget = ImportWidget(self)
+        self.import_widget.import_requested.connect(self._on_import_requested)
+        self.tabs.addTab(self.import_widget, "🎥 비디오 / YouTube 가져오기")
 
     def _build_landing_view(self) -> None:
         self.landing_view = QWidget()
@@ -491,6 +521,42 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             QMessageBox.critical(self, "불러오기 오류", f"악보를 불러오는데 실패했습니다:\n{str(e)}")
+
+    def _on_library_score_selected(self, item: ScoreItem):
+        # Library item selected
+        if os.path.exists(item.filepath):
+            self.load_score_file(item.filepath)
+            self.tabs.setCurrentIndex(0) # Switch to player tab
+        else:
+            QMessageBox.warning(self, "파일 없음", f"라이브러리 파일을 찾을 수 없습니다:\n{item.filepath}")
+
+    def _on_import_requested(self, source_type: str, source_path: str):
+        if self.active_worker and self.active_worker.isRunning():
+            QMessageBox.warning(self, "작업 중", "이미 다른 분석 작업이 진행 중입니다.")
+            return
+
+        self.active_worker = VideoAnalysisWorker(
+            source_type=source_type,
+            source_path=source_path,
+            library_manager=self.library_manager
+        )
+        self.active_worker.progress.connect(self.import_widget.update_progress)
+        self.active_worker.finished_success.connect(self._on_import_success)
+        self.active_worker.finished_error.connect(self._on_import_error)
+        
+        # Connect cancel button
+        self.import_widget.btn_cancel.clicked.connect(self.active_worker.cancel)
+        
+        self.active_worker.start()
+
+    def _on_import_success(self, item: ScoreItem):
+        self.import_widget.task_finished(True, f"'{item.title}' 라이브러리 저장됨")
+        self.library_widget.refresh_library()
+        self.active_worker = None
+
+    def _on_import_error(self, err_msg: str):
+        self.import_widget.task_finished(False, err_msg)
+        self.active_worker = None
 
     def _set_loaded_timeline(self, timeline: MusicTimeline) -> None:
         self.timeline = timeline
