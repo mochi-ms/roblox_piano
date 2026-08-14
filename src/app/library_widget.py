@@ -1,4 +1,5 @@
 import os
+import json
 import datetime
 import subprocess
 from typing import Optional, List, Tuple
@@ -7,18 +8,19 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit,
     QTreeView, QTableView, QHeaderView, QMenu, QInputDialog, QMessageBox,
     QLabel, QSplitter, QAbstractItemView, QFrame, QToolButton, QFileDialog,
-    QStyledItemDelegate, QStyle, QProgressDialog
+    QStyledItemDelegate, QStyle, QProgressDialog, QApplication
 )
-from PySide6.QtCore import Qt, QPoint, Signal, QModelIndex, QEvent, QThread
+from PySide6.QtCore import Qt, QPoint, Signal, QModelIndex, QEvent, QThread, QMimeData, QByteArray
 from PySide6.QtGui import (
     QStandardItemModel, QStandardItem, QIcon, QAction, QKeySequence,
-    QShortcut, QFontMetrics
+    QShortcut, QFontMetrics, QDrag, QPainter, QColor, QCursor
 )
 
 from src.library.manager import LibraryManager
 from src.library.models import ScoreItem, FolderItem
 from src.app.mml_dialog import MmlDialog
 from src.music.timeline import MusicTimeline
+
 
 class LibraryWidget(QWidget):
     score_selected = Signal(ScoreItem)
@@ -27,7 +29,7 @@ class LibraryWidget(QWidget):
         super().__init__(parent)
         self.manager = manager
         
-        # History for back/forward
+        # History for back/forward navigation
         self.history: List[Optional[str]] = []
         self.history_idx = -1
         self.current_folder_id: Optional[str] = None
@@ -37,6 +39,7 @@ class LibraryWidget(QWidget):
         self.clipboard_data = None
         
         self._is_internal_editing = False
+        self._drag_start_pos = None
 
         self._setup_ui()
         self._setup_shortcuts()
@@ -47,42 +50,63 @@ class LibraryWidget(QWidget):
             QWidget {
                 background-color: #0D1117;
                 color: #C9D1D9;
-                font-family: 'Segoe UI Variable', 'Segoe UI', -apple-system, sans-serif;
+                font-family: 'Segoe UI Variable', 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
                 font-size: 13px;
             }
             QSplitter::handle {
                 background-color: #21262D;
                 width: 1px;
             }
-            QTreeView, QTableView {
+            QTreeView {
                 background-color: #0D1117;
                 border: 1px solid #21262D;
                 border-radius: 6px;
                 outline: none;
-                alternate-background-color: #161B22;
-                selection-background-color: #1F3A60;
+                padding: 4px;
+            }
+            QTreeView::item {
+                padding: 4px 6px;
+                min-height: 28px;
+                border-radius: 4px;
+                color: #C9D1D9;
+            }
+            QTreeView::item:hover {
+                background-color: #161B22;
+                color: #F0F6FC;
+            }
+            QTreeView::item:selected {
+                background-color: #1F2A38;
+                color: #FFFFFF;
+                border-left: 2px solid #4C82F7;
+            }
+            QTableView {
+                background-color: #0D1117;
+                border: 1px solid #21262D;
+                border-radius: 6px;
+                outline: none;
+                alternate-background-color: #12161D;
+                selection-background-color: #1C2B42;
                 selection-color: #FFFFFF;
                 gridline-color: transparent;
             }
-            QTreeView::item, QTableView::item {
-                padding: 4px;
-                min-height: 28px;
+            QTableView::item {
+                padding: 4px 8px;
+                min-height: 32px;
                 border-radius: 4px;
             }
-            QTreeView::item:hover, QTableView::item:hover {
-                background-color: #1C2128;
+            QTableView::item:hover {
+                background-color: #161B22;
             }
-            QTreeView::item:selected, QTableView::item:selected {
-                background-color: #1F3A60;
+            QTableView::item:selected {
+                background-color: #1C2B42;
                 color: #FFFFFF;
             }
             QHeaderView::section {
                 background-color: #161B22;
                 color: #8B949E;
-                padding: 6px 8px;
+                padding: 6px 10px;
                 border: none;
                 border-bottom: 1px solid #21262D;
-                border-right: 1px solid #21262D;
                 font-weight: 600;
                 font-size: 12px;
             }
@@ -91,8 +115,9 @@ class LibraryWidget(QWidget):
                 color: #C9D1D9;
                 border: 1px solid #30363D;
                 border-radius: 6px;
-                padding: 6px 12px;
+                padding: 5px 12px;
                 font-size: 13px;
+                font-weight: 500;
             }
             QPushButton:hover, QToolButton:hover {
                 background-color: #30363D;
@@ -102,24 +127,43 @@ class LibraryWidget(QWidget):
             QPushButton:pressed, QToolButton:pressed {
                 background-color: #161B22;
             }
+            QPushButton:disabled, QToolButton:disabled {
+                background-color: #12151A;
+                border-color: #21262D;
+                color: #484F58;
+            }
             QLineEdit {
                 background-color: #161B22;
                 color: #F0F6FC;
                 border: 1px solid #30363D;
                 border-radius: 6px;
-                padding: 6px 10px;
+                padding: 5px 10px;
                 font-size: 13px;
             }
             QLineEdit:focus {
                 border: 1px solid #4C82F7;
                 background-color: #0D1117;
             }
-            #breadcrumb {
+            #crumb_btn {
                 background-color: transparent;
                 border: none;
                 color: #8B949E;
                 font-size: 13px;
                 font-weight: 500;
+                padding: 4px 6px;
+                border-radius: 4px;
+            }
+            #crumb_btn:hover {
+                background-color: #21262D;
+                color: #58A6FF;
+            }
+            #crumb_btn_active {
+                background-color: transparent;
+                border: none;
+                color: #F0F6FC;
+                font-size: 13px;
+                font-weight: 600;
+                padding: 4px 6px;
             }
             #statusBar {
                 background-color: #161B22;
@@ -152,10 +196,10 @@ class LibraryWidget(QWidget):
         """)
         
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(14, 14, 14, 10)
-        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(12, 12, 12, 8)
+        main_layout.setSpacing(8)
         
-        # Toolbar
+        # 1. Top Navigation & Action Toolbar
         toolbar = QHBoxLayout()
         toolbar.setSpacing(6)
         
@@ -178,17 +222,22 @@ class LibraryWidget(QWidget):
         toolbar.addWidget(self.btn_forward)
         toolbar.addWidget(self.btn_up)
         
-        self.breadcrumb = QLabel(self)
-        self.breadcrumb.setObjectName("breadcrumb")
-        toolbar.addWidget(self.breadcrumb, 1)
+        # Clickable Breadcrumb Container
+        self.breadcrumb_container = QWidget(self)
+        self.breadcrumb_layout = QHBoxLayout(self.breadcrumb_container)
+        self.breadcrumb_layout.setContentsMargins(4, 0, 4, 0)
+        self.breadcrumb_layout.setSpacing(2)
+        toolbar.addWidget(self.breadcrumb_container, 1)
         
+        # Search Box
         self.search_bar = QLineEdit(self)
         self.search_bar.setPlaceholderText("라이브러리 검색 (Ctrl+F)...")
         self.search_bar.textChanged.connect(self._on_search)
         self.search_bar.setMinimumWidth(160)
-        self.search_bar.setMaximumWidth(320)
+        self.search_bar.setMaximumWidth(280)
         toolbar.addWidget(self.search_bar)
         
+        # Action Buttons
         btn_add_folder = QPushButton("새 폴더", self)
         btn_add_folder.clicked.connect(self._create_folder)
         toolbar.addWidget(btn_add_folder)
@@ -198,29 +247,35 @@ class LibraryWidget(QWidget):
         toolbar.addWidget(btn_add_file)
         
         btn_import_folder = QPushButton("폴더 추가", self)
-        btn_import_folder.setToolTip("Windows 폴더 구조를 그대로 라이브러리로 가져옵니다")
+        btn_import_folder.setToolTip("Windows 폴더 계층을 그대로 라이브러리로 가져옵니다")
         btn_import_folder.clicked.connect(self._import_folder_dialog)
         toolbar.addWidget(btn_import_folder)
         
         btn_mml = QPushButton("MML 가져오기", self)
-        btn_mml.setStyleSheet("background-color: #4C82F7; color: white; border: none; font-weight: 600;")
+        btn_mml.setStyleSheet("background-color: #2D4C7C; color: #FFFFFF; border: 1px solid #4C82F7; font-weight: 600;")
         btn_mml.clicked.connect(self._open_mml_dialog)
         toolbar.addWidget(btn_mml)
         
         main_layout.addLayout(toolbar)
         
-        # Splitter (Tree + Table)
+        # 2. Main Splitter (Left Tree + Right Table)
         self.splitter = QSplitter(Qt.Horizontal, self)
         main_layout.addWidget(self.splitter, 1)
         
-        # Left Tree
+        # Left Tree View
         self.tree_view = QTreeView(self)
         self.tree_view.setHeaderHidden(True)
         self.tree_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.tree_view.setIndentation(18)
+        self.tree_view.setUniformRowHeights(True)
         self.tree_view.clicked.connect(self._on_tree_clicked)
+        
+        # Enable Drops on TreeView
+        self.tree_view.setAcceptDrops(True)
+        self.tree_view.viewport().installEventFilter(self)
         self.splitter.addWidget(self.tree_view)
         
-        # Right Table Container
+        # Right Table View Container
         table_container = QWidget(self)
         table_layout = QVBoxLayout(table_container)
         table_layout.setContentsMargins(0, 0, 0, 0)
@@ -230,17 +285,18 @@ class LibraryWidget(QWidget):
         self.table_view.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table_view.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table_view.verticalHeader().setVisible(False)
+        self.table_view.verticalHeader().setDefaultSectionSize(36)
         self.table_view.setShowGrid(False)
         self.table_view.setAlternatingRowColors(True)
         self.table_view.doubleClicked.connect(self._on_table_double_clicked)
         self.table_view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table_view.customContextMenuRequested.connect(self._show_context_menu)
         
-        # Drag and Drop
+        # Enable Drag and Drop on TableView
         self.table_view.setAcceptDrops(True)
         self.table_view.setDragEnabled(True)
         self.table_view.setDropIndicatorShown(True)
-        self.table_view.setDragDropMode(QAbstractItemView.DragDrop)
+        self.table_view.viewport().setAcceptDrops(True)
         self.table_view.viewport().installEventFilter(self)
         
         table_layout.addWidget(self.table_view, 1)
@@ -252,7 +308,7 @@ class LibraryWidget(QWidget):
         self.lbl_empty.hide()
 
         self.splitter.addWidget(table_container)
-        self.splitter.setSizes([200, 650])
+        self.splitter.setSizes([220, 680])
 
         self.tree_model = QStandardItemModel(self)
         self.tree_view.setModel(self.tree_model)
@@ -264,6 +320,7 @@ class LibraryWidget(QWidget):
         
         # Configure column resize modes
         header = self.table_view.horizontalHeader()
+        header.setFixedHeight(34)
         header.setSectionResizeMode(0, QHeaderView.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
@@ -303,13 +360,13 @@ class LibraryWidget(QWidget):
         root = self.tree_model.invisibleRootItem()
         
         folders = self.manager.get_all_folders()
-        root_item = QStandardItem("내 라이브러리")
+        root_item = QStandardItem(self.style().standardIcon(QStyle.SP_DirIcon), "내 라이브러리")
         root_item.setData(None, Qt.UserRole)
         root.appendRow(root_item)
         
         item_dict = {None: root_item}
         for f in folders:
-            item = QStandardItem(f.name)
+            item = QStandardItem(self.style().standardIcon(QStyle.SP_DirIcon), f.name)
             item.setData(f.id, Qt.UserRole)
             item_dict[f.id] = item
 
@@ -320,21 +377,53 @@ class LibraryWidget(QWidget):
         self.tree_view.expandAll()
 
     def _update_breadcrumb(self):
+        # Clear existing breadcrumb items
+        while self.breadcrumb_layout.count():
+            child = self.breadcrumb_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        # Root button
+        btn_root = QPushButton("내 라이브러리")
+        btn_root.setCursor(Qt.PointingHandCursor)
+        if self.current_folder_id is None:
+            btn_root.setObjectName("crumb_btn_active")
+        else:
+            btn_root.setObjectName("crumb_btn")
+            btn_root.clicked.connect(lambda: self._navigate(None))
+        self.breadcrumb_layout.addWidget(btn_root)
+
         if not self.current_folder_id:
-            self.breadcrumb.setText("내 라이브러리")
+            self.breadcrumb_layout.addStretch(1)
             return
-            
-        path = []
+
+        # Build folder hierarchy list
+        path_folders = []
         curr = self.current_folder_id
         while curr:
             f = self.manager.db.get_folder(curr)
             if not f:
                 break
-            path.append(f.name)
+            path_folders.append(f)
             curr = f.parent_id
-            
-        path.reverse()
-        self.breadcrumb.setText("내 라이브러리 > " + " > ".join(path))
+        path_folders.reverse()
+
+        for idx, f in enumerate(path_folders):
+            sep = QLabel("›")
+            sep.setStyleSheet("color: #484F58; font-weight: bold; padding: 0 2px;")
+            self.breadcrumb_layout.addWidget(sep)
+
+            btn = QPushButton(f.name)
+            btn.setCursor(Qt.PointingHandCursor)
+            is_last = (idx == len(path_folders) - 1)
+            if is_last:
+                btn.setObjectName("crumb_btn_active")
+            else:
+                btn.setObjectName("crumb_btn")
+                btn.clicked.connect(lambda _, fid=f.id: self._navigate(fid))
+            self.breadcrumb_layout.addWidget(btn)
+
+        self.breadcrumb_layout.addStretch(1)
 
     def _update_table(self, keyword=""):
         self._is_internal_editing = True
@@ -349,15 +438,17 @@ class LibraryWidget(QWidget):
             
         # Add folders first
         for f in folders:
-            item_name = QStandardItem(f.name)
+            item_name = QStandardItem(self.style().standardIcon(QStyle.SP_DirIcon), f.name)
             item_name.setData(("folder", f), Qt.UserRole)
             item_name.setEditable(True)
             
             item_type = QStandardItem("파일 폴더")
+            item_type.setTextAlignment(Qt.AlignCenter)
             item_type.setEditable(False)
             
             dt = datetime.datetime.fromtimestamp(f.updated_at if f.updated_at else f.created_at)
             item_date = QStandardItem(dt.strftime("%Y-%m-%d %H:%M"))
+            item_date.setTextAlignment(Qt.AlignCenter)
             item_date.setEditable(False)
             
             self.table_model.appendRow([
@@ -368,29 +459,34 @@ class LibraryWidget(QWidget):
             
         # Add scores
         for s in scores:
-            item_name = QStandardItem(s.title)
+            item_name = QStandardItem(self.style().standardIcon(QStyle.SP_FileIcon), s.title)
             item_name.setData(("score", s), Qt.UserRole)
             item_name.setEditable(True)
             item_name.setToolTip(f"{s.title}\n{s.filepath}")
             
             ext_str = s.file_extension.upper()[1:] if s.file_extension else "MIDI"
             item_type = QStandardItem(ext_str)
+            item_type.setTextAlignment(Qt.AlignCenter)
             item_type.setEditable(False)
             
             dur_s = int(s.duration)
             mins, secs = divmod(dur_s, 60)
             item_dur = QStandardItem(f"{mins:02d}:{secs:02d}")
+            item_dur.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             item_dur.setEditable(False)
             
             bpm_val = int(s.bpm) if s.bpm > 0 else 120
             item_bpm = QStandardItem(str(bpm_val))
+            item_bpm.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             item_bpm.setEditable(False)
             
             item_notes = QStandardItem(f"{s.total_notes:,}")
+            item_notes.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             item_notes.setEditable(False)
             
             dt = datetime.datetime.fromtimestamp(s.updated_at if s.updated_at else s.created_at)
             item_date = QStandardItem(dt.strftime("%Y-%m-%d %H:%M"))
+            item_date.setTextAlignment(Qt.AlignCenter)
             item_date.setEditable(False)
             
             self.table_model.appendRow([item_name, item_type, item_dur, item_bpm, item_notes, item_date])
@@ -409,11 +505,9 @@ class LibraryWidget(QWidget):
         total = self.table_model.rowCount()
         selected = len(self.table_view.selectionModel().selectedRows())
         
-        crumb = self.breadcrumb.text()
         status_str = f"{total:,}개 항목"
         if selected > 0:
             status_str += f"  |  {selected}개 선택됨"
-        status_str += f"  |  위치: {crumb}"
         self.status_bar.setText(status_str)
 
     def refresh_library(self):
@@ -478,7 +572,7 @@ class LibraryWidget(QWidget):
         self._update_table(text.strip())
 
     def _get_selected_data(self) -> list:
-        selected_rows = set(idx.row() for idx in self.table_view.selectionModel().selectedRows())
+        selected_rows = sorted(set(idx.row() for idx in self.table_view.selectionModel().selectedRows()))
         items = []
         for r in selected_rows:
             item = self.table_model.item(r, 0)
@@ -546,9 +640,7 @@ class LibraryWidget(QWidget):
                         self.manager.move_score(obj.id, self.current_folder_id)
                 elif itype == "folder":
                     if action == "cut":
-                        if obj.id != self.current_folder_id:
-                            obj.parent_id = self.current_folder_id
-                            self.manager.update_folder(obj)
+                        self.manager.move_folder(obj.id, self.current_folder_id)
             except Exception as e:
                 print(f"Paste failed for {obj}: {e}")
 
@@ -597,6 +689,9 @@ class LibraryWidget(QWidget):
             menu.addSeparator()
             action_add_file = menu.addAction("파일 추가...")
             action_add_file.triggered.connect(self._import_files_dialog)
+            
+            action_add_folder = menu.addAction("폴더 추가...")
+            action_add_folder.triggered.connect(self._import_folder_dialog)
             
             action_mml = menu.addAction("MML 가져오기...")
             action_mml.triggered.connect(self._open_mml_dialog)
@@ -663,7 +758,10 @@ class LibraryWidget(QWidget):
         if folder and os.path.exists(folder):
             self._start_folder_import(folder)
 
-    def _start_folder_import(self, folder_path: str):
+    def _start_folder_import(self, folder_path: str, target_parent_folder_id: Optional[str] = None):
+        if target_parent_folder_id is None:
+            target_parent_folder_id = self.current_folder_id
+
         progress = QProgressDialog("악보 폴더 분석 및 가져오는 중...", "취소", 0, 100, self)
         progress.setWindowTitle("폴더 가져오기")
         progress.setWindowModality(Qt.WindowModal)
@@ -702,7 +800,7 @@ class LibraryWidget(QWidget):
             }
         """)
 
-        worker = FolderImportWorker(self.manager, folder_path, self.current_folder_id, self)
+        worker = FolderImportWorker(self.manager, folder_path, target_parent_folder_id, self)
 
         def on_progress(cur, total, name):
             if total > 0:
@@ -746,15 +844,100 @@ class LibraryWidget(QWidget):
             if item and dialog.should_play():
                 self.score_selected.emit(item)
 
-    # --- Drag & Drop ---
+    # --- Drag & Drop Engine ---
+    def _start_internal_drag(self):
+        selected_data = self._get_selected_data()
+        if not selected_data:
+            return
+
+        scores = [obj.id for itype, obj in selected_data if itype == "score"]
+        folders = [obj.id for itype, obj in selected_data if itype == "folder"]
+
+        if not scores and not folders:
+            return
+
+        mime_data = QMimeData()
+        payload = json.dumps({"scores": scores, "folders": folders})
+        mime_data.setData("application/x-roblox-piano-items", QByteArray(payload.encode("utf-8")))
+
+        drag = QDrag(self.table_view)
+        drag.setMimeData(mime_data)
+        drag.exec(Qt.MoveAction)
+
+    def _get_drop_target_folder_id(self, source, pos: QPoint) -> Optional[str]:
+        if source is self.tree_view.viewport():
+            index = self.tree_view.indexAt(pos)
+            if index.isValid():
+                item = self.tree_model.itemFromIndex(index)
+                if item:
+                    return item.data(Qt.UserRole)
+            return None
+        elif source is self.table_view.viewport():
+            index = self.table_view.indexAt(pos)
+            if index.isValid():
+                item = self.table_model.item(index.row(), 0)
+                if item:
+                    data = item.data(Qt.UserRole)
+                    if data and data[0] == "folder":
+                        return data[1].id
+            return self.current_folder_id
+        return self.current_folder_id
+
     def eventFilter(self, source, event):
-        if source is self.table_view.viewport():
-            if event.type() == QEvent.Type.DragEnter:
-                if event.mimeData().hasUrls():
+        if not hasattr(self, 'table_view') or not hasattr(self, 'tree_view'):
+            return super().eventFilter(source, event)
+
+        if source in (self.table_view.viewport(), self.tree_view.viewport()):
+            # Detect mouse drag initiation on TableView
+            if source is self.table_view.viewport():
+                if event.type() == QEvent.Type.MouseButtonPress:
+                    if event.button() == Qt.LeftButton:
+                        self._drag_start_pos = event.pos()
+                elif event.type() == QEvent.Type.MouseMove:
+                    if (event.buttons() & Qt.LeftButton) and self._drag_start_pos:
+                        if (event.pos() - self._drag_start_pos).manhattanLength() >= QApplication.startDragDistance():
+                            self._start_internal_drag()
+                            self._drag_start_pos = None
+                            return True
+
+            if event.type() in (QEvent.Type.DragEnter, QEvent.Type.DragMove):
+                if event.mimeData().hasUrls() or event.mimeData().hasFormat("application/x-roblox-piano-items"):
                     event.acceptProposedAction()
                     return True
+
             elif event.type() == QEvent.Type.Drop:
-                if event.mimeData().hasUrls():
+                pos = event.position().toPoint()
+                target_folder_id = self._get_drop_target_folder_id(source, pos)
+
+                # 1. Internal Drag & Drop (Move scores / folders)
+                if event.mimeData().hasFormat("application/x-roblox-piano-items"):
+                    try:
+                        raw = event.mimeData().data("application/x-roblox-piano-items").data().decode("utf-8")
+                        payload = json.loads(raw)
+                        scores = payload.get("scores", [])
+                        folders = payload.get("folders", [])
+
+                        # Cycle prevention for folder move
+                        for f_id in folders:
+                            if f_id == target_folder_id or self.manager.is_descendant(f_id, target_folder_id):
+                                QMessageBox.warning(self, "이동 불가", "자기 자신이나 하위 폴더로는 이동할 수 없습니다.")
+                                event.acceptProposedAction()
+                                return True
+
+                        for s_id in scores:
+                            self.manager.move_score(s_id, target_folder_id)
+
+                        for f_id in folders:
+                            self.manager.move_folder(f_id, target_folder_id)
+
+                        self.refresh_library()
+                    except Exception as e:
+                        QMessageBox.critical(self, "이동 오류", f"항목 이동 중 오류가 발생했습니다:\n{e}")
+                    event.acceptProposedAction()
+                    return True
+
+                # 2. External Drag & Drop from Windows Explorer (Copy)
+                elif event.mimeData().hasUrls():
                     urls = event.mimeData().urls()
                     has_folder = False
                     for url in urls:
@@ -762,13 +945,17 @@ class LibraryWidget(QWidget):
                             loc = url.toLocalFile()
                             if os.path.isdir(loc):
                                 has_folder = True
-                                self._start_folder_import(loc)
+                                self._start_folder_import(loc, target_parent_folder_id=target_folder_id)
                             else:
-                                self.manager.import_external_file(loc, folder_id=self.current_folder_id)
+                                try:
+                                    self.manager.import_external_file(loc, folder_id=target_folder_id)
+                                except Exception as e:
+                                    print(f"Failed to import dropped file {loc}: {e}")
                     if not has_folder:
                         self.refresh_library()
                     event.acceptProposedAction()
                     return True
+
         return super().eventFilter(source, event)
 
 
@@ -801,4 +988,3 @@ class FolderImportWorker(QThread):
 
     def _on_progress(self, cur: int, total: int, name: str):
         self.sig_progress.emit(cur, total, name)
-

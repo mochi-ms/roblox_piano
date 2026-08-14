@@ -25,6 +25,10 @@ class LibraryManager:
         
         self.db_path = os.path.join(self.library_dir, "library.db")
         self.db = ScoreDatabase(self.db_path)
+        try:
+            self.clean_spurious_empty_folders()
+        except Exception as e:
+            print(f"Failed to clean spurious empty folders: {e}")
 
     def _get_folder_path(self, folder_id: Optional[str]) -> str:
         """Returns the physical absolute path for a folder ID by traversing parents."""
@@ -299,11 +303,13 @@ class LibraryManager:
         os.makedirs(target_dir, exist_ok=True)
         
         original_filename = os.path.basename(source_filepath)
-        dest_filename = self._get_safe_filename(target_dir, original_filename)
-        dest_filepath = os.path.join(target_dir, dest_filename)
-        
-        # Copy file to library directory
-        shutil.copy2(source_filepath, dest_filepath)
+        if os.path.abspath(os.path.dirname(source_filepath)) == os.path.abspath(target_dir):
+            dest_filename = original_filename
+            dest_filepath = source_filepath
+        else:
+            dest_filename = self._get_safe_filename(target_dir, original_filename)
+            dest_filepath = os.path.join(target_dir, dest_filename)
+            shutil.copy2(source_filepath, dest_filepath)
         
         # Default statuses
         status = "READY"
@@ -570,6 +576,78 @@ class LibraryManager:
                         
         self.db.delete_folder(folder_id)
 
+    def is_descendant(self, parent_folder_id: str, candidate_child_id: Optional[str]) -> bool:
+        """Returns True if candidate_child_id is the same as or a descendant of parent_folder_id."""
+        if not candidate_child_id or not parent_folder_id:
+            return False
+        if parent_folder_id == candidate_child_id:
+            return True
+            
+        current = self.db.get_folder(candidate_child_id)
+        visited = set()
+        while current and current.parent_id:
+            if current.id in visited:
+                break
+            visited.add(current.id)
+            if current.parent_id == parent_folder_id:
+                return True
+            current = self.db.get_folder(current.parent_id)
+        return False
+
+    def move_folder(self, folder_id: str, new_parent_id: Optional[str]) -> FolderItem:
+        """
+        Moves a folder to a new parent folder, preventing cycles and synchronizing physical paths and DB.
+        """
+        folder = self.db.get_folder(folder_id)
+        if not folder:
+            raise ValueError(f"Folder {folder_id} not found")
+            
+        if folder.parent_id == new_parent_id:
+            return folder
+            
+        # Prevent moving into itself or its own descendant
+        if folder_id == new_parent_id or self.is_descendant(folder_id, new_parent_id):
+            raise ValueError("자기 자신이나 하위 폴더로는 이동할 수 없습니다.")
+            
+        old_path = self._get_folder_path(folder_id)
+        new_parent_path = self._get_folder_path(new_parent_id)
+        os.makedirs(new_parent_path, exist_ok=True)
+        
+        # Check collision in new target directory
+        safe_name = folder.name
+        new_path = os.path.join(new_parent_path, safe_name)
+        counter = 1
+        orig_cand = safe_name
+        while os.path.exists(new_path) and os.path.abspath(new_path).lower() != os.path.abspath(old_path).lower():
+            safe_name = f"{orig_cand} ({counter})"
+            new_path = os.path.join(new_parent_path, safe_name)
+            counter += 1
+            
+        if os.path.exists(old_path) and os.path.abspath(old_path) != os.path.abspath(new_path):
+            shutil.move(old_path, new_path)
+            self._update_score_paths_recursive(folder_id, old_path, new_path)
+            
+        folder.name = safe_name
+        folder.parent_id = new_parent_id
+        folder.updated_at = time.time()
+        self.db.update_folder(folder)
+        return folder
+
+    def clean_spurious_empty_folders(self) -> int:
+        """
+        Removes orphaned empty folders with no scores, no subfolders, and no physical directory.
+        """
+        folders = self.get_all_folders()
+        cleaned_count = 0
+        for f in folders:
+            scores = self.get_folder_scores(f.id)
+            children = [c for c in folders if c.parent_id == f.id]
+            physical_path = self._get_folder_path(f.id)
+            if len(scores) == 0 and len(children) == 0 and not os.path.exists(physical_path):
+                self.db.delete_folder(f.id)
+                cleaned_count += 1
+        return cleaned_count
+
     def _update_score_paths_recursive(self, folder_id: str, old_base_path: str, new_base_path: str):
         scores = self.get_folder_scores(folder_id)
         for s in scores:
@@ -595,3 +673,4 @@ class LibraryManager:
     def get_folder_scores(self, folder_id: Optional[str]) -> List[ScoreItem]:
         scores = self.get_all()
         return [s for s in scores if s.folder_id == folder_id]
+
