@@ -1,10 +1,11 @@
-# Roblox Piano Player V2 — C# / .NET 10 / WPF Migration Plan & Architecture Audit
+# Roblox Piano Player V2 — C# / .NET 10 / WPF Migration Plan & Architecture Specification (Frozen)
 
-> **Document Status**: Phase 0 Complete — Audit & Architecture Specification  
+> **Document Status**: Phase 0.5 Final Freeze — Architecture, Roadmap & Data Safety Specification  
 > **Target Platform**: C# 13, .NET 10 LTS, WPF, Windows 10/11 x64  
 > **Source Repository**: `https://github.com/mochi-ms/roblox_piano`  
 > **Reference Baseline**: Python 3.13 + PySide6 (82 Pytest Unit/Integration Suite 100% Pass)  
-> **Rollout Policy**: Dual-track Coexistence in `/v2/` without deleting or modifying legacy Python reference code.
+> **Legacy Policy**: Dual-track Coexistence in `/v2/` without deleting or modifying legacy Python reference code.  
+> **Development Principle**: UI/UX First Validation Gate & Complete Database Isolation.
 
 ---
 
@@ -32,13 +33,14 @@ graph TD
 
 ---
 
-## 2. Current Feature Inventory & Porting Classification
+## 2. Current Feature Inventory & Porting Classification (25 Core Areas)
 
 ### [Classification Criteria]
-- **Category A**: C# / .NET 10 / WPF로 완전 이식 (Native High Performance)
-- **Category B**: Python Worker 유지 (무거운 ML/음원 분리/yt-dlp 등 격리 프로세스 및 JSON Lines IPC)
-- **Category C**: 기존 코드에서 알고리즘 및 시각화 로직만 참고하여 C# 고성능 렌더링 재구현
-- **Category D**: 폐기 / V2 전용 재설계 후보
+- **Category A**: C# / .NET 10 / WPF로 완전 이식 (Native High Performance) — **22개**
+- **Category B**: Python Worker 유지 (무거운 ML/음원 분리/yt-dlp 등 격리 프로세스 및 JSON Lines IPC) — **2개**
+- **Category C**: 기존 코드에서 알고리즘 및 시각화 로직만 참고하여 C# 고성능 렌더링 재구현 — **1개**
+- **Category D**: 폐기 / 전면 대체 — **0개**
+- **Total**: **25개**
 
 | # | 영역 (Feature Area) | 현재 Python 모듈 및 동작 세부사항 | V2 목표 기술 스택 | 분류 |
 | :---: | :--- | :--- | :--- | :---: |
@@ -70,330 +72,277 @@ graph TD
 
 ---
 
-## 3. Current Python Module → V2 C# Module Mapping
+## 3. UI/UX Design System & Polish Specification (Freeze)
+
+V2 Desktop UI는 기존 Python/PySide의 투박함과 잦은 UI 리팩토링 문제를 원천 해결하기 위해, **Sony / Canon Professional Utility, Microsoft PowerToys, Windows 11 Fluent** 수준의 정제되고 절제된 Dark Graphite 디자인 시스템을 엄격히 준수합니다.
 
 ```
-[Legacy Python Module]                              [V2 .NET 10 C# Assembly / Namespace]
----------------------------------------------------------------------------------------------------------
-src/music/events.py                 --->            RobloxPiano.Core.Music.Events (NoteEvent, PedalEvent, ChordGroup)
-src/music/timeline.py               --->            RobloxPiano.Core.Music.Timeline (MusicTimeline)
-src/music/range_processor.py        --->            RobloxPiano.Core.Music.Processing (RangeProcessor, OctaveFit)
-src/music/hand_assignment.py        --->            RobloxPiano.Core.Music.Processing (HandAssignmentService)
-src/music/transpose.py              --->            RobloxPiano.Core.Music.Processing (TransposeService)
-
-src/piano/profile.py                --->            RobloxPiano.Core.Piano.Models (PianoProfile, KeyMapping)
-src/piano/mapper.py                 --->            RobloxPiano.Core.Piano.Mapping (RobloxPianoMapper)
-src/piano/profiles/default.json     --->            RobloxPiano.Core/Resources/Profiles/default.json (Embedded)
-
-src/importers/base.py               --->            RobloxPiano.Core.Importers.Abstractions (IMusicImporter)
-src/importers/midi_importer.py      --->            RobloxPiano.Core.Importers.Midi (MidiImporter using DryWetMidi)
-src/importers/mml_importer.py       --->            RobloxPiano.Core.Importers.Mml (MmlImporter - NoteIR Engine)
-src/importers/musicxml_importer.py  --->            RobloxPiano.Core.Importers.MusicXml (MusicXmlImporter)
-src/importers/numeric_importer.py   --->            RobloxPiano.Core.Importers.Numeric (NumericImporter)
-src/services/mml_service.py         --->            RobloxPiano.Core.Services (MmlService)
-
-src/library/models.py               --->            RobloxPiano.Core.Library.Models (ScoreItem, FolderItem)
-src/library/database.py             --->            RobloxPiano.Infrastructure.Data (SqliteScoreRepository)
-src/library/manager.py              --->            RobloxPiano.Core.Library.Services (LibraryManager, FolderService)
-
-src/playback/keyboard_backend.py    --->            RobloxPiano.Playback.Windows.Abstractions (IKeyboardBackend)
-src/playback/sendinput_backend.py   --->            RobloxPiano.Playback.Windows.Native (WindowsSendInputBackend)
-src/playback/dryrun_backend.py      --->            RobloxPiano.Playback.Windows.Backends (DryRunKeyboardBackend)
-src/playback/key_state_manager.py   --->            RobloxPiano.Playback.Windows.State (KeyStateManager)
-src/playback/chord_engine.py        --->            RobloxPiano.Playback.Windows.Engine (ChordEngine)
-src/playback/pedal_backend.py       --->            RobloxPiano.Playback.Windows.Engine (PedalController)
-src/playback/scheduler.py           --->            RobloxPiano.Playback.Windows.Scheduler (PlaybackScheduler)
-
-src/hotkeys/global_hotkeys.py       --->            RobloxPiano.Playback.Windows.Native (GlobalHotkeyManager)
-src/windows/target_window.py        --->            RobloxPiano.Playback.Windows.Native (TargetWindowManager)
-
-src/utils/config.py                 --->            RobloxPiano.Core.Configuration (AppConfig, ConfigService)
-src/utils/icon_loader.py            --->            RobloxPiano.Desktop.Utilities (IconHelper)
-
-src/app/main_window.py              --->            RobloxPiano.Desktop.Views (MainWindow.xaml, PlayerView.xaml)
-src/app/library_widget.py           --->            RobloxPiano.Desktop.Views (LibraryView.xaml)
-src/app/floating_overlay.py         --->            RobloxPiano.Desktop.Views (OverlayWindow.xaml)
-src/app/virtual_piano_widget.py     --->            RobloxPiano.Desktop.Controls (VirtualPianoControl.xaml)
-src/app/piano_roll_widget.py        --->            RobloxPiano.Desktop.Controls (PianoRollControl.cs)
-src/app/mml_dialog.py               --->            RobloxPiano.Desktop.Views.Dialogs (MmlImportDialog.xaml)
-src/app/settings_window.py          --->            RobloxPiano.Desktop.Views.Dialogs (SettingsDialog.xaml)
-
-src/video/ & src/omr/               --->            workers/transcription-python/ (Subprocess IPC Worker)
+[Main Navigation Bar]
+[ Player ]  [ Library ]  [ Transcribe ]  [ Settings ]       [ Roblox State: Attached (PID 1234) ]
 ```
+
+### [A] Design Rules & Prohibitions
+- **절대 금지**:
+  - 화려한 AI 대시보드 스타일 및 거대한 카드들의 남발
+  - 이모지(Emoji) 및 유니코드 문자를 아이콘 대신 사용하는 행위 (오직 정밀한 SVG Vector Icon만 사용)
+  - 과도한 그라디언트, 눈부신 블루 네온, 산만한 컬러 팔레트
+  - 모든 컨테이너와 위젯마다 두꺼운 테두리(Border)를 두르는 행위
+  - 지나치게 둥근 코너(Over-rounded corners)
+  - 화면을 낭비하는 거대한 Play 버튼 및 빽빽하게 욱여넣어진 툴바
+- **시각 계층 및 상태 표현**:
+  - Roblox 연결 상태는 거대한 별도 카드가 아니라 상단 바 또는 상태 표시줄에 단정한 인디케이터로 표현.
+  - Accent Color는 사용자의 주의가 필수적인 활성 상태 및 주요 액션(Primary Action)에만 절제하여 사용.
+
+### [B] Design Tokens
+- **Color Palette (Dark Graphite)**:
+  - Background Root: `#0D1117`
+  - Surface Elevated: `#161B22`
+  - Surface Hover: `#21262D`
+  - Border Subtle: `#21262D`
+  - Border Default: `#30363D`
+  - Text Primary: `#F0F6FC`
+  - Text Secondary: `#8B949E`
+  - Accent Blue: `#388BFD`
+  - Accent Muted: `#1F3A60`
+  - Selection Highlight: `#1C2B42` (Left accent `#388BFD`)
+- **Typography**:
+  - Primary Font: `Segoe UI Variable` (fallback `Segoe UI`, `Malgun Gothic`, `-apple-system`)
+  - Title: 16px / Semibold (Header)
+  - Subtitle / Tab: 13px / Medium
+  - Body / Grid: 12.5px / Regular
+  - Caption / Metadata: 11.5px / Regular (`#8B949E`)
+- **Spacing Tokens**:
+  - `4px`, `8px`, `12px`, `16px`, `24px`, `32px`
+- **Corner Radius Tokens**:
+  - Compact: `4px`
+  - Standard: `6px`
+  - Maximum: `8px` (8px 초과 라운딩 금지)
 
 ---
 
-## 4. Features Retained in Python Worker (`workers/transcription-python/`)
+## 4. Library High-Performance Principles (Freeze)
 
-YouTube 음원 다운로드 및 AI 오디오 트랜스크립션(Basic Pitch), OEMER 악보 인식을 C#으로 무리하게 포팅하지 않고, **격리된 가벼운 Python 3.11 Standalone Worker**로 유지합니다.
+V1의 치명적 한계였던 "단일 파일/폴더 변경 시 전체 `QStandardItemModel`을 clear하고 처음부터 다시 그리는 구조"를 V2에서는 완전히 금지합니다.
 
-### [A] Worker Responsibilities
-1. **YouTube Downloader**: `yt-dlp` 최신 엔진을 통해 비디오/오디오 스트림 다운로드 및 FFmpeg 무손실 wav 추출.
-2. **Audio Transcription AI**: `basic-pitch` (Spotify AI) 신경망을 실행하여 polyphonic audio를 MIDI로 변환.
-3. **OEMER OMR Backend**: 딥러닝 기반 악보 이미지 분석.
-
-### [B] Inter-Process Communication (IPC) Protocol
-- **Transport**: Standard Input / Output (stdin/stdout) Streams via UTF-8 JSON Lines (`ndjson`).
-- **Command Envelope (C# -> Python)**:
-  ```json
-  {"id": "req-001", "cmd": "transcribe_youtube", "url": "https://youtu.be/...", "out_dir": "C:\\AppData\\Local\\RobloxPiano\\Temp"}
-  ```
-- **Progress Envelope (Python -> C#)**:
-  ```json
-  {"id": "req-001", "type": "progress", "percent": 45.0, "status": "Extracting notes with Basic Pitch..."}
-  ```
-- **Completion Envelope (Python -> C#)**:
-  ```json
-  {"id": "req-001", "type": "completed", "midi_path": "C:\\AppData\\Local\\RobloxPiano\\Temp\\transcription.mid", "bpm": 136.0, "duration": 184.2}
-  ```
-- **Error Envelope (Python -> C#)**:
-  ```json
-  {"id": "req-001", "type": "error", "message": "Failed to download video: Age restricted"}
-  ```
+### [A] Architectural Requirements
+1. **UI Virtualization & Recycling**:
+   - WPF `VirtualizingStackPanel` 및 Virtualizing DataGrid를 적용하여 10,000개 이상의 악보가 존재하더라도 현재 뷰포트에 표시되는 20~30개의 Row만 렌더링.
+2. **Incremental Observable Updates**:
+   - 전체 리스트 재구성 금지. 단일 파일의 추가/수정/삭제 시 `ObservableCollection<ScoreItemViewModel>`의 해당 아이템만 증분 갱신(Incremental update).
+3. **Asynchronous Non-Blocking Repository**:
+   - 모든 DB 쿼리 및 디렉토리 스캔은 `IAsyncEnumerable` 또는 `Task<List<ScoreItem>>` 기반의 비동기 파이프라인으로 실행되어 UI 쓰레드 프리징(0ms UI lag) 방지.
+4. **Search Debounce & Fast Filter**:
+   - 검색창 입력 시 150ms 디바운스 타이머를 적용하고, 메모리 캐시 및 SQLite FTS5를 통해 타이핑 즉시 즉각적인 필터링 수행.
+5. **Scalability Target**:
+   - **1,000개**, **5,000개**, **10,000개** 대용량 라이브러리 데이터셋에서도 60fps 부드러운 스크롤과 즉각적인 반응성 보장 (Phase 3에서 벤치마크 수행).
 
 ---
 
-## 5. Migration Dependency Graph
+## 5. Unified Transcription Architecture & AI Flow (Freeze)
+
+### [A] Architecture Boundary
+- **Main WPF App (.NET 10)**: 비즈니스 로직, 오디오 파일 수신, IPC 파이프 관리, 악보 뷰어 및 연주.
+- **AI Worker (Python 3.11 Standalone Subprocess)**: 무거운 딥러닝 모델(`basic-pitch`, `torch`/`onnx`), `yt-dlp`, `ffmpeg` 실행.
+- **통신 방식**: Standard Input / Output (stdin/stdout) 기반 UTF-8 JSON Lines (`ndjson`) 비동기 프로토콜.
+- **엔진 추상화**: `ITranscriptionEngine` 인터페이스를 통해 Basic Pitch 외에도 향후 피아노 특화 AI 모델(e.g., Onsets & Frames, ByteDance Piano)을 손쉽게 플러그인할 수 있는 아키텍처 구축.
+
+### [B] Single Unified Ingestion Pipeline
+YouTube 다운로드와 Local Audio 변환은 서로 다른 엔진을 사용하지 않으며, **단일 공통 AI Transcription Pipeline**을 공유합니다:
 
 ```mermaid
 flowchart TD
-    subgraph Phase1 [Phase 1: Core Domain & Importers]
-        E[Music Events & Timeline]
-        MAP[Roblox Piano Mapper & Profiles]
-        MML[MML NoteIR Importer & Engine]
-        MIDI[MIDI Importer DryWetMidi]
-        XML[MusicXML & Numeric Importers]
-        T1[xUnit Core Tests Suite]
+    subgraph Ingestion [Ingestion Channels]
+        A1[Channel A: Local Audio Files\nWAV / MP3 / FLAC / M4A]
+        A2[Channel B: YouTube URL\nyt-dlp Download & Metadata]
     end
 
-    subgraph Phase2 [Phase 2: Infrastructure & Playback Engine]
-        DB[SQLite Database & Repository]
-        LIB_SVC[Library & Folder Service]
-        SEND[Windows P/Invoke SendInput]
-        CHORD[ChordEngine & Modifier Split]
-        SCHED[High-Precision Multimedia Scheduler]
-        HK[Global Hotkeys & Window Hook]
-        T2[xUnit Playback & DB Tests Suite]
+    subgraph Normalization [Audio Normalization]
+        FFMPEG[FFmpeg Audio Conversion\n16kHz Mono 16-bit PCM WAV]
     end
 
-    subgraph Phase3 [Phase 3: Python AI Worker]
-        PY_IPC[JSON Lines IPC Pipe Adapter]
-        PY_WRK[workers/transcription-python]
+    subgraph AI_Core [Unified AI Transcription Worker]
+        IPC[JSON Lines IPC Pipe]
+        ENGINE[ITranscriptionEngine\nBasic Pitch AI Transcriber]
     end
 
-    subgraph Phase4 [Phase 4: WPF Desktop UI]
-        WPF_MAIN[Fluent MainWindow & Shell]
-        WPF_LIB[Windows 11 Explorer Library View]
-        WPF_PLY[Player View & Virtual Piano]
-        WPF_ROLL[High-Performance Piano Roll Visual]
-        WPF_OVL[Floating Overlay Window]
-        WPF_SET[Settings & Theme Dialogs]
+    subgraph Output [Review & Library Ingestion]
+        MID[Generated Standard MIDI]
+        REV[Transcription Review Editor\nAudio vs MIDI A/B Comparison]
+        LIB[Save to Library_v2.db & Physical Storage]
+        PLY[Roblox Piano Player Ready]
     end
 
-    subgraph Phase5 [Phase 5: Integration & Packaging]
-        E2E[End-to-End System Tests]
-        PUB[Self-Contained Single-File EXE Publish]
-    end
-
-    Phase1 --> Phase2
-    Phase1 --> Phase3
-    Phase2 --> Phase4
-    Phase3 --> Phase4
-    Phase4 --> Phase5
+    A1 --> FFMPEG
+    A2 --> FFMPEG
+    FFMPEG --> IPC
+    IPC --> ENGINE
+    ENGINE --> MID
+    MID --> REV
+    REV --> LIB
+    LIB --> PLY
 ```
 
 ---
 
-## 6. Known Regression Risks & Mitigation Strategies
+## 6. Database Safety & Storage Isolation Policy (Freeze)
 
-### [Risk 1] MML Parsing & Note Timing Semantics (CRITICAL)
-- **위험 요인**: 
-  - `N58L8` 또는 `CL16`과 같이 음표 뒤에 공백 없이 붙은 `L` 명령어가 음표 길이로 삼켜지지 않고 독립된 Default Length State 명령어로 처리되어야 함.
-  - 파싱 즉시 Note duration을 확정(Snapshot)하는 Forward-only 시맨틱스를 C# 구현 시 유지하지 못하면 전체 악보 박자가 틀어짐.
-  - Multi-track 동기화 및 중간 Tie(`&`) 체이닝.
-- **방어 대책**:
-  - Python에서 검증된 `tests/test_mml_timing.py` 11개 단위 테스트 및 `tests/test_mml_dialect.py` 6개 테스트를 xUnit 테스트로 100% 동일한 테스트 벡터로 이식하여 C# MML Importer의 정합성을 보증.
+> [!CAUTION]
+> **Production SQLite DB Isolation Rule**:
+> V2 개발 및 테스트 과정에서 레거시 V1 데이터베이스(`scores.db` / `library.db`)에 절대 Write 작업을 수행하지 않습니다.
 
-### [Risk 2] Key Conflicts & Modifier Bleeding in Chords
-- **위험 요인**: 
-  - `q`와 `Q` (Shift+q)가 동시에 연주될 때 동일한 물리 키를 공유하는 충돌 문제.
-  - Shift를 누른 상태에서 소문자 키가 동시에 전송되어 대문자로 잘못 입력되는 Modifier Bleed 현상.
-- **방어 대책**:
-  - `ChordEngine`의 Modifier Grouping 알고리즘(Normal 키 그룹 전송 -> Micro Arpeggio Delay -> Shift 키 그룹 전송)을 C#에 1:1로 정확히 포팅하고 `test_chords_and_conflicts.py` 테스트 케이스로 검증.
-
-### [Risk 3] Playback Scheduler Timer Precision on Windows
-- **위험 요인**:
-  - Windows 기본 타이머 해상도는 15.6ms이므로 단순 `Thread.Sleep()` 사용 시 심각한 박자 밀림(Jitter) 발생.
-- **방어 대책**:
-  - Win32 `timeBeginPeriod(1)` 호출로 OS 타이머 인터벌을 1ms로 극대화.
-  - `Stopwatch.GetTimestamp()` 기반 고성능 나노초 카운터 + 1ms 단위 Coarse Sleep + 50마이크로초 SpinWait 하이브리드 대기 루프 채택.
-
-### [Risk 4] SQLite Schema Compatibility & Safe Trash Deletion
-- **위험 요인**:
-  - 기존 사용자의 `scores.db`와 C# V2의 DB가 호환되지 않으면 악보 목록 유실 위험.
-  - 삭제 시 휴지통 이동 실패로 인한 파일 손상.
-- **방어 대책**:
-  - `folders`와 `scores` 테이블의 스키마 및 컬럼 타입을 100% 동일하게 유지(`TEXT`, `REAL`, `INTEGER`).
-  - C#에서는 `Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(..., UIOption.OnlyErrorDialogs, RecycleOption.SendToRecycleBin)` 또는 `SHFileOperationW` P/Invoke를 사용하여 안전한 Windows 휴지통 삭제 보장.
+1. **V1 Database (Read-Only Source)**:
+   - 기존 V1 SQLite DB는 오직 원본 데이터 읽기 참조용으로만 취급합니다.
+2. **V2 Database (`library_v2.db`)**:
+   - V2는 `%LOCALAPPDATA%\RobloxPianoPlayer\library_v2.db`라는 완전히 독립된 데이터베이스 파일을 생성하여 사용합니다.
+3. **Migration Flow**:
+   - V2 최초 실행 시 V1 데이터 가져오기:
+     $$\text{V1 DB (Read)} \longrightarrow \text{Auto Backup (.bak)} \longrightarrow \text{V2 Import Engine} \longrightarrow \text{library\_v2.db (Write)}$$
+   - V1과 V2를 교대로 실행하더라도 데이터 손실, 레코드 락, 스키마 오염이 구조적으로 발생하지 않도록 100% 격리합니다.
 
 ---
 
-## 7. Recommended V2 Project Structure
+## 7. Ten-Phase Corrected Roadmap & Strict Phase Gate Policy
 
-기존 Python 소스 코드를 건드리지 않고, `/v2/` 디렉토리 아래에 완벽히 분리된 .NET 10 솔루션을 구성합니다:
+"기능을 먼저 대량 개발한 뒤 나중에 UI를 고치느라 전체 구조를 뜯어고치는 문제"를 방지하기 위해, **UI/UX Foundation을 최우선으로 검증하는 10단계 로드맵**을 적용합니다.
 
-```
-roblox_piano/
-├── src/                               # [Legacy] Python Source (Preserved intact)
-├── tests/                             # [Legacy] Python Tests (Preserved as Oracle)
-├── app_icon.ico                       # [Shared] Multi-resolution App Icon
-├── MIGRATION_PLAN.md                  # Migration Plan & Architecture Document
-│
-└── v2/                                # [V2 .NET 10 Root]
-    ├── RobloxPiano.sln                # Visual Studio / .NET Solution File
-    │
-    ├── src/
-    │   ├── RobloxPiano.Core/          # Domain Entities, MusicTimeline, Importers, Interfaces
-    │   │   ├── Music/                 # NoteEvent, MusicTimeline, RangeProcessor, HandAssignment
-    │   │   ├── Piano/                 # RobloxPianoMapper, PianoProfile
-    │   │   ├── Importers/             # MidiImporter (DryWetMidi), MmlImporter, MusicXmlImporter
-    │   │   ├── Library/               # Models (ScoreItem, FolderItem), Services (LibraryManager)
-    │   │   └── Configuration/         # AppConfig, Settings
-    │   │
-    │   ├── RobloxPiano.Infrastructure/# SQLite Repository, File System, AppData Storage
-    │   │   ├── Data/                  # SqliteScoreRepository (Microsoft.Data.Sqlite)
-    │   │   └── Storage/               # Physical File Organizer, Trash Provider
-    │   │
-    │   ├── RobloxPiano.Playback.Windows/ # Win32 P/Invoke, SendInput, Scheduler, Hotkeys
-    │   │   ├── Native/                # PInvoke (SendInput, RegisterHotKey, timeBeginPeriod)
-    │   │   ├── Engine/                # ChordEngine, KeyStateManager, PedalController
-    │   │   └── Scheduler/             # HighPrecisionScheduler
-    │   │
-    │   └── RobloxPiano.Desktop/       # WPF Application (XAML, MVVM, Views, Controls, Theme)
-    │       ├── App.xaml / App.xaml.cs
-    │       ├── Views/                 # MainWindow, PlayerView, LibraryView, OverlayWindow
-    │       ├── ViewModels/            # MainViewModel, PlayerViewModel, LibraryViewModel
-    │       ├── Controls/              # VirtualPianoControl, PianoRollControl, BreadcrumbBar
-    │       └── Styles/                # FluentDarkTheme.xaml, ModernControls.xaml
-    │
-    ├── tests/
-    │   ├── RobloxPiano.Core.Tests/    # MML Timing, Importers, Mapper, Timeline Unit Tests
-    │   └── RobloxPiano.IntegrationTests/ # DB CRUD, D&D, Conflict Resolution, Scheduler Tests
-    │
-    └── workers/
-        └── transcription-python/      # Isolated Python 3.11 Worker for yt-dlp & Basic Pitch
-            ├── worker.py              # Stdin/Stdout JSON Lines IPC Server
-            └── requirements.txt       # yt-dlp, basic-pitch, ffmpeg-python
+```mermaid
+graph TD
+    P1[Phase 1: WPF App Shell & Fluent Design System\n*UI/UX Screenshots & User Approval Gate*] --> P2[Phase 2: Music Core, Timeline, MIDI & MML Engine\n*82 Pytest -> xUnit Regression Oracle*]
+    P2 --> P3[Phase 3: High-Performance Virtualized Library\n*1k-10k Items Benchmark & Isolated SQLite V2*]
+    P3 --> P4[Phase 4: Player, Scheduler & Roblox Playback\n*Win32 SendInput, Sub-ms Timer & Virtual Piano*]
+    P4 --> P5[Phase 5: Windows Integration, Global Hotkeys & Overlay\n*F4 Overlay, Target Roblox Window & Safety*]
+    P5 --> P6[Phase 6: Unified Multi-format Importer Pipeline\n*MIDI, MML, MusicXML, Numeric Notation*]
+    P6 --> P7[Phase 7: Local Audio Ingestion\n*WAV/MP3/FLAC/M4A & FFmpeg Normalization*]
+    P7 --> P8[Phase 8: Audio-to-MIDI AI Worker\n*Python 3.11 Subprocess & JSON Lines IPC*]
+    P8 --> P9[Phase 9: YouTube Ingestion Pipeline\n*yt-dlp -> Audio -> Unified AI -> MIDI E2E*]
+    P9 --> P10[Phase 10: Transcription Review Editor, OMR & Release\n*Editable Piano Roll, A/B Audio, Single-file EXE*]
 ```
 
----
-
-## 8. Test Migration Strategy (Python Pytest -> C# xUnit)
-
-현재 검증된 **82개 Pytest 단위/통합 테스트**를 C# xUnit 테스트로 1:1 매핑하여 V2의 동작 무결성을 검증합니다:
-
-| Python Test File | 테스트 수 | V2 xUnit Test Class | 주요 검증 사양 |
-| :--- | :---: | :--- | :--- |
-| `test_mml_timing.py` | 11 | `MmlTimingTests.cs` | `N58L8`, `CL16`, Forward-only default length, Note duration snapshot, Tie duration sum |
-| `test_mml_dialect.py` | 6 | `MmlDialectTests.cs` | Dotted default length, lowercase, standalone tie, 64th notes, multi-track tempo sync |
-| `test_mml_importer.py` | 18 | `MmlImporterTests.cs` | MML conversion, tie chaining, pitch ranges, invalid syntax error handling |
-| `test_importers.py` | 3 | `ImporterIntegrationTests.cs` | Synthetic MIDI import, Numeric single/chords/accidentals |
-| `test_musicxml.py` | 1 | `MusicXmlImporterTests.cs` | XML part/measure/staff conversion to `MusicTimeline` |
-| `test_timeline.py` | 2 | `MusicTimelineTests.cs` | Event sorting, total duration calculation, chord grouping tolerance |
-| `test_chords_and_conflicts.py` | 2 | `ChordEngineTests.cs` | Mixed Shift chord separation, same physical key micro-arpeggios |
-| `test_mapper.py` | 3 | `RobloxPianoMapperTests.cs` | C2-C7 key mapping, profile loading, out-of-range pitches |
-| `test_range_processor.py` | 2 | `RangeProcessorTests.cs` | Range detection, automatic octave fitting |
-| `test_hand_assignment.py` | 2 | `HandAssignmentTests.cs` | Pitch split (RH/LH), MusicXML staff override |
-| `test_scheduler.py` | 2 | `PlaybackSchedulerTests.cs` | Playback state transition, completion callback, stop/reset |
-| `test_safety.py` | 1 | `EmergencySafetyTests.cs` | Emergency key release all, modifier reset |
-| `test_library.py` | 2 | `ScoreRepositoryTests.cs` | SQLite CRUD, file path metadata |
-| `test_library_explorer.py` | 5 | `LibraryExplorerTests.cs` | Score rename, folder rename, copy score, move score, safe delete |
-| `test_library_folder_import.py` | 4 | `FolderImportTests.cs` | Recursive folder tree import, collision safety, empty folders |
-| `test_library_drag_drop.py` | 4 | `LibraryDragDropTests.cs` | Internal score move, folder move, cycle prevention |
-| `test_mml_service.py` | 6 | `MmlServiceTests.cs` | Validation, error reporting, saved MIDI re-open |
-| `test_video.py` | 2 | `VideoWorkerTests.cs` | Worker cancellation, IPC JSON envelope roundtrip |
-| `test_overlay_behavior.py` | 2 | `OverlayBehaviorTests.cs` | Hidden on startup, F4 hotkey toggle |
-| `test_gui.py` & Smoke | 4 | `DesktopAppSmokeTests.cs` | MainWindow instantiation, Settings dialog, Floating overlay |
-| **TOTAL** | **82** | **82 xUnit Test Methods** | **100% Functional Equivalence Target** |
+### [Phase Gate Enforcement]
+- **모든 Phase는 다음 6대 종료 조건을 만족해야 완료됩니다**:
+  1. `dotnet build` 0 Warnings, 0 Errors
+  2. Automated Tests (xUnit) 100% Pass
+  3. Real Process Smoke Run Verification
+  4. Measurable Concrete Evidence Reporting
+  5. Clean Git Commit
+  6. **User Explicit Review & Approval**
+- **AI Agent는 사용자 승인 없이 다음 Phase를 절대 임의로 자동 진행하지 않습니다.**
+- 각 Phase 완료 시 반드시 다음 형식으로 보고하고 대기합니다:
+  ```
+  PHASE N COMPLETE
+  NEXT PHASE READY: YES/NO
+  ```
 
 ---
 
-## 9. Database Migration Strategy
+### [Detailed Phase Specifications]
 
-### [A] Schema Preservation
-V2는 기존 Python 버전의 SQLite 데이터베이스(`%LOCALAPPDATA%\RobloxPianoPlayer\library.db` 또는 `scores.db`)와 **완벽히 동일한 테이블 구조 및 데이터 호환성**을 갖습니다:
+#### 🎨 PHASE 1 — WPF App Shell & Fluent Design System
+- **목표**: 실제 음악 엔진 구현 전, WPF 데스크톱 쉘과 현대적인 Fluent Dark 디자인 시스템을 먼저 빌드하여 **사용자에게 실제 UI/UX 방향을 완벽히 검증받는 단계**.
+- **구현 내용**:
+  - `v2/RobloxPiano.sln` 솔루션 생성 (.NET 10 LTS, C# 13, WPF).
+  - `MainWindow.xaml`: 모던 프레임리스 윈도우, Mica/Acrylic 지원, 커스텀 타이틀바.
+  - Main Navigation: `Player`, `Library`, `Transcribe`, `Settings` 탭 전환 및 MVVM 뷰모델 구조.
+  - 4개 Mock Views:
+    - `PlayerView.xaml` (플레이어 모크업, 재생 컨트롤, 상태 표시)
+    - `LibraryView.xaml` (Windows 11 Explorer 스타일 2-Row 네비게이션 및 커맨드 바)
+    - `TranscribeView.xaml` (Local Audio 및 YouTube Ingestion 모크업)
+    - `SettingsDialog.xaml` (설정 모크업)
+  - 디자인 토큰 시스템: Dark Graphite 팔레트, Segoe UI Variable 타이포그래피, Spacing/Radius 토큰, SVG Vector Icons.
+  - Multi-Resolution High-DPI 지원: **1280x720, 1366x768, 1600x900, 1920x1080** 레이아웃 반응형 대응.
+  - 7개 레이어 멀티사이즈 `app_icon.ico` 임베딩 및 Win32 `AppUserModelID` 등록.
+- **Phase Gate Deliverables**:
+  - 1280x720, 1366x768, 1920x1080 실제 GUI 실행 스크린샷 캡처 및 증거 제시.
+  - 사용자 디자인 승인 획득 전까지 Phase 2 진입 금지.
 
-```sql
-CREATE TABLE IF NOT EXISTS folders (
-    id TEXT PRIMARY KEY,
-    parent_id TEXT,
-    name TEXT NOT NULL,
-    created_at REAL,
-    updated_at REAL DEFAULT 0.0
-);
+#### 🎵 PHASE 2 — Music Core / MIDI / MML Engine
+- **목표**: 도메인 엔티티 및 음악 파싱 엔진의 C# 완전 이식 (Python 82개 테스트 검증 오라클 활용).
+- **구현 내용**:
+  - `RobloxPiano.Core`: `MusicTimeline`, `NoteEvent`, `PedalEvent`, `ChordGroup`, `RobloxPianoMapper`, `PianoProfile`, `RangeProcessor`, `HandAssignmentService`.
+  - `MidiImporter`: `Melanchall.DryWetMidi` 기반 표준 MIDI 파싱.
+  - `MmlImporter`: NoteIR 타이밍 엔진 1:1 이식 (`N58L8`, `CL16`, Forward-only default length, Note duration immediate snapshot, Multi-track tempo sync, Tie chaining).
+  - `RobloxPiano.Core.Tests`: xUnit 기반 11개 MML 타이밍 테스트, 6개 다이얼렉트 테스트, MIDI 임포트 단위 테스트 100% 통과.
 
-CREATE TABLE IF NOT EXISTS scores (
-    id TEXT PRIMARY KEY,
-    title TEXT NOT NULL,
-    source_type TEXT,
-    source_url TEXT,
-    filepath TEXT NOT NULL,
-    original_filename TEXT DEFAULT '',
-    file_extension TEXT DEFAULT '',
-    folder_id TEXT DEFAULT NULL,
-    duration REAL DEFAULT 0.0,
-    bpm REAL DEFAULT 120.0,
-    total_notes INTEGER DEFAULT 0,
-    tags TEXT DEFAULT '',
-    analysis_status TEXT DEFAULT 'READY',
-    analysis_error TEXT DEFAULT '',
-    favorite BOOLEAN DEFAULT 0,
-    created_at REAL,
-    updated_at REAL DEFAULT 0.0,
-    last_played_at REAL DEFAULT 0.0,
-    FOREIGN KEY(folder_id) REFERENCES folders(id) ON DELETE SET NULL
-);
-```
+#### 🗄️ PHASE 3 — High-Performance Virtualized Library
+- **목표**: 대용량 악보를 지연 없이 관리하는 초고성능 Virtualized Explorer 구현.
+- **구현 내용**:
+  - `RobloxPiano.Infrastructure`: `Microsoft.Data.Sqlite` 기반 `SqliteScoreRepository`, 격리된 `library_v2.db` 스키마.
+  - V1 데이터 무손실 백업 및 Read-only Migration 서비스.
+  - WPF UI Virtualization (`VirtualizingStackPanel`), Item Recycling, Incremental Observable Collection.
+  - 비동기 검색 및 150ms 디바운스 필터링, 메타데이터 캐싱.
+  - **1k, 5k, 10k 아이템 가상화 스크롤/검색 성능 벤치마크 (60fps 유지 검증)**.
 
-### [B] Data Safety Guarantee
-- 기존 사용자가 V1에서 생성한 악보 및 폴더 트리를 V2 실행 시 자동으로 감지하여 데이터 마이그레이션 없이 그대로 읽고 쓸 수 있습니다.
-- V1과 V2를 교대로 실행하더라도 데이터 손실이나 스키마 충돌이 전혀 발생하지 않습니다.
+#### 🎹 PHASE 4 — Player & Roblox Playback Engine
+- **목표**: 나노초 정밀도의 고성능 스케줄러와 SendInput 하드웨어 키보드 연주 엔진.
+- **구현 내용**:
+  - `RobloxPiano.Playback.Windows`: Win32 `timeBeginPeriod(1)` + `Stopwatch.GetTimestamp()` 서브밀리초 하이브리드 스핀-웨이트 `PlaybackScheduler`.
+  - `WindowsSendInputBackend`: Win32 P/Invoke 하드웨어 스캔 코드 전송.
+  - `ChordEngine`: Modifier Grouping (Normal 키 그룹 -> Micro-arpeggio -> Shift 키 그룹) 키 충돌 방지.
+  - `VirtualPianoControl.xaml`: 61/88 키 인터랙티브 건반 벡터 위젯.
+  - `PianoRollControl.cs`: `DrawingVisual` / `WriteableBitmap` 기반 60fps 고성능 피아노 롤 렌더링.
+
+#### 🪟 PHASE 5 — Windows Integration, Hotkeys & Overlay
+- **목표**: 시스템 레벨 글로벌 단축키, 플로팅 오버레이 및 타깃 창 연동.
+- **구현 내용**:
+  - `GlobalHotkeyManager`: Win32 `RegisterHotKey` (F4 Overlay Toggle, Play/Pause, Emergency Key Release All).
+  - `OverlayWindow.xaml`: Frameless Transparent Topmost 오버레이 (`WS_EX_LAYERED`, `WS_EX_TRANSPARENT`), 미니 프로그레스.
+  - `TargetWindowManager`: Roblox 창 포커스 감지 및 비상 정지 안전 정책.
+  - `SettingsService`: `System.Text.Json` 기반 설정 영속화.
+
+#### 🎼 PHASE 6 — Unified Multi-Format Importer Pipeline
+- **목표**: 모든 악보 포맷을 도메인 `MusicTimeline`으로 통합 변환.
+- **구현 내용**:
+  - `MusicXmlImporter`: XDocument 기반 파트/보표/음표/쉼표/붙임줄 파싱.
+  - `NumericImporter`: 숫자 악보 (1-7, 옥타브 점, 임시표, 언더라인 박자).
+  - `PdfImporter` & `ImageImporter`: Audiveris Java CLI 프로세스 어댑터 연동.
+
+#### 🎧 PHASE 7 — Local Audio Ingestion
+- **목표**: 로컬 오디오 파일 파싱 및 오디오 정규화 파이프라인.
+- **구현 내용**:
+  - 로컬 오디오 포맷 지원: WAV, MP3, FLAC, M4A, OGG.
+  - FFmpeg 파이프라인 연동: 16kHz Mono 16-bit PCM WAV 무손실 표준화.
+  - 로컬 오디오 파일 기반 전처리 검증.
+
+#### 🤖 PHASE 8 — Audio-to-MIDI AI Worker
+- **목표**: 격리된 Python 3.11 Subprocess 기반 오디오-to-MIDI AI 트랜스크립션.
+- **구현 내용**:
+  - `workers/transcription-python/`: `worker.py` (Basic Pitch AI 엔진 구동).
+  - C# `SubprocessTranscriptionWorker`: stdin/stdout JSON Lines IPC 클라이언트.
+  - `ITranscriptionEngine` 인터페이스 추상화.
+  - 트랜스크립션 결과 MIDI 파싱 및 무결성 검증.
+
+#### 📺 PHASE 9 — YouTube Ingestion Pipeline
+- **목표**: YouTube 음원 다운로드 및 공통 AI 파이프라인 E2E 통합.
+- **구현 내용**:
+  - Python Worker 내 `yt-dlp` 어댑터 연동 (URL 메타데이터, 오디오 스트림 추출, 취소/진행률 통지).
+  - **YouTube URL ➔ yt-dlp ➔ FFmpeg WAV ➔ [공통 AI Worker] ➔ MIDI ➔ Library ➔ Player E2E 파이프라인 완성**.
+
+#### 🚀 PHASE 10 — Review Editor, OMR & Final Release
+- **목표**: 트랜스크립션 검수 에디터, OMR 통합, 단일 실행 파일 패키징 및 최종 릴리즈.
+- **구현 내용**:
+  - Transcription Review Editor: 편집 가능한 피아노 롤 및 Audio vs MIDI A/B 동기화 재생 비교.
+  - OEMER OMR Worker 연동.
+  - 종합 시스템 성능 및 메모리 누수 감사.
+  - Self-contained Single-file EXE Publish (`dotnet publish -r win-x64 -c Release -p:PublishSingleFile=true`).
+  - 최종 릴리즈 및 V1-to-V2 마이그레이션 안내.
 
 ---
 
-## 10. V2 Rollout Strategy
+## 8. Current Audit & Frozen Checklist
 
-### [Phase 1] Core Domain & Importers Implementation
-1. `v2/src/RobloxPiano.Core/` 프로젝트 생성.
-2. `MusicTimeline`, `NoteEvent`, `PianoProfile`, `RobloxPianoMapper` 구현.
-3. `MmlImporter` (NoteIR 엔진), `MidiImporter` (DryWetMidi), `MusicXmlImporter` 구현.
-4. `v2/tests/RobloxPiano.Core.Tests/`에 40여 개 핵심 xUnit 테스트 작성 및 100% Pass 검증.
-
-### [Phase 2] Infrastructure & Windows Playback Engine
-1. `v2/src/RobloxPiano.Infrastructure/` (SQLite Repository).
-2. `v2/src/RobloxPiano.Playback.Windows/` (Win32 SendInput P/Invoke, HighPrecisionScheduler, GlobalHotkeys).
-3. `v2/tests/RobloxPiano.IntegrationTests/` 작성 및 Playback/DB 검증.
-
-### [Phase 3] Isolated Python Worker & IPC Bridge
-1. `v2/workers/transcription-python/` 독립 작업자 구성.
-2. C# `SubprocessTranscriptionWorker` 구현 (stdin/stdout JSON Lines IPC).
-
-### [Phase 4] WPF Modern Desktop Application
-1. `v2/src/RobloxPiano.Desktop/` WPF .NET 10 프로젝트 생성.
-2. Windows 11 Fluent Dark Theme, XAML ViewModels, Custom Controls(Virtual Piano, Piano Roll).
-3. 1280x720 ~ 1920x1080 반응형 레이아웃 및 Floating Overlay 완성.
-
-### [Phase 5] Comprehensive Verification & Single-File Publish
-1. 82개 xUnit 전체 통과 확인.
-2. Self-contained Single-file EXE Publish (`dotnet publish -r win-x64 -c Release -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true`).
-3. 배포용 EXE 멀티사이즈 아이콘 및 구동 무결성 최종 검증.
+- [x] **Phase Order Corrected**: UI/UX First Validation Roadmap (Phases 1 to 10)
+- [x] **Database Safety Enforced**: V1 DB Read-Only & Isolated `library_v2.db`
+- [x] **Legacy Python Code Preserved**: 0 Modified / 0 Deleted files
+- [x] **UI/UX Design Tokens Frozen**: Dark Graphite, Segoe UI Variable, Spacing/Radius Tokens
+- [x] **Library Performance Principles Frozen**: Virtualization, Recycling, Async Repo, 10k Items Scaling
+- [x] **AI Architecture Frozen**: Subprocess JSON Lines IPC & `ITranscriptionEngine`
+- [x] **Single Ingestion Pipeline Frozen**: Local Audio & YouTube share Common AI Core
+- [x] **Phase Gate Policy Active**: Explicit User Review & Screenshots required after each phase
+- [x] **Feature Classification Corrected**: 22 Cat-A / 2 Cat-B / 1 Cat-C / 0 Cat-D (Total 25)
 
 ---
 
-## 11. Final Audit Status
+## 9. Final Phase 0.5 Status
 
-**PHASE 1 READY: YES**
-
-- 전체 25개 평가 영역에 대한 정밀 감사가 완료되었습니다.
-- MML 타이밍 시맨틱스 및 핵심 오라클 테스트 벡터가 명확히 식별되었습니다.
-- 기존 Python 소스 코드의 무결성이 100% 보존되며, V2 아키텍처 수립이 승인 대기 상태입니다.
+**PHASE 0.5 COMPLETE**  
+**PHASE 1 READY: YES (Awaiting User Review & Approval to start Phase 1 WPF App Shell)**
