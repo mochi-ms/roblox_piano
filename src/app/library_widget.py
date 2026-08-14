@@ -30,58 +30,68 @@ class LibraryWidget(QWidget):
         self._navigate(None)
 
     def _setup_ui(self):
-        # Apply standard Windows 11 style, no emojis
+        from PySide6.QtWidgets import QStyle, QSizePolicy
+        
+        # Apply dark theme according to mockup (Apple / Google / Microsoft level)
         self.setStyleSheet("""
             QWidget {
-                background-color: #f3f3f3;
-                color: #1a1a1a;
+                background-color: #0D1117;
+                color: #c9d1d9;
                 font-family: 'Segoe UI Variable', 'Segoe UI', sans-serif;
                 font-size: 14px;
             }
             QSplitter::handle {
-                background-color: #e5e5e5;
+                background-color: #30363d;
                 width: 1px;
             }
             QTreeView, QTableView {
-                background-color: #ffffff;
-                border: 1px solid #e5e5e5;
-                border-radius: 4px;
+                background-color: #0D1117;
+                border: 1px solid #30363d;
+                border-radius: 6px;
                 outline: none;
+                alternate-background-color: #161b22;
             }
             QTreeView::item:selected, QTableView::item:selected {
-                background-color: #cce8ff;
-                color: #000000;
+                background-color: #4C82F7;
+                color: #ffffff;
             }
             QHeaderView::section {
-                background-color: #f9f9f9;
-                padding: 4px;
+                background-color: #161b22;
+                color: #c9d1d9;
+                padding: 6px;
                 border: none;
-                border-bottom: 1px solid #e5e5e5;
-                border-right: 1px solid #e5e5e5;
+                border-bottom: 1px solid #30363d;
+                border-right: 1px solid #30363d;
+                font-weight: bold;
             }
             QPushButton, QToolButton {
-                background-color: #ffffff;
-                border: 1px solid #cccccc;
-                border-radius: 4px;
+                background-color: #21262d;
+                color: #c9d1d9;
+                border: 1px solid #30363d;
+                border-radius: 6px;
                 padding: 6px 12px;
             }
             QPushButton:hover, QToolButton:hover {
-                background-color: #f0f0f0;
+                background-color: #30363d;
+                border-color: #8b949e;
             }
             QLineEdit {
-                background-color: #ffffff;
-                border: 1px solid #cccccc;
-                border-radius: 4px;
+                background-color: #0D1117;
+                color: #c9d1d9;
+                border: 1px solid #30363d;
+                border-radius: 6px;
                 padding: 6px;
             }
+            QLineEdit:focus {
+                border: 1px solid #4C82F7;
+            }
             #breadcrumb {
-                background-color: #ffffff;
-                border: 1px solid #e5e5e5;
-                border-radius: 4px;
+                background-color: transparent;
+                border: none;
                 padding: 6px;
             }
             #breadcrumbLabel {
-                color: #0078d4;
+                color: #4C82F7;
             }
             #breadcrumbLabel:hover {
                 text-decoration: underline;
@@ -90,23 +100,26 @@ class LibraryWidget(QWidget):
         """)
         
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(10, 10, 10, 10)
-        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(16, 16, 16, 16)
+        main_layout.setSpacing(12)
         
         # Toolbar
         toolbar = QHBoxLayout()
         toolbar.setSpacing(8)
         
         self.btn_back = QToolButton()
-        self.btn_back.setText("<")
+        self.btn_back.setIcon(self.style().standardIcon(QStyle.SP_ArrowBack))
+        self.btn_back.setToolTip("뒤로 가기")
         self.btn_back.clicked.connect(self._go_back)
         
         self.btn_forward = QToolButton()
-        self.btn_forward.setText(">")
+        self.btn_forward.setIcon(self.style().standardIcon(QStyle.SP_ArrowForward))
+        self.btn_forward.setToolTip("앞으로 가기")
         self.btn_forward.clicked.connect(self._go_forward)
         
         self.btn_up = QToolButton()
-        self.btn_up.setText("^")
+        self.btn_up.setIcon(self.style().standardIcon(QStyle.SP_ArrowUp))
+        self.btn_up.setToolTip("상위 폴더로")
         self.btn_up.clicked.connect(self._go_up)
         
         toolbar.addWidget(self.btn_back)
@@ -115,12 +128,15 @@ class LibraryWidget(QWidget):
         
         self.breadcrumb = QLabel()
         self.breadcrumb.setObjectName("breadcrumb")
+        self.breadcrumb.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         toolbar.addWidget(self.breadcrumb, 1)
         
         self.search_bar = QLineEdit()
         self.search_bar.setPlaceholderText("검색...")
         self.search_bar.textChanged.connect(self._on_search)
-        self.search_bar.setFixedWidth(250)
+        self.search_bar.setMinimumWidth(150)
+        self.search_bar.setMaximumWidth(400)
+        self.search_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         toolbar.addWidget(self.search_bar)
         
         btn_add_folder = QPushButton("새 폴더")
@@ -128,6 +144,7 @@ class LibraryWidget(QWidget):
         toolbar.addWidget(btn_add_folder)
         
         btn_mml = QPushButton("MML 추가")
+        btn_mml.setStyleSheet("background-color: #4C82F7; color: white; border: none; font-weight: bold;")
         btn_mml.clicked.connect(self._open_mml_dialog)
         toolbar.addWidget(btn_mml)
         
@@ -173,6 +190,10 @@ class LibraryWidget(QWidget):
         self.table_model.setHorizontalHeaderLabels(["이름", "유형", "길이", "노트 수", "수정 날짜"])
         self.table_view.setModel(self.table_model)
         self.table_view.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.table_view.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.table_view.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.table_view.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.table_view.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
 
     def _update_tree(self):
         self.tree_model.clear()

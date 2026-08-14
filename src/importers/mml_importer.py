@@ -55,7 +55,16 @@ class MmlImporter(BaseMusicImporter):
         return self.midi_importer.import_score(out_midi_path)
 
     def convert_to_midi(self, mml_text: str, out_filepath: str):
-        original_text = mml_text
+        mid, _ = self._parse_to_midi(mml_text)
+        if out_filepath != os.devnull:
+            mid.save(out_filepath)
+
+    def extract_metadata(self, mml_text: str) -> dict:
+        """Utility to get tracks count, tempo, duration, notes without saving file."""
+        mid, stats = self._parse_to_midi(mml_text)
+        return stats
+
+    def _parse_to_midi(self, mml_text: str) -> Tuple[mido.MidiFile, dict]:
         mml_text = mml_text.strip()
         
         if mml_text.startswith("MML@"):
@@ -67,30 +76,25 @@ class MmlImporter(BaseMusicImporter):
         
         mid = mido.MidiFile(ticks_per_beat=480)
         
-        # Tokenizer regex: matches valid commands or a single character fallback for invalid tokens
-        # Valid commands:
-        # A-G followed by optional +,-,# followed by optional length digits and dots, followed by optional &
-        # R followed by optional length digits and dots, followed by optional &
-        # V, T, L, O followed by digits and optional dots
-        # >, <
-        # whitespace
-        # \S (anything else is invalid)
-        token_pattern = re.compile(r'\s+|([A-Ga-g][+#-]?[\d\.]*&?|[Rr][\d\.]*&?|[VvTtLlOo][\d\.]*|[><])|(\S)')
+        token_pattern = re.compile(r'\s+|([A-Ga-g][+#-]?[\d\.]*&?|[Nn]-?\d+|[Rr][\d\.]*&?|[VvTtLlOo][\d\.]*|[><])|(\S)')
+        
+        global_tempo = 120
+        total_notes = 0
+        min_pitch = 127
+        max_pitch = 0
         
         for track_idx, track_str in enumerate(tracks_mml):
             track = mido.MidiTrack()
             mid.tracks.append(track)
             
-            # Default state
             octave = 4
             default_length = 4
             volume = 100
             current_time_ticks = 0
-            
             last_event_ticks = 0
             
             def add_note_events(pitch: int, duration_ticks: int):
-                nonlocal last_event_ticks
+                nonlocal last_event_ticks, total_notes, min_pitch, max_pitch
                 delta_on = current_time_ticks - last_event_ticks
                 track.append(mido.Message('note_on', note=pitch, velocity=volume, time=delta_on))
                 last_event_ticks = current_time_ticks
@@ -98,6 +102,9 @@ class MmlImporter(BaseMusicImporter):
                 delta_off = duration_ticks
                 track.append(mido.Message('note_off', note=pitch, velocity=0, time=delta_off))
                 last_event_ticks = current_time_ticks + duration_ticks
+                total_notes += 1
+                if pitch < min_pitch: min_pitch = pitch
+                if pitch > max_pitch: max_pitch = pitch
                 
             def parse_length(arg_str: str) -> int:
                 ticks = 0
@@ -110,7 +117,6 @@ class MmlImporter(BaseMusicImporter):
                 if base_len == 0: base_len = default_length
                 
                 dots = arg_str.count('.')
-                
                 base_ticks = int(480 * 4 / base_len)
                 ticks = base_ticks
                 add = base_ticks // 2
@@ -126,7 +132,6 @@ class MmlImporter(BaseMusicImporter):
             while pos < len(track_str):
                 match = token_pattern.match(track_str, pos)
                 if not match:
-                    # Should be impossible due to \S fallback
                     raise MmlParseError(track_idx, pos, track_str[pos])
                 
                 token = match.group(0)
@@ -151,7 +156,6 @@ class MmlImporter(BaseMusicImporter):
                             elif valid_cmd[1] == '-': pitch -= 1
                             arg_idx = 2
                             
-                        # clamp pitch to 0-127
                         if pitch < 0 or pitch > 127:
                             raise MmlParseError(track_idx, pos, valid_cmd, "MIDI pitch out of bounds (0-127)")
                             
@@ -171,7 +175,26 @@ class MmlImporter(BaseMusicImporter):
                             current_time_ticks += tied_duration
                             tied_pitch = -1
                             tied_duration = 0
+                    elif cmd_char == 'N':
+                        try:
+                            pitch = int(valid_cmd[1:])
+                        except:
+                            raise MmlParseError(track_idx, pos, valid_cmd, "Invalid N command format")
                             
+                        if pitch < 0 or pitch > 127:
+                            raise MmlParseError(track_idx, pos, valid_cmd, "MIDI pitch out of bounds (0-127)")
+                            
+                        duration_ticks = parse_length("")
+                        
+                        if tied_pitch != -1:
+                            add_note_events(tied_pitch, tied_duration)
+                            current_time_ticks += tied_duration
+                            tied_pitch = -1
+                            tied_duration = 0
+                            
+                        add_note_events(pitch, duration_ticks)
+                        current_time_ticks += duration_ticks
+                        
                     elif cmd_char == 'R':
                         is_tie = valid_cmd.endswith('&')
                         duration_ticks = parse_length(valid_cmd[1:])
@@ -210,6 +233,7 @@ class MmlImporter(BaseMusicImporter):
                             tempo_val = int(val_str)
                             if tempo_val <= 0:
                                 raise MmlParseError(track_idx, pos, valid_cmd, "Tempo must be > 0")
+                            global_tempo = tempo_val
                             tempo = mido.bpm2tempo(tempo_val)
                             delta = current_time_ticks - last_event_ticks
                             track.append(mido.MetaMessage('set_tempo', tempo=tempo, time=delta))
@@ -220,24 +244,18 @@ class MmlImporter(BaseMusicImporter):
             if tied_pitch != -1:
                 add_note_events(tied_pitch, tied_duration)
                 current_time_ticks += tied_duration
+                
+        duration_sec = mid.length
+        if total_notes == 0:
+            min_pitch = 0
+            max_pitch = 0
 
-        mid.save(out_filepath)
-
-    def extract_metadata(self, mml_text: str) -> dict:
-        """Utility to get tracks count, tempo, etc without saving file. Will throw MmlParseError if invalid."""
-        mml_text = mml_text.strip()
-        if mml_text.startswith("MML@"):
-            mml_text = mml_text[4:]
-        if mml_text.endswith(";"):
-            mml_text = mml_text[:-1]
-        
-        tracks = mml_text.split(',')
-        tempo = 120
-        t_match = re.search(r'[Tt]\s*(\d+)', tracks[0])
-        if t_match:
-            tempo = int(t_match.group(1))
-            
-        return {
-            "tracks": len(tracks),
-            "tempo": tempo,
+        stats = {
+            "tracks": len(tracks_mml),
+            "tempo": global_tempo,
+            "duration": duration_sec,
+            "total_notes": total_notes,
+            "min_pitch": min_pitch,
+            "max_pitch": max_pitch,
         }
+        return mid, stats

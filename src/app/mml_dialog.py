@@ -126,7 +126,11 @@ class MmlDialog(QDialog):
                 
                 meta = self.importer.extract_metadata(text)
                 self.lbl_info.setStyleSheet("color: #a0a0a0; font-size: 13px;")
-                self.lbl_info.setText(f"정상 MML | 트랙: {meta.get('tracks', 0)} | 템포: {meta.get('tempo', 120)} BPM")
+                dur_s = int(meta.get('duration', 0))
+                mins, secs = divmod(dur_s, 60)
+                dur_str = f"{mins:02d}:{secs:02d}"
+                notes = meta.get('total_notes', 0)
+                self.lbl_info.setText(f"정상 MML | 트랙: {meta.get('tracks', 0)} | 템포: {meta.get('tempo', 120)} BPM | 길이: {dur_str} | 노트: {notes:,}")
                 
                 self.btn_add.setEnabled(True)
                 self.btn_add_and_play.setEnabled(True)

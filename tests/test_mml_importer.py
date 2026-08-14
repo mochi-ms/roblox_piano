@@ -77,3 +77,55 @@ def test_mml_all_valid_tokens(tmp_path):
     assert len(mid.tracks) == 1
     notes = [m for m in mid.tracks[0] if m.type in ('note_on', 'note_off')]
     assert len(notes) > 0
+
+def test_mml_numeric_note(tmp_path):
+    importer = MmlImporter()
+    meta = importer.extract_metadata("MML@N60;")
+    assert meta["total_notes"] == 1
+    assert meta["min_pitch"] == 60
+    assert meta["max_pitch"] == 60
+
+def test_mml_numeric_note_zero(tmp_path):
+    importer = MmlImporter()
+    meta = importer.extract_metadata("MML@N0;")
+    assert meta["min_pitch"] == 0
+
+def test_mml_numeric_note_127(tmp_path):
+    importer = MmlImporter()
+    meta = importer.extract_metadata("MML@N127;")
+    assert meta["max_pitch"] == 127
+
+def test_mml_numeric_note_overflow(tmp_path):
+    importer = MmlImporter()
+    with pytest.raises(MmlParseError) as excinfo:
+        importer.convert_to_midi("MML@N128;", os.devnull)
+    assert "out of bounds" in str(excinfo.value)
+
+def test_mml_numeric_note_negative(tmp_path):
+    importer = MmlImporter()
+    with pytest.raises(MmlParseError) as excinfo:
+        importer.convert_to_midi("MML@N-1;", os.devnull)
+    assert "out of bounds" in str(excinfo.value)
+
+def test_mml_numeric_note_default_length(tmp_path):
+    importer = MmlImporter()
+    mid, _ = importer._parse_to_midi("MML@L16N60;")
+    notes = [m for m in mid.tracks[0] if m.type in ('note_on', 'note_off')]
+    assert len(notes) == 2
+
+def test_mml_numeric_note_volume(tmp_path):
+    importer = MmlImporter()
+    mid, _ = importer._parse_to_midi("MML@V10N60;")
+    note_on = [m for m in mid.tracks[0] if m.type == 'note_on' and m.velocity > 0][0]
+    assert note_on.velocity == int(10 * 127 / 15)
+
+def test_mml_metadata_duration(tmp_path):
+    importer = MmlImporter()
+    meta = importer.extract_metadata("MML@T120L4C;")
+    assert abs(meta["duration"] - 0.5) < 0.05
+
+def test_mml_metadata_note_count(tmp_path):
+    importer = MmlImporter()
+    meta = importer.extract_metadata("MML@CDEFGAB;")
+    assert meta["total_notes"] == 7
+
