@@ -7,9 +7,9 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLineEdit,
     QTreeView, QTableView, QHeaderView, QMenu, QInputDialog, QMessageBox,
     QLabel, QSplitter, QAbstractItemView, QFrame, QToolButton, QFileDialog,
-    QStyledItemDelegate, QStyle
+    QStyledItemDelegate, QStyle, QProgressDialog
 )
-from PySide6.QtCore import Qt, QPoint, Signal, QModelIndex, QEvent
+from PySide6.QtCore import Qt, QPoint, Signal, QModelIndex, QEvent, QThread
 from PySide6.QtGui import (
     QStandardItemModel, QStandardItem, QIcon, QAction, QKeySequence,
     QShortcut, QFontMetrics
@@ -196,6 +196,11 @@ class LibraryWidget(QWidget):
         btn_add_file = QPushButton("파일 추가", self)
         btn_add_file.clicked.connect(self._import_files_dialog)
         toolbar.addWidget(btn_add_file)
+        
+        btn_import_folder = QPushButton("폴더 추가", self)
+        btn_import_folder.setToolTip("Windows 폴더 구조를 그대로 라이브러리로 가져옵니다")
+        btn_import_folder.clicked.connect(self._import_folder_dialog)
+        toolbar.addWidget(btn_import_folder)
         
         btn_mml = QPushButton("MML 가져오기", self)
         btn_mml.setStyleSheet("background-color: #4C82F7; color: white; border: none; font-weight: 600;")
@@ -653,6 +658,86 @@ class LibraryWidget(QWidget):
                 print(f"Import failed for {f}: {e}")
         self.refresh_library()
 
+    def _import_folder_dialog(self):
+        folder = QFileDialog.getExistingDirectory(self, "가져올 악보 최상위 폴더 선택")
+        if folder and os.path.exists(folder):
+            self._start_folder_import(folder)
+
+    def _start_folder_import(self, folder_path: str):
+        progress = QProgressDialog("악보 폴더 분석 및 가져오는 중...", "취소", 0, 100, self)
+        progress.setWindowTitle("폴더 가져오기")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+        progress.setStyleSheet("""
+            QProgressDialog {
+                background-color: #161B22;
+                color: #C9D1D9;
+            }
+            QLabel {
+                color: #F0F6FC;
+                font-size: 13px;
+            }
+            QProgressBar {
+                background-color: #0D1117;
+                border: 1px solid #30363D;
+                border-radius: 4px;
+                text-align: center;
+                color: #FFFFFF;
+            }
+            QProgressBar::chunk {
+                background-color: #4C82F7;
+                border-radius: 3px;
+            }
+            QPushButton {
+                background-color: #21262D;
+                color: #C9D1D9;
+                border: 1px solid #30363D;
+                border-radius: 4px;
+                padding: 4px 12px;
+            }
+            QPushButton:hover {
+                background-color: #30363D;
+                color: #FFFFFF;
+            }
+        """)
+
+        worker = FolderImportWorker(self.manager, folder_path, self.current_folder_id, self)
+
+        def on_progress(cur, total, name):
+            if total > 0:
+                progress.setMaximum(total)
+                progress.setValue(cur)
+                progress.setLabelText(f"가져오는 중... ({cur} / {total})\n현재: {name}")
+
+        def on_finished(summary):
+            progress.close()
+            self.refresh_library()
+            if summary.get("cancelled"):
+                QMessageBox.information(self, "가져오기 중단", "사용자에 의해 가져오기가 중단되었습니다.\n지금까지 완료된 항목은 안전하게 저장되었습니다.")
+            else:
+                msg = (
+                    f"악보 폴더 가져오기가 완료되었습니다.\n\n"
+                    f"· 생성/병합된 폴더: {summary['imported_folders']}개\n"
+                    f"· 가져온 악보: {summary['imported_scores']}개\n"
+                    f"· 건너뜀 (비악보 파일): {summary['skipped']}개\n"
+                    f"· 실패: {summary['failed']}개"
+                )
+                QMessageBox.information(self, "가져오기 완료", msg)
+
+        def on_error(err):
+            progress.close()
+            self.refresh_library()
+            QMessageBox.critical(self, "가져오기 오류", f"폴더 가져오기 중 오류가 발생했습니다:\n{err}")
+
+        worker.sig_progress.connect(on_progress)
+        worker.sig_finished.connect(on_finished)
+        worker.sig_error.connect(on_error)
+        progress.canceled.connect(worker.cancel)
+
+        progress.show()
+        worker.start()
+
     def _open_mml_dialog(self):
         dialog = MmlDialog(self.manager, current_folder_id=self.current_folder_id, parent=self)
         if dialog.exec() == MmlDialog.Accepted:
@@ -670,21 +755,50 @@ class LibraryWidget(QWidget):
                     return True
             elif event.type() == QEvent.Type.Drop:
                 if event.mimeData().hasUrls():
-                    for url in event.mimeData().urls():
+                    urls = event.mimeData().urls()
+                    has_folder = False
+                    for url in urls:
                         if url.isLocalFile():
-                            self._import_dropped_path(url.toLocalFile())
-                    self.refresh_library()
+                            loc = url.toLocalFile()
+                            if os.path.isdir(loc):
+                                has_folder = True
+                                self._start_folder_import(loc)
+                            else:
+                                self.manager.import_external_file(loc, folder_id=self.current_folder_id)
+                    if not has_folder:
+                        self.refresh_library()
                     event.acceptProposedAction()
                     return True
         return super().eventFilter(source, event)
 
-    def _import_dropped_path(self, path: str):
-        if os.path.isdir(path):
-            folder_name = os.path.basename(path)
-            new_folder = self.manager.create_folder(folder_name, self.current_folder_id)
-            for f in os.listdir(path):
-                child_path = os.path.join(path, f)
-                if os.path.isfile(child_path):
-                    self.manager.import_external_file(child_path, folder_id=new_folder.id)
-        else:
-            self.manager.import_external_file(path, folder_id=self.current_folder_id)
+
+class FolderImportWorker(QThread):
+    sig_progress = Signal(int, int, str)
+    sig_finished = Signal(dict)
+    sig_error = Signal(str)
+
+    def __init__(self, manager: LibraryManager, source_folder_path: str, target_parent_folder_id: Optional[str] = None, parent=None):
+        super().__init__(parent)
+        self.manager = manager
+        self.source_folder_path = source_folder_path
+        self.target_parent_folder_id = target_parent_folder_id
+        self._is_cancelled = False
+
+    def cancel(self):
+        self._is_cancelled = True
+
+    def run(self):
+        try:
+            summary = self.manager.import_folder_recursive(
+                self.source_folder_path,
+                self.target_parent_folder_id,
+                progress_callback=self._on_progress,
+                cancel_check=lambda: self._is_cancelled
+            )
+            self.sig_finished.emit(summary)
+        except Exception as e:
+            self.sig_error.emit(str(e))
+
+    def _on_progress(self, cur: int, total: int, name: str):
+        self.sig_progress.emit(cur, total, name)
+

@@ -2,7 +2,7 @@ import os
 import shutil
 import uuid
 import re
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict, Any, Callable
 import time
 
 from src.library.models import ScoreItem, FolderItem
@@ -66,6 +66,226 @@ class LibraryManager:
             counter += 1
             
         return candidate
+
+    def import_folder_recursive(
+        self,
+        source_folder_path: str,
+        target_parent_folder_id: Optional[str] = None,
+        progress_callback: Optional[Any] = None,
+        cancel_check: Optional[Any] = None
+    ) -> Dict[str, Any]:
+        """
+        Recursively imports an entire folder hierarchy from the filesystem into the library.
+        Preserves original folder tree, file names (with collision safety), and copies files.
+        Extracts MusicTimeline metadata for supported score formats.
+        """
+        from src.importers.midi_importer import MidiImporter
+        from src.importers.musicxml_importer import MusicXmlImporter
+        from src.importers.mml_importer import MmlImporter
+        from src.services.mml_service import MmlConversionService
+
+        if not os.path.exists(source_folder_path) or not os.path.isdir(source_folder_path):
+            raise ValueError(f"Invalid source folder: {source_folder_path}")
+
+        root_name = os.path.basename(os.path.abspath(source_folder_path).rstrip(r'\/'))
+        if not root_name:
+            root_name = "악보"
+
+        # 1. Check or create root folder in target_parent_folder_id
+        existing_folders = self.db.get_all_folders()
+        root_folder = None
+        for f in existing_folders:
+            if f.parent_id == target_parent_folder_id and f.name.lower() == root_name.lower():
+                root_folder = f
+                break
+
+        imported_folders_count = 0
+        if not root_folder:
+            root_folder = self.create_folder(root_name, target_parent_folder_id)
+            imported_folders_count += 1
+
+        # Pre-scan total files for accurate progress
+        all_files_to_process = []
+        for dirpath, dirnames, filenames in os.walk(source_folder_path):
+            for fname in filenames:
+                all_files_to_process.append(os.path.join(dirpath, fname))
+        total_files = len(all_files_to_process)
+
+        rel_dir_to_folder_id: Dict[str, str] = {"": root_folder.id}
+        imported_scores_count = 0
+        skipped_count = 0
+        failed_count = 0
+        failed_items = []
+        processed_count = 0
+        is_cancelled = False
+
+        midi_imp = MidiImporter()
+        xml_imp = MusicXmlImporter()
+        mml_svc = MmlConversionService()
+
+        ignore_exts = {".ini", ".db", ".ds_store", ".tmp", ".bak", ".log"}
+        score_exts = {".mid", ".midi", ".musicxml", ".mxl", ".xml", ".mml", ".txt", ".pdf", ".png", ".jpg", ".jpeg"}
+
+        for dirpath, dirnames, filenames in os.walk(source_folder_path):
+            if cancel_check and cancel_check():
+                is_cancelled = True
+                break
+
+            rel_dir = os.path.relpath(dirpath, source_folder_path)
+            cur_key = "" if rel_dir == "." else os.path.normpath(rel_dir)
+            cur_folder_id = rel_dir_to_folder_id.get(cur_key, root_folder.id)
+
+            # Ensure subdirectories are created and mapped
+            for d in dirnames:
+                sub_key = d if cur_key == "" else os.path.normpath(os.path.join(cur_key, d))
+                # Check if folder exists
+                sub_folder = None
+                for ef in self.db.get_all_folders():
+                    if ef.parent_id == cur_folder_id and ef.name.lower() == d.lower():
+                        sub_folder = ef
+                        break
+                if not sub_folder:
+                    sub_folder = self.create_folder(d, cur_folder_id)
+                    imported_folders_count += 1
+                rel_dir_to_folder_id[sub_key] = sub_folder.id
+
+            target_dir = self._get_folder_path(cur_folder_id)
+            os.makedirs(target_dir, exist_ok=True)
+
+            # Process files
+            for fname in filenames:
+                if cancel_check and cancel_check():
+                    is_cancelled = True
+                    break
+
+                processed_count += 1
+                src_filepath = os.path.join(dirpath, fname)
+                lower_fname = fname.lower()
+                base_name, ext = os.path.splitext(lower_fname)
+
+                # Skip system and ignore files
+                if lower_fname in ["desktop.ini", "thumbs.db", ".ds_store"] or lower_fname.startswith("readme") or lower_fname.startswith("license"):
+                    skipped_count += 1
+                    continue
+                if ext in ignore_exts or ext not in score_exts:
+                    skipped_count += 1
+                    continue
+
+                # Content-based classification for .txt
+                source_type = "FILE"
+                if ext == ".txt":
+                    try:
+                        with open(src_filepath, "r", encoding="utf-8", errors="ignore") as f:
+                            head_snippet = f.read(100).strip().upper()
+                        if head_snippet.startswith("MML@"):
+                            source_type = "MML"
+                        elif re.search(r'\b[1-7][+#-]?\b', head_snippet):
+                            source_type = "NUMERIC"
+                        else:
+                            skipped_count += 1
+                            continue
+                    except Exception:
+                        skipped_count += 1
+                        continue
+                elif ext in [".mid", ".midi"]:
+                    source_type = "MIDI"
+                elif ext in [".musicxml", ".mxl", ".xml"]:
+                    source_type = "MUSICXML"
+                elif ext == ".mml":
+                    source_type = "MML"
+                elif ext == ".pdf":
+                    source_type = "PDF"
+                elif ext in [".png", ".jpg", ".jpeg"]:
+                    source_type = "IMAGE"
+
+                # Safe destination filename in target_dir
+                dest_filename = self._get_safe_filename(target_dir, fname)
+                dest_filepath = os.path.join(target_dir, dest_filename)
+
+                # Copy file physically (preserving original)
+                try:
+                    shutil.copy2(src_filepath, dest_filepath)
+                except Exception as e:
+                    failed_count += 1
+                    failed_items.append((os.path.join(rel_dir, fname), str(e)))
+                    continue
+
+                # Parse metadata via importers
+                duration = 0.0
+                bpm = 120.0
+                total_notes = 0
+                title = os.path.splitext(dest_filename)[0]
+                status = "READY"
+                error_msg = None
+
+                try:
+                    if source_type == "MIDI":
+                        timeline = midi_imp.import_score(dest_filepath)
+                        duration = timeline.duration
+                        bpm = timeline.initial_bpm
+                        total_notes = timeline.total_notes
+                        if timeline.title:
+                            title = timeline.title
+                    elif source_type == "MUSICXML":
+                        timeline = xml_imp.import_score(dest_filepath)
+                        duration = timeline.duration
+                        bpm = timeline.initial_bpm
+                        total_notes = timeline.total_notes
+                        if timeline.title:
+                            title = timeline.title
+                    elif source_type == "MML":
+                        with open(dest_filepath, "r", encoding="utf-8", errors="ignore") as f_mml:
+                            mml_text = f_mml.read()
+                        valid, meta, mml_err, _ = mml_svc.validate_and_analyze(mml_text)
+                        if valid:
+                            duration = meta.get("duration", 0.0)
+                            bpm = meta.get("bpm", 120.0)
+                            total_notes = meta.get("notes", 0)
+                        else:
+                            status = "FAILED"
+                            error_msg = mml_err
+                    elif source_type in ["PDF", "IMAGE"]:
+                        status = "ANALYZING"
+                except Exception as ex:
+                    # Keep file registered but flag status
+                    status = "READY"
+                    error_msg = str(ex)
+
+                score_id = str(uuid.uuid4())
+                score_item = ScoreItem(
+                    id=score_id,
+                    title=title,
+                    source_type=source_type,
+                    source_url=src_filepath,
+                    filepath=dest_filepath,
+                    original_filename=dest_filename,
+                    file_extension=os.path.splitext(dest_filename)[1].lower(),
+                    folder_id=cur_folder_id,
+                    duration=duration,
+                    bpm=bpm,
+                    total_notes=total_notes,
+                    tags="imported,folder",
+                    analysis_status=status,
+                    analysis_error=error_msg
+                )
+                self.db.insert_score(score_item)
+                imported_scores_count += 1
+
+                if progress_callback:
+                    progress_callback(processed_count, total_files, fname)
+
+        summary = {
+            "root_folder_id": root_folder.id,
+            "root_folder_name": root_folder.name,
+            "total_scanned": total_files,
+            "imported_folders": imported_folders_count,
+            "imported_scores": imported_scores_count,
+            "skipped": skipped_count,
+            "failed": failed_count,
+            "failed_items": failed_items,
+            "cancelled": is_cancelled
+        }
+        return summary
 
     def import_external_file(self, source_filepath: str, source_type: str = "FILE", folder_id: Optional[str] = None) -> ScoreItem:
         """
