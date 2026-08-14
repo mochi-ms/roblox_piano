@@ -27,7 +27,15 @@ def main():
     app.setApplicationName("Roblox Auto Piano Player")
     app.setOrganizationName("RobloxPiano")
 
+    icon_path = os.path.join(PROJECT_ROOT, "src", "resources", "app_icon.png")
+    if os.path.exists(icon_path):
+        from PySide6.QtGui import QIcon
+        app.setWindowIcon(QIcon(icon_path))
+
     window = MainWindow()
+    if os.path.exists(icon_path):
+        from PySide6.QtGui import QIcon
+        window.setWindowIcon(QIcon(icon_path))
     window.show()
 
     sys.exit(app.exec())

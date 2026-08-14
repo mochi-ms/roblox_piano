@@ -58,6 +58,11 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(780, 620)
         self.setAcceptDrops(True)
 
+        # Set window icon
+        icon_candidate = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "resources", "app_icon.png")
+        if os.path.exists(icon_candidate):
+            self.setWindowIcon(QIcon(icon_candidate))
+
         # 1. Config & Core Services
         self.config_mgr = ConfigManager()
         self.config: AppConfig = self.config_mgr.config

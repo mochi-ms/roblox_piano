@@ -5,7 +5,10 @@ a = Analysis(
     ['run.py'],
     pathex=[],
     binaries=[],
-    datas=[('src/piano/profiles', 'src/piano/profiles')],
+    datas=[
+        ('src/piano/profiles', 'src/piano/profiles'),
+        ('src/resources', 'src/resources')
+    ],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -27,6 +30,7 @@ exe = EXE(
     strip=False,
     upx=True,
     console=False,
+    icon='app_icon.ico',
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
