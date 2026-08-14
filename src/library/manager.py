@@ -23,9 +23,10 @@ class LibraryManager:
         self.db_path = os.path.join(self.library_dir, "library.db")
         self.db = ScoreDatabase(self.db_path)
 
-    def import_external_file(self, source_filepath: str, timeline: MusicTimeline, source_type: str = "FILE") -> ScoreItem:
+    def import_external_file(self, source_filepath: str, source_type: str = "FILE") -> ScoreItem:
         """
         Copies an external file into the library and registers it in the database.
+        Returns the registered ScoreItem.
         """
         ext = os.path.splitext(source_filepath)[1].lower()
         score_id = str(uuid.uuid4())
@@ -35,19 +36,39 @@ class LibraryManager:
         # Copy file to library
         shutil.copy2(source_filepath, dest_filepath)
         
+        # Default statuses
+        status = "READY"
+        if ext in [".pdf", ".png", ".jpg", ".jpeg"]:
+            status = "ANALYZING"
+            
         item = ScoreItem(
             id=score_id,
-            title=timeline.title if timeline.title else os.path.basename(source_filepath),
+            title=os.path.splitext(os.path.basename(source_filepath))[0],
             source_type=source_type,
             source_url=source_filepath,
             filepath=dest_filepath,
-            duration=timeline.duration,
-            bpm=timeline.initial_bpm,
-            total_notes=timeline.total_notes,
-            tags="imported"
+            original_filename=os.path.basename(source_filepath),
+            file_extension=ext,
+            duration=0.0,
+            bpm=120.0,
+            total_notes=0,
+            tags="imported",
+            analysis_status=status
         )
         self.db.insert_score(item)
         return item
+        
+    def update_score_from_timeline(self, score_id: str, timeline: MusicTimeline) -> None:
+        """Updates duration, bpm, total_notes, and status when timeline is parsed successfully."""
+        item = self.db.get_score(score_id)
+        if item:
+            item.duration = timeline.duration
+            item.bpm = timeline.initial_bpm
+            item.total_notes = timeline.total_notes
+            item.analysis_status = "READY"
+            if timeline.title:
+                item.title = timeline.title
+            self.db.update_score(item)
         
     def register_generated_score(self, xml_filepath: str, title: str, source_type: str, source_url: str, timeline: MusicTimeline) -> ScoreItem:
         """

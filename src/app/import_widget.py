@@ -1,7 +1,7 @@
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QLineEdit, QProgressBar, QMessageBox, QFileDialog, QGroupBox
+    QLineEdit, QProgressBar, QMessageBox, QFileDialog, QGroupBox, QFrame
 )
 
 class ImportWidget(QWidget):
@@ -25,12 +25,17 @@ class ImportWidget(QWidget):
 
         # Title
         lbl_title = QLabel("비디오 / YouTube 악보 자동 생성")
-        lbl_title.setStyleSheet("font-size: 18px; font-weight: bold;")
+        lbl_title.setStyleSheet("font-size: 20px; font-weight: bold; color: #FFFFFF;")
         layout.addWidget(lbl_title)
 
-        # YouTube Group
-        yt_group = QGroupBox("YouTube 링크로 가져오기")
-        yt_layout = QVBoxLayout(yt_group)
+        # YouTube Card
+        self.yt_card = QFrame()
+        self.yt_card.setObjectName("card")
+        yt_layout = QVBoxLayout(self.yt_card)
+        
+        lbl_yt = QLabel("YouTube 링크로 가져오기")
+        lbl_yt.setStyleSheet("font-size: 14px; font-weight: bold; color: #E2E8F0;")
+        
         self.input_url = QLineEdit()
         self.input_url.setPlaceholderText("https://www.youtube.com/watch?v=...")
         
@@ -38,13 +43,19 @@ class ImportWidget(QWidget):
         btn_yt_import.setObjectName("primary_btn")
         btn_yt_import.clicked.connect(self._on_yt_import)
         
+        yt_layout.addWidget(lbl_yt)
         yt_layout.addWidget(self.input_url)
         yt_layout.addWidget(btn_yt_import, 0, Qt.AlignRight)
-        layout.addWidget(yt_group)
+        layout.addWidget(self.yt_card)
 
-        # Local Video Group
-        local_group = QGroupBox("로컬 비디오 파일로 가져오기")
-        local_layout = QVBoxLayout(local_group)
+        # Local Video Card
+        self.local_card = QFrame()
+        self.local_card.setObjectName("card")
+        local_layout = QVBoxLayout(self.local_card)
+        
+        lbl_local = QLabel("로컬 비디오 파일로 가져오기")
+        lbl_local.setStyleSheet("font-size: 14px; font-weight: bold; color: #E2E8F0;")
+        
         self.lbl_local_file = QLabel("선택된 파일 없음")
         self.lbl_local_file.setStyleSheet("color: #94A3B8;")
         
@@ -59,13 +70,18 @@ class ImportWidget(QWidget):
         local_h.addWidget(btn_browse)
         local_h.addWidget(self.lbl_local_file, 1)
         
+        local_layout.addWidget(lbl_local)
         local_layout.addLayout(local_h)
         local_layout.addWidget(btn_local_import, 0, Qt.AlignRight)
-        layout.addWidget(local_group)
+        layout.addWidget(self.local_card)
 
-        # Progress Area
-        self.progress_group = QGroupBox("분석 진행 상태")
-        prog_layout = QVBoxLayout(self.progress_group)
+        # Progress Card
+        self.progress_card = QFrame()
+        self.progress_card.setObjectName("card")
+        prog_layout = QVBoxLayout(self.progress_card)
+        
+        lbl_prog = QLabel("분석 진행 상태")
+        lbl_prog.setStyleSheet("font-size: 14px; font-weight: bold; color: #E2E8F0;")
         
         self.lbl_status = QLabel("대기 중...")
         self.progress_bar = QProgressBar()
@@ -76,12 +92,13 @@ class ImportWidget(QWidget):
         self.btn_cancel.setEnabled(False)
         self.btn_cancel.clicked.connect(self._on_cancel)
         
+        prog_layout.addWidget(lbl_prog)
         prog_layout.addWidget(self.lbl_status)
         prog_layout.addWidget(self.progress_bar)
         prog_layout.addWidget(self.btn_cancel, 0, Qt.AlignRight)
         
-        layout.addWidget(self.progress_group)
-        self.progress_group.hide()  # Hide initially
+        layout.addWidget(self.progress_card)
+        self.progress_card.hide()  # Hide initially
 
         layout.addStretch()
         
@@ -107,7 +124,7 @@ class ImportWidget(QWidget):
         self._start_task("LOCAL_VIDEO", self.local_filepath)
 
     def _start_task(self, source_type: str, path: str):
-        self.progress_group.show()
+        self.progress_card.show()
         self.lbl_status.setText("준비 중...")
         self.progress_bar.setValue(0)
         self.btn_cancel.setEnabled(True)

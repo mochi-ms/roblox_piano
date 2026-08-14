@@ -203,17 +203,17 @@ class MainWindow(QMainWindow):
         
         self._build_landing_view()
         self._build_player_view()
-        self.tabs.addTab(self.player_container, "🎹 플레이어")
+        self.tabs.addTab(self.player_container, "플레이어")
 
         # Tab 1: Library
         self.library_widget = LibraryWidget(self.library_manager, self)
         self.library_widget.score_selected.connect(self._on_library_score_selected)
-        self.tabs.addTab(self.library_widget, "📚 라이브러리")
+        self.tabs.addTab(self.library_widget, "라이브러리")
 
         # Tab 2: Import
         self.import_widget = ImportWidget(self)
         self.import_widget.import_requested.connect(self._on_import_requested)
-        self.tabs.addTab(self.import_widget, "🎥 비디오 / YouTube 가져오기")
+        self.tabs.addTab(self.import_widget, "비디오 / YouTube 가져오기")
 
     def _build_landing_view(self) -> None:
         self.landing_view = QWidget()
@@ -228,8 +228,8 @@ class MainWindow(QMainWindow):
         drop_layout.setAlignment(Qt.AlignCenter)
         drop_layout.setSpacing(16)
 
-        lbl_icon = QLabel("🎹")
-        lbl_icon.setStyleSheet("font-size: 48px;")
+        lbl_icon = QLabel("⛁") # monochrome symbol
+        lbl_icon.setStyleSheet("font-size: 50px; color: #64748B;")
         lbl_icon.setAlignment(Qt.AlignCenter)
 
         lbl_main = QLabel("여기에 악보 파일을 드래그 앤 드롭하세요")
@@ -465,8 +465,9 @@ class MainWindow(QMainWindow):
     def dropEvent(self, event: QDropEvent) -> None:
         urls = event.mimeData().urls()
         if urls:
-            file_path = urls[0].toLocalFile()
-            self.load_score_file(file_path)
+            for url in urls:
+                file_path = url.toLocalFile()
+                self._import_file_to_library_and_parse(file_path)
 
     def _browse_file(self) -> None:
         filters = (
@@ -494,10 +495,10 @@ class MainWindow(QMainWindow):
         timeline.title = "Canon in D (Sample Demo)"
         self._set_loaded_timeline(timeline)
 
-    def load_score_file(self, file_path: str) -> None:
+    def parse_score_file(self, file_path: str) -> Optional[MusicTimeline]:
         if not os.path.isfile(file_path):
             QMessageBox.warning(self, "파일 오류", f"파일을 찾을 수 없습니다: {file_path}")
-            return
+            return None
 
         ext = os.path.splitext(file_path)[1].lower()
         try:
@@ -514,13 +515,61 @@ class MainWindow(QMainWindow):
                 timeline = self.pdf_importer.import_score(file_path)
             else:
                 QMessageBox.warning(self, "지원하지 않는 포맷", f"지원하지 않는 파일 확장자입니다: {ext}")
-                return
-
-            if timeline:
-                self._set_loaded_timeline(timeline)
-
+                return None
+            return timeline
         except Exception as e:
             QMessageBox.critical(self, "불러오기 오류", f"악보를 불러오는데 실패했습니다:\n{str(e)}")
+            return None
+
+    def load_score_file(self, file_path: str) -> None:
+        timeline = self.parse_score_file(file_path)
+        if timeline:
+            self._set_loaded_timeline(timeline)
+
+    def _import_file_to_library_and_parse(self, file_path: str):
+        # 1. First, copy file into library and register it
+        try:
+            score_item = self.library_manager.import_external_file(file_path, "FILE")
+        except Exception as e:
+            QMessageBox.warning(self, "가져오기 실패", f"파일을 라이브러리에 복사할 수 없습니다: {e}")
+            return
+            
+        # 2. Refresh library to show the item
+        self.library_widget.refresh_library()
+        
+        # 3. Parse timeline
+        timeline = self.parse_score_file(score_item.filepath)
+        if timeline:
+            self.library_manager.update_score_from_timeline(score_item.id, timeline)
+            self._set_loaded_timeline(timeline)
+        else:
+            # Parsing failed or needs analysis
+            ext = os.path.splitext(file_path)[1].lower()
+            if ext in [".pdf", ".png", ".jpg", ".jpeg"]:
+                score_item.analysis_status = "ANALYSIS_REQUIRED"
+                score_item.analysis_error = "PDF/Image requires OMR analysis"
+            else:
+                score_item.analysis_status = "ANALYSIS_FAILED"
+                score_item.analysis_error = "Failed to parse file format"
+            self.library_manager.db.update_score(score_item)
+            
+        self.library_widget.refresh_library()
+
+    def _on_library_add_external(self):
+        filters = (
+            "All Supported Scores (*.mid *.midi *.musicxml *.xml *.mxl *.txt *.png *.jpg *.jpeg *.pdf);;"
+            "MIDI Files (*.mid *.midi);;"
+            "MusicXML Files (*.musicxml *.xml *.mxl);;"
+            "Numeric / Jianpu (*.txt *.num);;"
+            "Score Images (*.png *.jpg *.jpeg);;"
+            "PDF Scores (*.pdf)"
+        )
+        paths, _ = QFileDialog.getOpenFileNames(self, "외부 파일 추가", self.config.last_directory, filters)
+        if paths:
+            self.config.last_directory = os.path.dirname(paths[0])
+            for path in paths:
+                self._import_file_to_library_and_parse(path)
+            QMessageBox.information(self, "성공", f"{len(paths)}개의 악보가 라이브러리에 추가되었습니다.")
 
     def _on_library_score_selected(self, item: ScoreItem):
         # Library item selected

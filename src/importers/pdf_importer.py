@@ -35,11 +35,7 @@ class PdfImporter(BaseMusicImporter):
             raise FileNotFoundError(f"PDF file not found: {file_path_or_content}")
 
         if not self.omr_backend.is_available():
-            raise RuntimeError(
-                f"OMR Engine (Audiveris) is not installed.\n\n"
-                f"To recognize PDF sheet music, please install Audiveris.\n"
-                f"Directly supported formats without OMR: MIDI (.mid), MusicXML (.musicxml, .xml, .mxl), Numeric (.txt)"
-            )
+            raise RuntimeError("악보 인식 엔진 설정이 필요합니다.")
 
         # Audiveris can directly accept PDF files!
         result = self.omr_backend.recognize_score(file_path_or_content)

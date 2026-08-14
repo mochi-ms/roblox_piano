@@ -69,9 +69,13 @@ def test_library_manager_import(config_manager, temp_library_dir):
     from src.music.events import NoteEvent
     tl.add_note(NoteEvent(pitch=60, start_time=0.0, end_time=60.0))
     tl.sort_events()
+
+    item = mgr.import_external_file(dummy_source, source_type="LOCAL")
+    mgr.update_score_from_timeline(item.id, tl)
     
-    item = mgr.import_external_file(dummy_source, tl)
-    
+    # Refetch to get updated fields
+    item = mgr.db.get_score(item.id)
+
     assert item is not None
     assert item.title == "My Imported Song"
     assert item.tags == "imported"

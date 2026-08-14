@@ -13,11 +13,18 @@ class ScoreItem:
     source_type: str  # "FILE", "YOUTUBE", "IMAGE_OMR"
     source_url: str   # File path or YouTube URL used as source
     filepath: str     # Path to the actual .xml or .mid file inside Library dir
+    original_filename: str = ""
+    file_extension: str = ""
     duration: float = 0.0
     bpm: float = 120.0
     total_notes: int = 0
     tags: str = ""    # Comma-separated tags e.g. "anime,hard,omr"
+    analysis_status: str = "READY"  # READY, ANALYZING, ANALYSIS_REQUIRED, ANALYSIS_FAILED, UNSUPPORTED
+    analysis_error: str = ""
+    favorite: bool = False
     created_at: float = field(default_factory=time.time)
+    updated_at: float = 0.0
+    last_played_at: float = 0.0
 
     def get_tags_list(self) -> List[str]:
         if not self.tags:

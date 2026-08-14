@@ -1,5 +1,4 @@
 import os
-import yt_dlp
 from typing import Optional
 
 class YoutubeAdapter:
@@ -19,6 +18,7 @@ class YoutubeAdapter:
             'no_warnings': True,
             'extract_flat': True,
         }
+        import yt_dlp
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
@@ -47,6 +47,7 @@ class YoutubeAdapter:
         if progress_hook:
             ydl_opts['progress_hooks'] = [progress_hook]
 
+        import yt_dlp
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)

@@ -93,7 +93,7 @@ class VideoAnalysisWorker(QThread):
             from src.omr.oemer_backend import OemerBackend
             omr = OemerBackend()
             if not omr.is_available():
-                raise RuntimeError("Oemer OMR 엔진이 설치되어 있지 않습니다.")
+                raise RuntimeError("악보 인식 엔진 설정이 필요합니다.")
 
             # Oemer processes one image and outputs a .musicxml file.
             # We will process the first extracted frame for the E2E test.

@@ -31,25 +31,57 @@ class ScoreDatabase:
                     source_type TEXT,
                     source_url TEXT,
                     filepath TEXT NOT NULL,
-                    duration REAL,
-                    bpm REAL,
-                    total_notes INTEGER,
-                    tags TEXT,
-                    created_at REAL
+                    original_filename TEXT DEFAULT '',
+                    file_extension TEXT DEFAULT '',
+                    duration REAL DEFAULT 0.0,
+                    bpm REAL DEFAULT 120.0,
+                    total_notes INTEGER DEFAULT 0,
+                    tags TEXT DEFAULT '',
+                    analysis_status TEXT DEFAULT 'READY',
+                    analysis_error TEXT DEFAULT '',
+                    favorite BOOLEAN DEFAULT 0,
+                    created_at REAL,
+                    updated_at REAL DEFAULT 0.0,
+                    last_played_at REAL DEFAULT 0.0
                 )
             """)
             conn.commit()
+            self._migrate_db(conn)
+
+    def _migrate_db(self, conn):
+        cur = conn.execute("PRAGMA table_info(scores)")
+        columns = [row['name'] for row in cur.fetchall()]
+        new_columns = {
+            'original_filename': "TEXT DEFAULT ''",
+            'file_extension': "TEXT DEFAULT ''",
+            'analysis_status': "TEXT DEFAULT 'READY'",
+            'analysis_error': "TEXT DEFAULT ''",
+            'favorite': "BOOLEAN DEFAULT 0",
+            'updated_at': "REAL DEFAULT 0.0",
+            'last_played_at': "REAL DEFAULT 0.0"
+        }
+        for col, col_type in new_columns.items():
+            if col not in columns:
+                try:
+                    conn.execute(f"ALTER TABLE scores ADD COLUMN {col} {col_type}")
+                except Exception as e:
+                    print(f"Migration error for column {col}: {e}")
+        conn.commit()
 
     def insert_score(self, score: ScoreItem) -> None:
         with self._get_connection() as conn:
             conn.execute("""
                 INSERT OR REPLACE INTO scores 
-                (id, title, source_type, source_url, filepath, duration, bpm, total_notes, tags, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, title, source_type, source_url, filepath, original_filename, file_extension,
+                 duration, bpm, total_notes, tags, analysis_status, analysis_error, favorite,
+                 created_at, updated_at, last_played_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 score.id, score.title, score.source_type, score.source_url, 
-                score.filepath, score.duration, score.bpm, score.total_notes, 
-                score.tags, score.created_at
+                score.filepath, score.original_filename, score.file_extension,
+                score.duration, score.bpm, score.total_notes, 
+                score.tags, score.analysis_status, score.analysis_error, score.favorite,
+                score.created_at, score.updated_at, score.last_played_at
             ))
             conn.commit()
 

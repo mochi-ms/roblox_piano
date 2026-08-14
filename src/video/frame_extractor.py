@@ -1,4 +1,3 @@
-import cv2
 import os
 import numpy as np
 from typing import List, Callable
@@ -26,6 +25,7 @@ class FrameExtractor:
         if not os.path.exists(video_path):
             raise FileNotFoundError(f"Video file not found: {video_path}")
 
+        import cv2
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             raise RuntimeError(f"Could not open video file: {video_path}")

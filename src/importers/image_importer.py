@@ -2,7 +2,6 @@
 Roblox Piano Player - Image Score Importer (OpenCV Preprocessing + OMR)
 """
 import os
-import cv2
 import numpy as np
 from typing import List, Optional
 from src.importers.base import BaseMusicImporter
@@ -36,6 +35,7 @@ class ImageImporter(BaseMusicImporter):
         """
         Applies OpenCV preprocessing (Grayscale, Contrast enhancement, Deskew, Thresholding).
         """
+        import cv2
         img = cv2.imread(image_path)
         if img is None:
             raise ValueError(f"Could not load image: {image_path}")
@@ -85,11 +85,7 @@ class ImageImporter(BaseMusicImporter):
             raise FileNotFoundError(f"Image score file not found: {file_path_or_content}")
 
         if not self.omr_backend.is_available():
-            raise RuntimeError(
-                f"OMR Engine (Audiveris) is not installed.\n\n"
-                f"To recognize sheet music images, please install Audiveris.\n"
-                f"Directly supported formats without OMR: MIDI (.mid), MusicXML (.musicxml, .xml, .mxl), Numeric (.txt)"
-            )
+            raise RuntimeError("악보 인식 엔진 설정이 필요합니다.")
 
         # Preprocess
         preprocessed_path = self.preprocess_image(file_path_or_content)
