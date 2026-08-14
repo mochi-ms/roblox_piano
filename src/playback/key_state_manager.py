@@ -15,26 +15,28 @@ class KeyStateManager:
     def __init__(self, backend: KeyboardBackend):
         self.backend: KeyboardBackend = backend
         self._pressed_physical_keys: Set[str] = set()
-        self._shift_active: bool = False
+        self._active_modifiers: Set[str] = set()
         self._lock = threading.Lock()
 
     @property
-    def shift_active(self) -> bool:
-        return self._shift_active
+    def active_modifiers(self) -> Set[str]:
+        with self._lock:
+            return set(self._active_modifiers)
 
     @property
     def active_keys(self) -> Set[str]:
         with self._lock:
             return set(self._pressed_physical_keys)
 
-    def set_shift(self, active: bool) -> None:
+    def set_modifier(self, modifier: str, active: bool) -> None:
+        mod_upper = modifier.upper()
         with self._lock:
-            if active and not self._shift_active:
-                self.backend.key_down("shift")
-                self._shift_active = True
-            elif not active and self._shift_active:
-                self.backend.key_up("shift")
-                self._shift_active = False
+            if active and mod_upper not in self._active_modifiers:
+                self.backend.key_down(mod_upper.lower())
+                self._active_modifiers.add(mod_upper)
+            elif not active and mod_upper in self._active_modifiers:
+                self.backend.key_up(mod_upper.lower())
+                self._active_modifiers.discard(mod_upper)
 
     def press_physical_key(self, physical_key: str) -> None:
         with self._lock:
@@ -52,7 +54,7 @@ class KeyStateManager:
     def release_all(self) -> None:
         """
         Emergency or routine full release.
-        Guarantees that Shift and all physical keys are completely released.
+        Guarantees that all modifiers and physical keys are completely released.
         """
         with self._lock:
             for k in list(self._pressed_physical_keys):
@@ -62,12 +64,12 @@ class KeyStateManager:
                     pass
             self._pressed_physical_keys.clear()
 
-            if self._shift_active:
+            for mod in list(self._active_modifiers):
                 try:
-                    self.backend.key_up("shift")
+                    self.backend.key_up(mod.lower())
                 except Exception:
                     pass
-                self._shift_active = False
+            self._active_modifiers.clear()
 
             # Call backend's native release_all
             try:

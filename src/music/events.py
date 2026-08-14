@@ -47,6 +47,13 @@ class NoteEvent:
 
 
 @dataclass
+class PedalEvent:
+    time: float
+    down: bool
+    value: Optional[int] = None
+    source: str = ""
+
+@dataclass
 class ChordGroup:
     """Group of notes starting at virtually the same timestamp"""
     start_time: float

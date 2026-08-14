@@ -1,91 +1,71 @@
-# 🎹 Roblox Auto Piano Player (Windows Desktop Application)
+# 🎹 로블록스 자동 피아노 연주기 (Windows 데스크톱 애플리케이션)
 
-Professional, high-precision automated two-handed piano player for **Roblox Virtual Piano** (61-key layout: C2 to C7).
+**로블록스 가상 피아노(Roblox Virtual Piano)**를 위한 전문가용, 고정밀 88건반 양손 자동 연주 프로그램입니다. (A0 ~ C8 지원)
 
-Built with **Python 3.13+, PySide6, Win32 `SendInput` (Hardware ScanCodes), High-precision Monotonic Timing, Floating In-Game HUD Overlay, and Multi-Format Score Import Engine**.
-
----
-
-## 🌟 Key Features
-
-1. **Multi-Format Score Support**:
-   - **MIDI (`.mid`, `.midi`)**: Multi-track, multi-channel, tempo change tracking, note velocity, note duration.
-   - **MusicXML (`.musicxml`, `.xml`, `.mxl`)**: Grand staff (Staff 1 = RH, Staff 2 = LH), chord ties, dynamic meters.
-   - **Numbered Musical Notation (Jianpu / `.txt`)**: `1 2 3 4 5 6 7`, `#4`, `b3`, `1'`, `1,`, chords `[1 3 5]`, duration extensions `-`.
-   - **Score Image / PDF (OMR)**: Optical Music Recognition pipeline with OpenCV preprocessing and Audiveris adapter.
-2. **True Two-Handed Playback (RH / LH)**:
-   - Separate Right Hand and Left Hand tracks.
-   - Live hand toggling: Practice Right Hand only, Left Hand only, or Both hands simultaneously.
-3. **Hardware Scancode `SendInput` Integration**:
-   - Sends DirectInput keyboard scan codes to prevent in-game key dropping or anti-cheat blocking.
-   - **Zero memory tampering or DLL injection**: 100% safe external simulation.
-4. **Mixed Shift & Chord Handling**:
-   - Intelligent separation of unshifted white keys and Shift-modified black keys within chords.
-   - **Micro-Arpeggio Conflict Resolution**: Automatically handles same physical key collisions (e.g. `q` [F3] and `Q` [Shift+q = F#3]).
-5. **Floating In-Game HUD Overlay**:
-   - Always-on-top, frameless, semi-transparent HUD showing song progress, countdown, BPM, and speed.
-   - Compact and Expanded mode toggles.
-   - Optional click-through mode (`WS_EX_TRANSPARENT`).
-6. **Global Hotkeys**:
-   - `F6`: Start Playback (with customizable 3s countdown)
-   - `F7`: Pause / Resume
-   - `F8`: Emergency Immediate Stop (instantly releases all keys and Shift)
-   - `F4`: Show / Hide Floating HUD Overlay
-7. **Roblox Target Window Focus Safety**:
-   - Monitors active foreground window. Automatically pauses if Roblox loses focus to prevent accidental typing in other windows.
-8. **Interactive 61-Key Visualizer & Piano Roll**:
-   - Real-time key illumination matching the exact Roblox Virtual Piano layout.
-   - Pitch Range analyzer with one-click **Octave Fit** for notes outside C2~C7.
+**Python 3.13+, PySide6, Win32 `SendInput` (하드웨어 스캔코드), 고정밀 Monotonic 타이밍, 인게임 HUD 오버레이, CC64 페달 지원 및 다중 포맷 악보 불러오기 엔진**으로 제작되었습니다.
 
 ---
 
-## 🎹 Roblox 61-Key Keyboard Mapping (C2 ~ C7)
+## 🌟 주요 기능
 
-| Octave | Note | White Key (Natural) | Black Key (Sharp / Shift) |
-| :--- | :--- | :--- | :--- |
-| **Octave 1** | C2 ~ B2 | `1` `2` `3` `4` `5` `6` `7` | `!` `@` *(none)* `$` `%` `^` *(none)* |
-| **Octave 2** | C3 ~ B3 | `8` `9` `0` `q` `w` `e` `r` | `*` `(` *(none)* `Q` `W` `E` *(none)* |
-| **Octave 3** (Middle C) | C4 ~ B4 | `t` `y` `u` `i` `o` `p` `a` | `T` `Y` *(none)* `I` `O` `P` *(none)* |
-| **Octave 4** | C5 ~ B5 | `s` `d` `f` `g` `h` `j` `k` | `S` `D` *(none)* `G` `H` `J` *(none)* |
-| **Octave 5** | C6 ~ B6 | `l` `z` `x` `c` `v` `b` `n` | `L` `Z` *(none)* `C` `V` `B` *(none)* |
-| **Highest** | C7 | `m` | - |
-
-*(Configuration profile saved in `src/piano/profiles/roblox_virtual_piano_61.json`)*
+1. **다중 포맷 악보 지원**:
+   - **MIDI (`.mid`, `.midi`)**: 다중 트랙, 다중 채널, 템포 변경, 노트 벨로시티, CC64 서스테인 페달(Sustain Pedal) 이벤트 지원.
+   - **MusicXML (`.musicxml`, `.xml`, `.mxl`)**: 큰보표 (Staff 1 = 오른손, Staff 2 = 왼손), 붙임줄, 박자표 지원.
+   - **숫자 악보 (Jianpu / `.txt`)**: `1 2 3 4 5 6 7`, `#4`, `b3`, `1'`, `1,`, 화음 `[1 3 5]`, 길이 연장 `-`.
+   - **악보 이미지 / PDF (OMR)**: OpenCV 전처리와 Audiveris 어댑터를 활용한 광학 악보 인식 파이프라인.
+2. **진정한 양손 연주 (오른손 / 왼손)**:
+   - 오른손(RH)과 왼손(LH) 트랙 분리 지원.
+   - 실시간 손 토글: 오른손만, 왼손만, 또는 양손 동시 연주 모드를 지원.
+3. **88건반 풀 스케일 및 `CTRL` / `SHIFT` 모디파이어 완벽 지원**:
+   - 기존 61건반에서 88건반 (A0 ~ C8, MIDI 21~108)으로 확장.
+   - 하위 옥타브 연주를 위한 `CTRL` 및 상위 옥타브를 위한 `SHIFT` 조합 완벽 매핑.
+4. **하드웨어 스캔코드 `SendInput` 연동**:
+   - 게임 내 키 씹힘이나 안티치트 차단을 방지하기 위해 DirectInput 키보드 스캔 코드를 직접 전송.
+   - **메모리 변조나 DLL 인젝션 없음**: 100% 안전한 외부 시뮬레이션 방식.
+5. **혼합 Shift/Ctrl 화음 처리 및 페달(CC64) 자동 클릭**:
+   - 한 화음 내에서 일반 키와 Shift/Ctrl 조합 키가 섞일 경우 이를 논리적으로 분리(Micro-Arpeggio)하여 충돌 없는 연주 보장.
+   - **페달 클릭 자동화**: 악보의 서스테인 페달(CC64) 이벤트를 읽어 화면의 특정 좌표를 자동으로 마우스 클릭하여 물리적 페달링을 시뮬레이션.
+6. **인게임 HUD 플로팅 오버레이**:
+   - 항상 위, 프레임리스, 반투명 형태의 HUD가 진행률, 카운트다운, BPM 및 속도를 표시.
+   - 작게 보기 및 크게 보기 모드.
+   - 클릭 무시 모드(`WS_EX_TRANSPARENT`) 지원으로 게임 플레이 방해 없음.
+7. **글로벌 단축키**:
+   - `F6`: 연주 시작 (3초 카운트다운 설정 가능)
+   - `F7`: 일시정지 / 다시 시작
+   - `F8`: 즉각적인 긴급 정지 (모든 입력키 및 모디파이어 강제 릴리스)
+   - `F4`: 플로팅 HUD 오버레이 숨기기 / 보이기
+8. **로블록스 타겟 창 포커스 안전 장치**:
+   - 현재 활성화된 포커스 창을 모니터링하여, 로블록스 창이 백그라운드로 내려가면 다른 창에서의 원치 않는 키보드 입력을 방지하기 위해 자동으로 연주 일시정지.
+9. **인터랙티브 88건반 비주얼라이저 및 피아노 롤**:
+   - 실제 로블록스 가상 피아노 레이아웃과 일치하는 실시간 건반 조명 효과.
+   - 음역대 분석 및 범위 초과 시 원클릭 **옥타브 맞춤** 제공.
 
 ---
 
-## 🚀 Quick Start Guide
+## 🚀 빠른 시작 가이드
 
-### 1. Run the Application
-Double-click `start.bat` or run in terminal:
+### 1. 프로그램 실행
+`start.bat` 파일을 더블 클릭하거나 터미널에서 다음 명령어를 실행하세요:
 ```bash
 .\.venv\Scripts\python.exe run.py
 ```
 
-### 2. How to Play in Roblox
-1. Drag and drop any `.mid`, `.musicxml`, or `.txt` score onto the application window (or click **"Load Demo Sample"**).
-2. Check the detected notes, BPM, and range. (Click **"Octave Fit"** if notes exceed the 61-key range).
-3. Open Roblox and sit in front of the Virtual Piano.
-4. Press **`F6`** on your keyboard.
-5. The HUD overlay will count down: **`3.. 2.. 1.. PLAY`** and automatically perform the song with perfect rhythm and two-handed chords!
-6. Press **`F7`** to pause/resume, or **`F8`** to stop at any time.
+### 2. 로블록스에서 연주하기
+1. `.mid`, `.musicxml`, 또는 `.txt` 악보 파일을 프로그램 창으로 드래그 앤 드롭 하거나, **"데모 곡 불러오기"**를 클릭하세요.
+2. 인식된 노트, BPM, 음역대를 확인하세요. (만약 88건반 범위를 벗어나면 **"옥타브 맞춤"**을 클릭하세요).
+3. 로블록스를 열고 가상 피아노 의자에 앉습니다.
+4. 페달 설정에서 화면상 페달 버튼의 X, Y 좌표 비율을 설정하면 자동 페달링이 활성화됩니다.
+5. 키보드에서 **`F6`**을 누릅니다.
+6. HUD 오버레이에서 카운트다운(**`3.. 2.. 1.. PLAY`**)이 나타나며, 완벽한 리듬과 양손 화음으로 자동 연주가 시작됩니다!
+7. 연주 도중 언제든지 **`F7`**을 눌러 일시정지하거나, **`F8`**을 눌러 정지할 수 있습니다.
 
 ---
 
-## 🧪 Automated Testing
+## 📦 독립 실행형 `.exe` 파일로 빌드 (선택 사항)
 
-To run the complete automated test suite (21 unit tests covering mappers, importers, timeline, mixed chords, key safety, scheduler, and GUI):
-```bash
-.\.venv\Scripts\python.exe -m pytest tests/
-```
-
----
-
-## 📦 Packaging to Standalone `.exe` (Optional)
-
-To compile into a standalone Windows executable using PyInstaller:
+PyInstaller를 사용하여 설치가 필요 없는 Windows용 실행 파일(.exe)로 컴파일할 수 있습니다:
 ```bash
 .\.venv\Scripts\uv pip install pyinstaller
 .\.venv\Scripts\pyinstaller --name "RobloxPianoPlayer" --windowed --add-data "src/piano/profiles;src/piano/profiles" run.py
 ```
-The compiled executable will be located in `dist/RobloxPianoPlayer/`.
+빌드가 완료되면 `dist/RobloxPianoPlayer/` 또는 `dist/RobloxPianoPlayer.exe` (설정에 따라)에서 실행 파일을 확인할 수 있습니다.

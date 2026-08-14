@@ -27,6 +27,7 @@ from src.playback.dryrun_backend import DryRunBackend
 from src.playback.key_state_manager import KeyStateManager
 from src.playback.chord_engine import ChordEngine, ConflictPolicy
 from src.playback.scheduler import PlaybackScheduler, PlaybackState
+from src.playback.pedal_backend import MousePedalBackend
 from src.hotkeys.global_hotkeys import GlobalHotkeyManager
 from src.windows.target_window import TargetWindowManager, FocusLossPolicy
 from src.utils.config import AppConfig, ConfigManager
@@ -112,10 +113,22 @@ class MainWindow(QMainWindow):
             default_hold_duration_ms=self.config.hold_duration_ms,
             on_log=logger.log
         )
+
+        self.pedal_backend = MousePedalBackend()
+        self.pedal_backend.setup(
+            enabled=self.config.pedal_enabled,
+            x_ratio=self.config.pedal_x_ratio,
+            y_ratio=self.config.pedal_y_ratio,
+            interaction_mode=self.config.pedal_mode,
+            restore_cursor=True
+        )
+
         self.scheduler = PlaybackScheduler(
             chord_engine=self.chord_engine,
             key_state=self.key_state
         )
+        self.scheduler.pedal_backend = self.pedal_backend
+        self.scheduler.target_hwnd_getter = self.target_window.get_roblox_hwnd
         self.scheduler.speed = self.config.playback_speed
         self.scheduler.countdown_seconds = self.config.countdown_seconds
         self.scheduler.enable_rh = self.config.enable_rh
@@ -268,7 +281,7 @@ class MainWindow(QMainWindow):
 
         # Range / Octave Fit
         v4 = QVBoxLayout()
-        self.lbl_stat_range = QLabel("C2 — C7")
+        self.lbl_stat_range = QLabel("A0 — C8")
         self.lbl_stat_range.setObjectName("stat_value")
         self.btn_octave_fit = QPushButton("옥타브 맞춤")
         self.btn_octave_fit.setStyleSheet("font-size: 10px; padding: 2px 6px; background-color: #2D3748;")
@@ -289,7 +302,7 @@ class MainWindow(QMainWindow):
         self.piano_roll.seek_requested.connect(self._handle_seek)
         layout.addWidget(self.piano_roll, 2)
 
-        # 61-Key Interactive Virtual Piano Widget
+        # 88-Key Interactive Virtual Piano Widget
         self.virtual_piano = VirtualPianoWidget(self.mapper, self)
         self.virtual_piano.key_clicked.connect(self._handle_piano_key_clicked)
         layout.addWidget(self.virtual_piano)
@@ -499,7 +512,7 @@ class MainWindow(QMainWindow):
             self.lbl_stat_range.setStyleSheet("color: #EF4444; font-weight: bold;")
             self.btn_octave_fit.show()
         else:
-            self.lbl_stat_range.setText("C2 — C7 (OK)")
+            self.lbl_stat_range.setText("A0 — C8 (OK)")
             self.lbl_stat_range.setStyleSheet("color: #10B981; font-weight: bold;")
             self.btn_octave_fit.hide()
 
@@ -519,12 +532,12 @@ class MainWindow(QMainWindow):
             return
         modified = RangeProcessor.apply_octave_fit(self.timeline)
         self.piano_roll.update()
-        self.lbl_stat_range.setText("C2 — C7 (Fitted)")
+        self.lbl_stat_range.setText("A0 — C8 (Fitted)")
         self.lbl_stat_range.setStyleSheet("color: #10B981; font-weight: bold;")
         self.btn_octave_fit.hide()
         QMessageBox.information(
             self, "옥타브 맞춤 적용됨",
-            f"로블록스 61건반 범위에 맞게 {modified}개의 노트를 성공적으로 조정했습니다."
+            f"로블록스 88건반 범위에 맞게 {modified}개의 노트를 성공적으로 조정했습니다."
         )
 
     # ----------------------------------------------------
@@ -677,6 +690,14 @@ class MainWindow(QMainWindow):
         self.chord_engine.default_hold_duration_ms = new_config.hold_duration_ms
         self.target_window.enabled = new_config.target_window_safety
         self.target_window.policy = FocusLossPolicy(new_config.focus_loss_policy)
+        
+        self.pedal_backend.setup(
+            enabled=new_config.pedal_enabled,
+            x_ratio=new_config.pedal_x_ratio,
+            y_ratio=new_config.pedal_y_ratio,
+            interaction_mode=new_config.pedal_mode,
+            restore_cursor=True
+        )
 
     # ----------------------------------------------------
     # Safe Application Termination

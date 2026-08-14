@@ -48,6 +48,20 @@ class TargetWindowManager:
         # Match "Roblox" window title
         return any(k in title for k in self.ROBLOX_KEYWORDS)
 
+    def get_roblox_hwnd(self) -> Optional[int]:
+        hwnd = self._user32.GetForegroundWindow()
+        if not hwnd:
+            return None
+        length = self._user32.GetWindowTextLengthW(hwnd)
+        if length == 0:
+            return None
+        buff = ctypes.create_unicode_buffer(length + 1)
+        self._user32.GetWindowTextW(hwnd, buff, length + 1)
+        title = buff.value.lower()
+        if any(k in title for k in self.ROBLOX_KEYWORDS):
+            return hwnd
+        return None
+
     def check_can_play(self) -> Tuple[bool, str]:
         """
         Returns (can_play, reason_or_warning)

@@ -24,8 +24,8 @@ class RangeProcessor:
     Provides non-destructive octave fitting to pull out-of-range notes into playable range.
     """
 
-    DEFAULT_MIN_PITCH = 36  # C2
-    DEFAULT_MAX_PITCH = 96  # C7
+    DEFAULT_MIN_PITCH = 21  # A0
+    DEFAULT_MAX_PITCH = 108 # C8
 
     @classmethod
     def analyze_range(

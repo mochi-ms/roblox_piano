@@ -1,5 +1,5 @@
 """
-Roblox Piano Player - 61-Key Virtual Piano Keyboard Visualizer
+Roblox Piano Player - 88-Key Virtual Piano Keyboard Visualizer
 """
 from typing import Optional, Set, Dict, Tuple
 from PySide6.QtCore import Qt, QRectF, Signal
@@ -11,7 +11,7 @@ from src.piano.profile import KeyMapping
 
 class VirtualPianoWidget(QWidget):
     """
-    Renders an interactive 61-key Roblox Virtual Piano (C2 to C7).
+    Renders an interactive 88-key Roblox Virtual Piano (A0 to C8).
     Displays note names and Roblox keyboard key bindings on each key.
     Lights up active notes in real-time during playback.
     """
@@ -36,7 +36,7 @@ class VirtualPianoWidget(QWidget):
 
     def _get_key_geometry(self) -> Tuple[Dict[int, QRectF], Dict[int, QRectF]]:
         """
-        Calculates bounding boxes for 36 white keys and 25 black keys.
+        Calculates bounding boxes for 52 white keys and 36 black keys.
         Returns (white_keys_rects, black_keys_rects)
         """
         w = self.width() - 8
@@ -44,7 +44,7 @@ class VirtualPianoWidget(QWidget):
         top_offset = 4
         left_offset = 4
 
-        num_white_keys = 36
+        num_white_keys = 52
         white_key_width = w / num_white_keys
         white_key_height = h
         black_key_width = white_key_width * 0.65
@@ -53,10 +53,10 @@ class VirtualPianoWidget(QWidget):
         white_rects: Dict[int, QRectF] = {}
         black_rects: Dict[int, QRectF] = {}
 
-        # 61 keys: C2 (36) to C7 (96)
+        # 88 keys: A0 (21) to C8 (108)
         white_index = 0
 
-        for pitch in range(36, 97):
+        for pitch in range(21, 109):
             note_in_octave = pitch % 12
             is_black = note_in_octave in (1, 3, 6, 8, 10)  # C#, D#, F#, G#, A#
 

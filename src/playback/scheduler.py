@@ -9,6 +9,7 @@ from src.music.events import NoteEvent, ChordGroup
 from src.music.timeline import MusicTimeline
 from src.playback.chord_engine import ChordEngine
 from src.playback.key_state_manager import KeyStateManager
+from src.playback.pedal_backend import MousePedalBackend
 
 
 class PlaybackState(Enum):
@@ -48,6 +49,8 @@ class PlaybackScheduler:
         self.on_chord_played: Optional[Callable[[List[NoteEvent]], None]] = None
         self.on_log: Optional[Callable[[str], None]] = None
         self.target_window_check_fn: Optional[Callable[[], bool]] = None
+        self.target_hwnd_getter: Optional[Callable[[], Optional[int]]] = None
+        self.pedal_backend: Optional[MousePedalBackend] = None
 
         # Threading state
         self._state: PlaybackState = PlaybackState.IDLE
@@ -139,6 +142,10 @@ class PlaybackScheduler:
             self._thread.join(timeout=0.5)
         self._thread = None
         self.key_state.release_all()
+        if self.pedal_backend and self.target_hwnd_getter:
+            hwnd = self.target_hwnd_getter()
+            if hwnd:
+                self.pedal_backend.release_all(hwnd)
         self._set_state(PlaybackState.STOPPED)
         self._log("Playback stopped.")
 
@@ -218,16 +225,27 @@ class PlaybackScheduler:
 
             # Filter by current_time offset
             chord_groups = self._timeline.build_chord_groups(filtered_notes)
-            pending_chords = [cg for cg in chord_groups if cg.start_time >= self._current_time]
+            
+            # Merge chords and pedals
+            events = []
+            for cg in chord_groups:
+                if cg.start_time >= self._current_time:
+                    events.append((cg.start_time, "chord", cg))
+            
+            for p in self._timeline.pedals:
+                if p.time >= self._current_time:
+                    events.append((p.time, "pedal", p))
+                    
+            events.sort(key=lambda x: x[0])
 
-            if not pending_chords:
+            if not events:
                 self._set_state(PlaybackState.COMPLETED)
                 return
 
             start_song_time = self._current_time
             perf_anchor = time.perf_counter()
 
-            for cg in pending_chords:
+            for ev_time, ev_type, ev_data in events:
                 if self._stop_event.is_set():
                     break
 
@@ -242,26 +260,39 @@ class PlaybackScheduler:
                     perf_anchor += paused_duration
 
                 # Calculate target perf time
-                delta_song_time = (cg.start_time - start_song_time) / self.speed
+                delta_song_time = (ev_time - start_song_time) / self.speed
                 target_perf = perf_anchor + delta_song_time
 
                 if not self._precise_sleep_until(target_perf):
                     break
 
                 # Target window check (auto-pause if focus lost)
+                hwnd = None
+                if self.target_hwnd_getter:
+                    hwnd = self.target_hwnd_getter()
+                
                 if self.target_window_check_fn:
                     if not self.target_window_check_fn():
                         self.pause()
                         continue
 
-                # Play the chord
-                self._current_time = cg.start_time
+                # Play the event
+                self._current_time = ev_time
                 if self.on_progress:
                     self.on_progress(self._current_time, self._total_time)
-                if self.on_chord_played:
-                    self.on_chord_played(cg.notes)
 
-                self.chord_engine.play_chord_notes(cg.notes)
+                if ev_type == "chord":
+                    cg = ev_data
+                    if self.on_chord_played:
+                        self.on_chord_played(cg.notes)
+                    self.chord_engine.play_chord_notes(cg.notes)
+                elif ev_type == "pedal":
+                    p = ev_data
+                    if self.pedal_backend and hwnd:
+                        if p.down:
+                            self.pedal_backend.pedal_down(hwnd)
+                        else:
+                            self.pedal_backend.pedal_up(hwnd)
 
             if not self._stop_event.is_set():
                 self._current_time = self._total_time

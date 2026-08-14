@@ -60,7 +60,7 @@ class INPUT(ctypes.Structure):
     ]
 
 
-# Hardware DirectInput Scan Codes (QWERTY)
+# Hardware Scan Codes (QWERTY)
 SCANCODE_MAP: Dict[str, int] = {
     # Number row
     "1": 0x02, "2": 0x03, "3": 0x04, "4": 0x05, "5": 0x06,

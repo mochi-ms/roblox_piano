@@ -12,8 +12,9 @@ class KeyMapping:
     pitch: int
     char: str
     physical_key: str
-    shift: bool
+    modifiers: frozenset[str]
     name: str  # e.g. "C4", "C#4"
+
 
 
 @dataclass
@@ -32,11 +33,16 @@ class PianoProfile:
         keys_dict = {}
         for pitch_str, k_data in data.get("keys", {}).items():
             pitch = int(pitch_str)
+            # Migrate legacy 'shift' boolean if present
+            modifiers_list = k_data.get("modifiers", [])
+            if k_data.get("shift", False) and "SHIFT" not in modifiers_list:
+                modifiers_list.append("SHIFT")
+            
             keys_dict[pitch] = KeyMapping(
                 pitch=pitch,
                 char=k_data["char"],
                 physical_key=k_data["physical_key"],
-                shift=k_data.get("shift", False),
+                modifiers=frozenset(modifiers_list),
                 name=k_data.get("name", "")
             )
 
@@ -57,7 +63,7 @@ class PianoProfile:
             keys_dict[str(pitch)] = {
                 "char": k.char,
                 "physical_key": k.physical_key,
-                "shift": k.shift,
+                "modifiers": list(k.modifiers),
                 "name": k.name
             }
         return {
@@ -86,7 +92,7 @@ class ProfileManager:
 
     @classmethod
     def get_default_profile_path(cls) -> str:
-        return os.path.join(cls.get_profiles_dir(), "roblox_virtual_piano_61.json")
+        return os.path.join(cls.get_profiles_dir(), "roblox_virtual_piano_88.json")
 
     @classmethod
     def load_default_profile(cls) -> PianoProfile:

@@ -2,7 +2,7 @@
 Roblox Piano Player - Normalized Music Timeline
 """
 from typing import List, Optional, Dict, Tuple
-from src.music.events import NoteEvent, ChordGroup, HandType
+from src.music.events import NoteEvent, ChordGroup, HandType, PedalEvent
 
 
 class MusicTimeline:
@@ -14,6 +14,7 @@ class MusicTimeline:
     def __init__(self, title: str = "Untitled"):
         self.title: str = title
         self.notes: List[NoteEvent] = []
+        self.pedals: List[PedalEvent] = []
         self.initial_bpm: float = 120.0
         self.time_signature: Tuple[int, int] = (4, 4)
         self.track_names: Dict[int, str] = {}
@@ -22,9 +23,13 @@ class MusicTimeline:
     def add_note(self, note: NoteEvent) -> None:
         self.notes.append(note)
 
-    def sort_notes(self) -> None:
-        """Sort notes by start_time ascending, then by pitch ascending."""
+    def add_pedal(self, pedal: PedalEvent) -> None:
+        self.pedals.append(pedal)
+
+    def sort_events(self) -> None:
+        """Sort notes and pedals by start_time ascending."""
         self.notes.sort(key=lambda n: (n.start_time, n.pitch))
+        self.pedals.sort(key=lambda p: p.time)
 
     @property
     def total_notes(self) -> int:
@@ -32,9 +37,9 @@ class MusicTimeline:
 
     @property
     def duration(self) -> float:
-        if not self.notes:
-            return 0.0
-        return max(n.end_time for n in self.notes)
+        note_dur = max((n.end_time for n in self.notes), default=0.0)
+        pedal_dur = max((p.time for p in self.pedals), default=0.0)
+        return max(note_dur, pedal_dur)
 
     @property
     def pitch_range(self) -> Tuple[int, int]:

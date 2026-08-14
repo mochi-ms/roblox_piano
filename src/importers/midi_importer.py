@@ -5,7 +5,7 @@ import os
 import mido
 from typing import List, Dict, Tuple, Optional
 from src.importers.base import BaseMusicImporter
-from src.music.events import NoteEvent, HandType
+from src.music.events import NoteEvent, HandType, PedalEvent
 from src.music.timeline import MusicTimeline
 from src.music.hand_assignment import HandAssigner
 
@@ -154,6 +154,16 @@ class MidiImporter(BaseMusicImporter):
                             source="midi"
                         ))
 
+                elif msg.type == 'control_change' and msg.control == 64:
+                    abs_sec = tick_to_seconds(abs_tick)
+                    is_down = msg.value >= 64
+                    timeline.add_pedal(PedalEvent(
+                        time=abs_sec,
+                        down=is_down,
+                        value=msg.value,
+                        source="midi"
+                    ))
+
             # Close any trailing notes left on
             for (ch, pitch), (start_tick, vel) in active_notes.items():
                 start_sec = tick_to_seconds(start_tick)
@@ -174,5 +184,5 @@ class MidiImporter(BaseMusicImporter):
 
         # Assign hands and sort
         HandAssigner.assign_hands_to_timeline(timeline)
-        timeline.sort_notes()
+        timeline.sort_events()
         return timeline

@@ -20,8 +20,8 @@ class PianoRollWidget(QWidget):
         super().__init__(parent)
         self._timeline: Optional[MusicTimeline] = None
         self._current_time: float = 0.0
-        self._min_pitch: int = 36  # C2
-        self._max_pitch: int = 96  # C7
+        self._min_pitch: int = 21  # A0
+        self._max_pitch: int = 108  # C8
         self.setMinimumHeight(140)
         self.setMouseTracking(True)
         self._is_dragging: bool = False
@@ -31,11 +31,11 @@ class PianoRollWidget(QWidget):
         self._current_time = 0.0
         if timeline and timeline.notes:
             pitches = [n.pitch for n in timeline.notes]
-            self._min_pitch = min(36, min(pitches))
-            self._max_pitch = max(96, max(pitches))
+            self._min_pitch = min(21, min(pitches))
+            self._max_pitch = max(108, max(pitches))
         else:
-            self._min_pitch = 36
-            self._max_pitch = 96
+            self._min_pitch = 21
+            self._max_pitch = 108
         self.update()
 
     def set_playhead_time(self, current_time: float) -> None:
@@ -119,7 +119,7 @@ class PianoRollWidget(QWidget):
                 color = QColor("#10B981")  # Emerald Green
 
             # Out of Roblox range highlight
-            if not (36 <= note.pitch <= 96):
+            if not (21 <= note.pitch <= 108):
                 color = QColor("#EF4444")  # Red for out-of-range
 
             painter.setPen(Qt.NoPen)

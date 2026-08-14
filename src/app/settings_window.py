@@ -129,6 +129,30 @@ class SettingsDialog(QDialog):
         self.tabs.addTab(tab_hotkeys, "단축키 및 오버레이 설정")
         self.tabs.addTab(tab_omr, "악보 인식 (OMR) 설정")
 
+        # Tab 4: Pedal
+        tab_pedal = QWidget()
+        form_pedal = QFormLayout(tab_pedal)
+        form_pedal.setContentsMargins(12, 12, 12, 12)
+        form_pedal.setSpacing(12)
+
+        self.chk_pedal_enabled = QCheckBox("페달(Sustain CC64) 화면 자동 클릭 활성화")
+        self.spin_pedal_x = QDoubleSpinBox()
+        self.spin_pedal_x.setRange(0.0, 1.0)
+        self.spin_pedal_x.setSingleStep(0.05)
+        self.spin_pedal_y = QDoubleSpinBox()
+        self.spin_pedal_y.setRange(0.0, 1.0)
+        self.spin_pedal_y.setSingleStep(0.05)
+        
+        self.combo_pedal_mode = QComboBox()
+        self.combo_pedal_mode.addItems(["toggle", "hold"])
+
+        form_pedal.addRow("", self.chk_pedal_enabled)
+        form_pedal.addRow("화면 X 비율 (0.0~1.0):", self.spin_pedal_x)
+        form_pedal.addRow("화면 Y 비율 (0.0~1.0):", self.spin_pedal_y)
+        form_pedal.addRow("동작 방식:", self.combo_pedal_mode)
+
+        self.tabs.addTab(tab_pedal, "페달 설정")
+
         layout.addWidget(self.tabs)
 
         # Action buttons (Save, Cancel)
@@ -170,6 +194,11 @@ class SettingsDialog(QDialog):
         self.chk_click_through.setChecked(c.overlay_click_through)
         self.edit_audiveris_path.setText(c.audiveris_path)
 
+        self.chk_pedal_enabled.setChecked(c.pedal_enabled)
+        self.spin_pedal_x.setValue(c.pedal_x_ratio)
+        self.spin_pedal_y.setValue(c.pedal_y_ratio)
+        self.combo_pedal_mode.setCurrentText(c.pedal_mode)
+
     def _save_values(self) -> None:
         c = self.config
         c.theme = self.combo_theme.currentText()
@@ -188,6 +217,11 @@ class SettingsDialog(QDialog):
         c.overlay_opacity = self.spin_opacity.value()
         c.overlay_click_through = self.chk_click_through.isChecked()
         c.audiveris_path = self.edit_audiveris_path.text().strip()
+
+        c.pedal_enabled = self.chk_pedal_enabled.isChecked()
+        c.pedal_x_ratio = self.spin_pedal_x.value()
+        c.pedal_y_ratio = self.spin_pedal_y.value()
+        c.pedal_mode = self.combo_pedal_mode.currentText()
 
         self.config_mgr.save_config(c)
         self.settings_saved.emit(c)

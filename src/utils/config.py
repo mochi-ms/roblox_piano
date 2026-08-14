@@ -29,10 +29,14 @@ class AppConfig:
     overlay_click_through: bool = False
     overlay_pos_x: int = 40
     overlay_pos_y: int = 40
-    active_profile: str = "Roblox Virtual Piano 61"
+    active_profile: str = "Roblox Virtual Piano 88"
     audiveris_path: str = ""
     dry_run_mode: bool = False
     last_directory: str = ""
+    pedal_enabled: bool = False
+    pedal_x_ratio: float = 0.5
+    pedal_y_ratio: float = 0.5
+    pedal_mode: str = "toggle"
 
 
 class ConfigManager:
