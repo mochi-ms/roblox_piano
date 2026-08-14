@@ -1,7 +1,7 @@
 # Roblox Piano Player V2 — C# / .NET 10 / WPF Migration Plan & Architecture Specification (Frozen)
 
 > **Document Status**: Phase 0.5 Final Freeze — Architecture, Roadmap & Data Safety Specification  
-> **Target Platform**: C# 13, .NET 10 LTS, WPF, Windows 10/11 x64  
+> **Target Platform**: C# 14, .NET 10 LTS, WPF, Windows 10/11 x64  
 > **Source Repository**: `https://github.com/mochi-ms/roblox_piano`  
 > **Reference Baseline**: Python 3.13 + PySide6 (82 Pytest Unit/Integration Suite 100% Pass)  
 > **Legacy Policy**: Dual-track Coexistence in `/v2/` without deleting or modifying legacy Python reference code.  
@@ -240,7 +240,7 @@ graph TD
 #### 🎨 PHASE 1 — WPF App Shell & Fluent Design System
 - **목표**: 실제 음악 엔진 구현 전, WPF 데스크톱 쉘과 현대적인 Fluent Dark 디자인 시스템을 먼저 빌드하여 **사용자에게 실제 UI/UX 방향을 완벽히 검증받는 단계**.
 - **구현 내용**:
-  - `v2/RobloxPiano.sln` 솔루션 생성 (.NET 10 LTS, C# 13, WPF).
+  - `v2/RobloxPiano.sln` 솔루션 생성 (.NET 10 LTS, C# 14, WPF).
   - `MainWindow.xaml`: 모던 프레임리스 윈도우, Mica/Acrylic 지원, 커스텀 타이틀바.
   - Main Navigation: `Player`, `Library`, `Transcribe`, `Settings` 탭 전환 및 MVVM 뷰모델 구조.
   - 4개 Mock Views:
