@@ -138,6 +138,9 @@ class ScoreDatabase:
             """, (folder.id, folder.parent_id, folder.name, folder.created_at, folder.updated_at))
             conn.commit()
 
+    def update_folder(self, folder: FolderItem) -> None:
+        self.insert_folder(folder)
+
     def get_all_folders(self) -> List[FolderItem]:
         with self._get_connection() as conn:
             cur = conn.execute("SELECT * FROM folders ORDER BY name ASC")
