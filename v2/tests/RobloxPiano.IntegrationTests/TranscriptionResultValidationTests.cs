@@ -51,7 +51,7 @@ public class TranscriptionResultValidationTests : IDisposable
         {
             _onStdOut = onStdOut;
             _responder = responder;
-            _onStdOut?.Invoke("{\"type\":\"hello\",\"protocol\":1,\"request_id\":\"startup\",\"worker_version\":\"1.0.0\",\"python_version\":\"3.11.2\",\"basic_pitch_version\":\"0.4.0\"}");
+            _onStdOut?.Invoke("{\"type\":\"hello\",\"protocol\":1,\"request_id\":\"startup\",\"worker_version\":\"1.0.0\",\"python_version\":\"3.11.2\",\"basic_pitch_version\":\"0.4.0\",\"engine_available\":true,\"status_message\":\"정상\"}");
         }
 
         public Task SendLineAsync(string line, CancellationToken ct = default)

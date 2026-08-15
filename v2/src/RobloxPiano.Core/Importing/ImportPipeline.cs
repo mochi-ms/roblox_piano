@@ -88,7 +88,7 @@ public class ImportPipeline : IImportPipeline
         ct.ThrowIfCancellationRequested();
 
         // 3. Centralized Timeline Validation (strict BPM, timing, and note validation)
-        var validation = ImportTimelineValidator.Validate(timeline);
+        var validation = ImportTimelineValidator.Validate(timeline, request.TargetPianoProfile);
         if (!validation.IsValid)
         {
             return ImportResult.Failed(normalizedPath, validation.ErrorMessage ?? ImportError.CorruptTiming, errorCode: "TIMELINE_INVALID", sourceType: sourceType);

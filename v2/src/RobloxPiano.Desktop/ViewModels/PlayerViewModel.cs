@@ -98,6 +98,15 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
     private int _selectedTranspose = 0;
 
     [ObservableProperty]
+    private ObservableCollection<string> _availablePianoProfiles = new() { "Roblox 88키 (기본)", "Roblox 61키" };
+
+    [ObservableProperty]
+    private string _selectedPianoProfile = "Roblox 88키 (기본)";
+
+    [ObservableProperty]
+    private double _keyboardCanvasWidth = 936.0;
+
+    [ObservableProperty]
     private bool _hasScore;
 
     [ObservableProperty]
@@ -120,6 +129,8 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
 
     public bool IsRealInputBackend => _backend is ITargetedPlaybackBackend;
     public PlaybackScheduler Scheduler => _scheduler;
+    public RobloxPianoMapper Mapper => _mapper;
+    public PianoProfile CurrentPianoProfile => _mapper.Profile;
     public IRobloxTargetWindowService TargetService => _targetService;
     public IPlaybackTargetGuard TargetGuard => _targetGuard;
     public OverlayViewModel OverlayViewModel => _overlayViewModel;
@@ -154,23 +165,55 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
         _targetService.TargetChanged += OnTargetChanged;
         _targetService.AvailableTargetsChanged += OnAvailableTargetsChanged;
 
-        Initialize61Keys();
+        InitializePianoKeys(_mapper.Profile);
         RefreshRobloxWindows();
     }
 
-    private void Initialize61Keys()
+    partial void OnSelectedPianoProfileChanged(string value)
     {
-        // 61 Keys: C2 (36) to C7 (96)
-        // 36 White keys (width 18px each -> Total 648px)
-        // 25 Black keys (width 11px each, height 34px)
-        int whiteCount = 0;
-        var whiteNotes = new[] { 0, 2, 4, 5, 7, 9, 11 }; // C, D, E, F, G, A, B
+        if (_disposed) return;
 
-        var keysList = new List<PianoKeyViewModel>();
-
-        // Generate 61 keys
-        for (int pitch = 36; pitch <= 96; pitch++)
+        // 1. Safety: stop active playback before switching profile
+        if (_scheduler.State is PlaybackState.Playing or PlaybackState.Paused or PlaybackState.Countdown)
         {
+            _scheduler.Stop();
+            _backend.ReleaseAll();
+            _keyState.ReleaseAll();
+        }
+
+        // 2. Load target profile
+        var newProfile = value.Contains("61")
+            ? PianoProfileLoader.Load61KeyProfile()
+            : PianoProfileLoader.Load88KeyProfile();
+
+        // 3. Update existing mapper instance
+        _mapper.SetProfile(newProfile);
+
+        // 4. Rebuild visible piano keyboard
+        InitializePianoKeys(newProfile);
+
+        // 5. Refresh piano roll if timeline is loaded
+        if (CurrentTimeline != null)
+        {
+            RefreshPianoRoll(CurrentTimeline);
+        }
+    }
+
+    public void InitializePianoKeys(PianoProfile profile)
+    {
+        var whiteNotes = new[] { 0, 2, 4, 5, 7, 9, 11 }; // C, D, E, F, G, A, B
+        var keysList = new List<PianoKeyViewModel>();
+        _keyLookup.Clear();
+
+        int minPitch = profile.MinPitch;
+        int maxPitch = profile.MaxPitch;
+
+        // 1. Pass: Generate White keys
+        int whiteCount = 0;
+        for (int pitch = minPitch; pitch <= maxPitch; pitch++)
+        {
+            if (!profile.Keys.ContainsKey(pitch)) continue;
+
             int noteInOctave = pitch % 12;
             bool isWhite = whiteNotes.Contains(noteInOctave);
 
@@ -194,21 +237,26 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
             }
         }
 
-        // Generate Black keys positioned relative to white keys
-        whiteCount = 0;
-        for (int pitch = 36; pitch <= 96; pitch++)
+        // 2. Pass: Generate Black keys positioned relative to preceding white keys
+        for (int pitch = minPitch; pitch <= maxPitch; pitch++)
         {
+            if (!profile.Keys.ContainsKey(pitch)) continue;
+
             int noteInOctave = pitch % 12;
             bool isWhite = whiteNotes.Contains(noteInOctave);
 
-            if (isWhite)
+            if (!isWhite)
             {
-                whiteCount++;
-            }
-            else
-            {
-                // Black key position: between previous white key and current
-                double left = (whiteCount * 18.0) - 6.0;
+                int precedingWhiteCount = 0;
+                for (int p = minPitch; p < pitch; p++)
+                {
+                    if (profile.Keys.ContainsKey(p) && whiteNotes.Contains(p % 12))
+                    {
+                        precedingWhiteCount++;
+                    }
+                }
+
+                double left = (precedingWhiteCount * 18.0) - 6.0;
                 string noteName = FormatPitch(pitch);
                 var keyVm = new PianoKeyViewModel
                 {
@@ -225,6 +273,7 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
             }
         }
 
+        KeyboardCanvasWidth = Math.Max(648.0, whiteCount * 18.0);
         PianoKeys = new ObservableCollection<PianoKeyViewModel>(keysList.OrderBy(k => k.ZIndex).ThenBy(k => k.Pitch));
     }
 
@@ -307,17 +356,32 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
             PitchRangeText = "-";
         }
 
-        // Build real timeline-backed piano roll notes (cap to 2000 for high performance)
+        // Build real timeline-backed piano roll notes
+        RefreshPianoRoll(timeline);
+        ResetKeyboardHighlight();
+
+        HasScore = true;
+        StatusText = "준비됨";
+
+        _overlayViewModel.UpdateScoreTitle(Title);
+        _scheduler.SetTimeline(timeline);
+    }
+
+    private void RefreshPianoRoll(MusicTimeline timeline)
+    {
         var rollList = new List<PianoRollNoteViewModel>();
         int count = 0;
+        int maxPitch = _mapper.MaxPitch;
+        int minPitch = _mapper.MinPitch;
+        int pitchSpan = Math.Max(1, maxPitch - minPitch);
+
         foreach (var note in timeline.Notes)
         {
             if (count++ >= 2000) break;
 
             double left = note.StartTime * PixelsPerSecond;
             double width = Math.Max(6.0, note.Duration * PixelsPerSecond);
-            // Pitch 96 (C7) at top 10px, Pitch 36 (C2) at bottom 240px
-            double top = Math.Clamp((96 - note.Pitch) * 3.8 + 10.0, 5.0, 240.0);
+            double top = Math.Clamp((maxPitch - note.Pitch) * (230.0 / pitchSpan) + 10.0, 5.0, 240.0);
             string brushKey = note.Hand == HandType.Left ? "#34D399" : "#5B8DEF";
 
             rollList.Add(new PianoRollNoteViewModel(
@@ -334,13 +398,6 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
         }
 
         PianoRollNotes = new ObservableCollection<PianoRollNoteViewModel>(rollList);
-        ResetKeyboardHighlight();
-
-        HasScore = true;
-        StatusText = "준비됨";
-
-        _overlayViewModel.UpdateScoreTitle(Title);
-        _scheduler.SetTimeline(timeline);
     }
 
     partial void OnSelectedSpeedChanged(double value)

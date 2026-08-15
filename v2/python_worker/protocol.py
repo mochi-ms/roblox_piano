@@ -62,6 +62,8 @@ def create_hello(
     worker_version: str,
     python_version: str,
     basic_pitch_version: str,
+    engine_available: bool = True,
+    status_message: str = "정상",
     request_id: str = "init"
 ) -> Dict[str, Any]:
     return {
@@ -70,7 +72,9 @@ def create_hello(
         "request_id": request_id,
         "worker_version": worker_version,
         "python_version": python_version,
-        "basic_pitch_version": basic_pitch_version
+        "basic_pitch_version": basic_pitch_version,
+        "engine_available": engine_available,
+        "status_message": status_message
     }
 
 

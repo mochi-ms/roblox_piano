@@ -1,3 +1,4 @@
+using RobloxPiano.Core.Importing;
 using RobloxPiano.Core.Music;
 using RobloxPiano.Core.Piano;
 using Xunit;
@@ -115,5 +116,52 @@ public class RobloxPianoMapperTests
         mapper.SetProfile(PianoProfileLoader.Load88KeyProfile());
         Assert.Equal(21, mapper.MinPitch);
         Assert.True(mapper.CanPlay(21));
+    }
+}
+
+public class ImportValidationProfileTests
+{
+    [Fact]
+    public void ImportValidation_DefaultProfile_Is88Key()
+    {
+        var timeline = new MusicTimeline("Default 88-key");
+        timeline.Notes.Add(new NoteEvent(21, 0, 1)); // A0
+        timeline.Notes.Add(new NoteEvent(108, 1, 2)); // C8
+
+        var res = ImportTimelineValidator.Validate(timeline);
+        Assert.True(res.IsValid);
+        Assert.Equal(2, res.PlayableNotes);
+        Assert.Equal(0, res.OutOfRangeNotes);
+    }
+
+    [Fact]
+    public void ImportValidation_88Key_Pitch21And108Playable()
+    {
+        var timeline = new MusicTimeline("88-key test");
+        timeline.Notes.Add(new NoteEvent(21, 0, 1));
+        timeline.Notes.Add(new NoteEvent(60, 0.5, 1.5));
+        timeline.Notes.Add(new NoteEvent(108, 1, 2));
+
+        var profile88 = PianoProfileLoader.Load88KeyProfile();
+        var res = ImportTimelineValidator.Validate(timeline, profile88);
+        Assert.True(res.IsValid);
+        Assert.Equal(3, res.PlayableNotes);
+        Assert.Equal(0, res.OutOfRangeNotes);
+    }
+
+    [Fact]
+    public void ImportValidation_61Key_Pitch21OutOfRange_Pitch36Playable()
+    {
+        var timeline = new MusicTimeline("61-key test");
+        timeline.Notes.Add(new NoteEvent(21, 0, 1));  // A0 (out of 61-key)
+        timeline.Notes.Add(new NoteEvent(36, 0, 1));  // C2 (playable in 61-key)
+        timeline.Notes.Add(new NoteEvent(96, 0, 1));  // C7 (playable in 61-key)
+        timeline.Notes.Add(new NoteEvent(108, 1, 2)); // C8 (out of 61-key)
+
+        var profile61 = PianoProfileLoader.Load61KeyProfile();
+        var res = ImportTimelineValidator.Validate(timeline, profile61);
+        Assert.True(res.IsValid);
+        Assert.Equal(2, res.PlayableNotes); // 36, 96
+        Assert.Equal(2, res.OutOfRangeNotes); // 21, 108
     }
 }

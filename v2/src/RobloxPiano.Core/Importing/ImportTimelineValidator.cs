@@ -1,10 +1,11 @@
 using RobloxPiano.Core.Music;
+using RobloxPiano.Core.Piano;
 
 namespace RobloxPiano.Core.Importing;
 
 public static class ImportTimelineValidator
 {
-    public static ImportValidationResult Validate(MusicTimeline? timeline)
+    public static ImportValidationResult Validate(MusicTimeline? timeline, PianoProfile? targetProfile = null)
     {
         if (timeline == null)
         {
@@ -39,9 +40,10 @@ public static class ImportTimelineValidator
             }
         }
 
-        // Calculate diagnostics
-        int playableNotes = timeline.Notes.Count(n => n.Pitch >= 36 && n.Pitch <= 96);
-        int outOfRangeNotes = timeline.Notes.Count(n => n.Pitch < 36 || n.Pitch > 96);
+        // Calculate diagnostics using actual PianoProfile (defaults to 88-key)
+        var profile = targetProfile ?? PianoProfileLoader.LoadDefaultProfile();
+        int playableNotes = timeline.Notes.Count(n => profile.Keys.ContainsKey(n.Pitch));
+        int outOfRangeNotes = timeline.Notes.Count(n => !profile.Keys.ContainsKey(n.Pitch));
         var (minPitch, maxPitch) = timeline.PitchRange;
 
         return ImportValidationResult.Valid(

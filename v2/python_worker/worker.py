@@ -46,7 +46,9 @@ def run_worker(backend: Optional[ITranscriptionBackend] = None) -> int:
     send_protocol(protocol.create_hello(
         worker_version="1.0.0",
         python_version=py_ver,
-        basic_pitch_version=bp_ver if is_available else "none",
+        basic_pitch_version=bp_ver if is_available else (bp_ver or "none"),
+        engine_available=is_available,
+        status_message=status_msg,
         request_id="startup"
     ))
 

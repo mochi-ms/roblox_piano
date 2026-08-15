@@ -29,6 +29,89 @@ public class PlayerViewModelPlaybackTests : IDisposable
     }
 
     [Fact]
+    public void Player_DefaultProfile_Is88Key()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var vm = new PlayerViewModel(backend);
+
+        Assert.Equal("Roblox 88키 (기본)", vm.SelectedPianoProfile);
+        Assert.Equal(88, vm.CurrentPianoProfile.Keys.Count);
+        Assert.Equal(21, vm.Mapper.MinPitch);
+        Assert.Equal(108, vm.Mapper.MaxPitch);
+    }
+
+    [Fact]
+    public void Player_88Key_VisualKeyboardContains21And108()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var vm = new PlayerViewModel(backend);
+
+        Assert.Contains(vm.PianoKeys, k => k.Pitch == 21);  // A0
+        Assert.Contains(vm.PianoKeys, k => k.Pitch == 108); // C8
+        Assert.Equal(88, vm.PianoKeys.Count);
+    }
+
+    [Fact]
+    public void Player_61Key_VisualKeyboardUses61Profile()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var vm = new PlayerViewModel(backend);
+
+        vm.SelectedPianoProfile = "Roblox 61키";
+
+        Assert.DoesNotContain(vm.PianoKeys, k => k.Pitch == 21);
+        Assert.DoesNotContain(vm.PianoKeys, k => k.Pitch == 108);
+        Assert.Contains(vm.PianoKeys, k => k.Pitch == 36); // C2
+        Assert.Contains(vm.PianoKeys, k => k.Pitch == 96); // C7
+        Assert.Equal(61, vm.PianoKeys.Count);
+        Assert.Equal(36, vm.Mapper.MinPitch);
+        Assert.Equal(96, vm.Mapper.MaxPitch);
+    }
+
+    [Fact]
+    public void Player_ProfileSwitch_UpdatesMapperAndRebuildsKeyboard()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var vm = new PlayerViewModel(backend);
+
+        Assert.True(vm.Mapper.CanPlay(21)); // 88-key
+
+        vm.SelectedPianoProfile = "Roblox 61키";
+        Assert.False(vm.Mapper.CanPlay(21)); // 61-key cannot play A0
+        Assert.True(vm.Mapper.CanPlay(60));
+
+        vm.SelectedPianoProfile = "Roblox 88키 (기본)";
+        Assert.True(vm.Mapper.CanPlay(21));
+        Assert.True(vm.Mapper.CanPlay(108));
+    }
+
+    [Fact]
+    public async Task Player_ProfileSwitchDuringPlayback_StopsBeforeChange()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var vm = new PlayerViewModel(backend);
+
+        var timeline = new MusicTimeline("Profile Switch Play Test");
+        for (int i = 0; i < 20; i++)
+        {
+            timeline.AddNote(new NoteEvent(60, i * 0.1, (i + 1) * 0.1));
+        }
+        vm.LoadTimeline(timeline);
+        vm.Scheduler.CountdownSeconds = 0;
+        vm.Play();
+
+        await Task.Delay(50);
+        Assert.Equal(RobloxPiano.Playback.Windows.Playback.PlaybackState.Playing, vm.Scheduler.State);
+
+        // Switch profile mid-playback
+        vm.SelectedPianoProfile = "Roblox 61키";
+
+        // Must be stopped
+        Assert.Equal(RobloxPiano.Playback.Windows.Playback.PlaybackState.Stopped, vm.Scheduler.State);
+        Assert.Empty(backend.PressedKeys);
+    }
+
+    [Fact]
     public async Task LoadScoreAsync_MmlScore_PopulatesMetadataAndTimeline()
     {
         string mmlFile = Path.Combine(_tempDir, "sample.mml");

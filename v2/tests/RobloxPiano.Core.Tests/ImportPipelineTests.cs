@@ -148,15 +148,25 @@ public class ImportPipelineTests : IDisposable
         };
         midiFile.Write(wideRangeMidi, true);
 
-        var req = new ImportRequest(wideRangeMidi, addToLibrary: false);
-        var result = await _pipeline.ImportFileAsync(req);
+        // 1. Default (88-key): pitch 21, 60, 108 are all playable
+        var reqDefault = new ImportRequest(wideRangeMidi, addToLibrary: false);
+        var resultDefault = await _pipeline.ImportFileAsync(reqDefault);
 
-        Assert.True(result.Success);
-        Assert.Equal(3, result.NoteCount);
-        Assert.Equal(1, result.PlayableNoteCount);
-        Assert.Equal(2, result.OutOfRangeNoteCount);
-        Assert.Equal(21, result.MinPitch);
-        Assert.Equal(108, result.MaxPitch);
+        Assert.True(resultDefault.Success);
+        Assert.Equal(3, resultDefault.NoteCount);
+        Assert.Equal(3, resultDefault.PlayableNoteCount);
+        Assert.Equal(0, resultDefault.OutOfRangeNoteCount);
+        Assert.Equal(21, resultDefault.MinPitch);
+        Assert.Equal(108, resultDefault.MaxPitch);
+
+        // 2. Explicit 61-key profile: pitch 21 and 108 are out of range
+        var req61 = new ImportRequest(wideRangeMidi, addToLibrary: false, targetPianoProfile: RobloxPiano.Core.Piano.PianoProfileLoader.Load61KeyProfile());
+        var result61 = await _pipeline.ImportFileAsync(req61);
+
+        Assert.True(result61.Success);
+        Assert.Equal(3, result61.NoteCount);
+        Assert.Equal(1, result61.PlayableNoteCount);
+        Assert.Equal(2, result61.OutOfRangeNoteCount);
     }
 
     [Fact]

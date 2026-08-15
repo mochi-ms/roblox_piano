@@ -34,8 +34,21 @@
                     </StackPanel>
                 </StackPanel>
 
-                <!-- Roblox Target Status & Selector -->
+                <!-- Piano Profile & Roblox Target Status & Selectors -->
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,24,0">
+                    <!-- Piano Profile Selector (88-key vs 61-key) -->
+                    <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Default}" BorderThickness="1" CornerRadius="6" Padding="8,4" Margin="0,0,10,0">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="건반:" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" Margin="0,0,6,0" VerticalAlignment="Center"/>
+                            <ComboBox ItemsSource="{Binding AvailablePianoProfiles}"
+                                      SelectedItem="{Binding SelectedPianoProfile, Mode=TwoWay}"
+                                      MinWidth="120"
+                                      MaxHeight="26"
+                                      FontSize="11.5"
+                                      VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
+
                     <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Default}" BorderThickness="1" CornerRadius="6" Padding="8,4">
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                             <!-- Status Indicator -->
@@ -225,37 +238,14 @@
             </Grid>
         </Border>
 
-        <!-- 3. Virtual Piano Interactive Keyboard (61-Key Binding-Driven) -->
-        <Border Grid.Row="2" Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="0,1,0,0" Padding="12,6">
-            <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="56" />
-                </Grid.RowDefinitions>
-
-                <!-- Octave Header Labels -->
-                <Grid Grid.Row="0" Margin="0,0,0,3">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="126" />
-                        <ColumnDefinition Width="126" />
-                        <ColumnDefinition Width="126" />
-                        <ColumnDefinition Width="126" />
-                        <ColumnDefinition Width="126" />
-                        <ColumnDefinition Width="18" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Grid.Column="0" Text="C2" FontSize="9.5" Foreground="{StaticResource Text.Disabled}" HorizontalAlignment="Left" Margin="2,0,0,0" />
-                    <TextBlock Grid.Column="1" Text="C3" FontSize="9.5" Foreground="{StaticResource Text.Disabled}" HorizontalAlignment="Left" Margin="2,0,0,0" />
-                    <TextBlock Grid.Column="2" Text="C4 (가온 C)" FontSize="9.5" Foreground="{StaticResource Accent.Primary}" FontWeight="SemiBold" HorizontalAlignment="Left" Margin="2,0,0,0" />
-                    <TextBlock Grid.Column="3" Text="C5" FontSize="9.5" Foreground="{StaticResource Text.Disabled}" HorizontalAlignment="Left" Margin="2,0,0,0" />
-                    <TextBlock Grid.Column="4" Text="C6" FontSize="9.5" Foreground="{StaticResource Text.Disabled}" HorizontalAlignment="Left" Margin="2,0,0,0" />
-                    <TextBlock Grid.Column="5" Text="C7" FontSize="9.5" Foreground="{StaticResource Text.Disabled}" HorizontalAlignment="Left" Margin="2,0,0,0" />
-                </Grid>
-
-                <!-- Real Binding-Driven 61 Piano Keys -->
-                <ItemsControl Grid.Row="1" ItemsSource="{Binding PianoKeys}">
+        <!-- 3. Virtual Piano Interactive Keyboard (Profile-Driven) -->
+        <Border Grid.Row="2" Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="0,1,0,0" Padding="12,12">
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" HorizontalAlignment="Center">
+                <!-- Real Binding-Driven Piano Keys -->
+                <ItemsControl ItemsSource="{Binding PianoKeys}">
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
-                            <Canvas Width="648" Height="56" />
+                            <Canvas Width="{Binding KeyboardCanvasWidth}" Height="56" />
                         </ItemsPanelTemplate>
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemContainerStyle>
@@ -309,7 +299,7 @@
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
-            </Grid>
+            </ScrollViewer>
         </Border>
 
         <!-- 4. Transport Bar (Desktop Compact DAW Style) -->

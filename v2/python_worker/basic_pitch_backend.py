@@ -46,14 +46,16 @@ class BasicPitchBackend(ITranscriptionBackend):
         self._basic_pitch_version = "unknown"
 
     def check_environment(self) -> Tuple[bool, str, str, str]:
-        py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-        if sys.version_info.major != 3 or sys.version_info.minor != 11:
+        py_ver = f"{sys.version_info[0]}.{sys.version_info[1]}.{sys.version_info[2]}"
+        if sys.version_info[0] != 3 or sys.version_info[1] != 11:
             return False, py_ver, "", f"CPython 3.11이 필요하지만 현재 {py_ver}입니다."
 
         try:
             import importlib.metadata
             bp_ver = importlib.metadata.version("basic-pitch")
             self._basic_pitch_version = bp_ver
+            if bp_ver != "0.4.0":
+                return False, py_ver, bp_ver, f"Basic Pitch 0.4.0이 필요하지만 현재 {bp_ver}가 설치되어 있습니다."
             return True, py_ver, bp_ver, "정상"
         except Exception as ex:
             return False, py_ver, "", f"Basic Pitch 패키지를 로드할 수 없습니다: {ex}"
@@ -66,8 +68,9 @@ class BasicPitchBackend(ITranscriptionBackend):
             on_status("model_loading", "Basic Pitch AI 모델 로딩 중...")
 
         try:
+            from basic_pitch import ICASSP_2022_MODEL_PATH
             from basic_pitch.inference import Model
-            self._model = Model()
+            self._model = Model(ICASSP_2022_MODEL_PATH)
             if on_status:
                 on_status("model_ready", "AI 모델 준비 완료")
         except Exception as ex:

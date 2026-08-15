@@ -48,6 +48,20 @@ class TestProtocol(unittest.TestCase):
         self.assertEqual(parsed["job_id"], "job_한글_01")
         self.assertEqual(parsed["midi_path"], "C:\\음악 폴더\\쇼팽_피아노.mid")
 
+    def test_hello_reports_engine_available(self):
+        hello = protocol.create_hello("1.0.0", "3.11.2", "0.4.0", engine_available=True, status_message="정상")
+        self.assertEqual(hello["type"], "hello")
+        self.assertTrue(hello["engine_available"])
+        self.assertEqual(hello["basic_pitch_version"], "0.4.0")
+        self.assertEqual(hello["status_message"], "정상")
+
+    def test_hello_reports_engine_unavailable(self):
+        hello = protocol.create_hello("1.0.0", "3.11.2", "none", engine_available=False, status_message="Basic Pitch 패키지 없음")
+        self.assertEqual(hello["type"], "hello")
+        self.assertFalse(hello["engine_available"])
+        self.assertEqual(hello["basic_pitch_version"], "none")
+        self.assertEqual(hello["status_message"], "Basic Pitch 패키지 없음")
+
 
 if __name__ == "__main__":
     unittest.main()

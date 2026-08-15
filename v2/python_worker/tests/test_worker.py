@@ -5,12 +5,13 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 # Add python_worker root to sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import protocol
-from basic_pitch_backend import FakeTranscriptionBackend
+from basic_pitch_backend import BasicPitchBackend, FakeTranscriptionBackend
 
 
 class TestWorkerBackend(unittest.TestCase):
@@ -60,6 +61,54 @@ class TestWorkerBackend(unittest.TestCase):
         temp_midi = os.path.join(out_dir, "transcription.tmp.mid")
         self.assertFalse(os.path.exists(final_midi))
         self.assertFalse(os.path.exists(temp_midi))
+
+    def test_basic_pitch_backend_constructs_model_with_official_model_path(self):
+        backend = BasicPitchBackend()
+        mock_model_cls = MagicMock()
+        mock_model_instance = MagicMock()
+        mock_model_cls.return_value = mock_model_instance
+
+        with patch.dict("sys.modules", {
+            "basic_pitch": MagicMock(ICASSP_2022_MODEL_PATH="/mock/path/to/icassp_model"),
+            "basic_pitch.inference": MagicMock(Model=mock_model_cls)
+        }):
+            backend.load_model()
+
+            mock_model_cls.assert_called_once_with("/mock/path/to/icassp_model")
+            self.assertIs(backend._model, mock_model_instance)
+
+    def test_environment_exact_040_available(self):
+        backend = BasicPitchBackend()
+        with patch("sys.version_info", (3, 11, 2, "final", 0)), \
+             patch("importlib.metadata.version", return_value="0.4.0"):
+            avail, py_ver, bp_ver, msg = backend.check_environment()
+            self.assertTrue(avail)
+            self.assertEqual(bp_ver, "0.4.0")
+            self.assertIn("정상", msg)
+
+    def test_environment_wrong_basic_pitch_version_unavailable(self):
+        backend = BasicPitchBackend()
+        with patch("sys.version_info", (3, 11, 2, "final", 0)), \
+             patch("importlib.metadata.version", return_value="0.5.0"):
+            avail, py_ver, bp_ver, msg = backend.check_environment()
+            self.assertFalse(avail)
+            self.assertEqual(bp_ver, "0.5.0")
+            self.assertIn("0.4.0", msg)
+
+    def test_environment_missing_basic_pitch_unavailable(self):
+        backend = BasicPitchBackend()
+        with patch("sys.version_info", (3, 11, 2, "final", 0)), \
+             patch("importlib.metadata.version", side_effect=Exception("Package not found")):
+            avail, py_ver, bp_ver, msg = backend.check_environment()
+            self.assertFalse(avail)
+            self.assertIn("패키지를 로드할 수 없습니다", msg)
+
+    def test_environment_wrong_python_unavailable(self):
+        backend = BasicPitchBackend()
+        with patch("sys.version_info", (3, 10, 5, "final", 0)):
+            avail, py_ver, bp_ver, msg = backend.check_environment()
+            self.assertFalse(avail)
+            self.assertIn("3.11", msg)
 
 
 if __name__ == "__main__":

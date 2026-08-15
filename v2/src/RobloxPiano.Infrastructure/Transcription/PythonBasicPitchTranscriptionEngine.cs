@@ -27,6 +27,8 @@ public class PythonBasicPitchTranscriptionEngine : ITranscriptionEngine
 
     private string? _detectedPythonVersion;
     private string? _detectedBasicPitchVersion;
+    private bool _engineAvailable;
+    private string? _detectedStatusMessage;
 
     public PythonBasicPitchTranscriptionEngine(
         IPythonLocator? pythonLocator = null,
@@ -58,11 +60,46 @@ public class PythonBasicPitchTranscriptionEngine : ITranscriptionEngine
             return TranscriptionEngineStatus.Unavailable("worker.py 스크립트 파일을 찾을 수 없습니다.");
         }
 
-        return TranscriptionEngineStatus.Available(
-            pyPath,
-            pyVer ?? "3.11",
-            _detectedBasicPitchVersion ?? "0.4.0"
-        );
+        try
+        {
+            await _lock.WaitAsync(ct);
+            try
+            {
+                await EnsureWorkerRunningAsync(null, ct);
+
+                if (!string.Equals(_detectedBasicPitchVersion, "0.4.0", StringComparison.OrdinalIgnoreCase))
+                {
+                    return TranscriptionEngineStatus.Unavailable(
+                        string.IsNullOrWhiteSpace(_detectedStatusMessage)
+                            ? $"Basic Pitch 0.4.0이 필요하지만 현재 '{_detectedBasicPitchVersion ?? "없음"}'입니다."
+                            : _detectedStatusMessage
+                    );
+                }
+
+                if (!_engineAvailable)
+                {
+                    return TranscriptionEngineStatus.Unavailable(
+                        string.IsNullOrWhiteSpace(_detectedStatusMessage)
+                            ? "Basic Pitch AI 엔진을 사용할 수 없습니다."
+                            : _detectedStatusMessage
+                    );
+                }
+
+                return TranscriptionEngineStatus.Available(
+                    pyPath,
+                    pyVer ?? "3.11",
+                    _detectedBasicPitchVersion ?? "0.4.0"
+                );
+            }
+            finally
+            {
+                _lock.Release();
+            }
+        }
+        catch (Exception ex)
+        {
+            return TranscriptionEngineStatus.Unavailable($"Basic Pitch 가용성 확인 실패: {ex.Message}");
+        }
     }
 
     public async Task<TranscriptionResult> TranscribeAsync(
@@ -183,15 +220,28 @@ public class PythonBasicPitchTranscriptionEngine : ITranscriptionEngine
                 return TranscriptionResult.Failed(request.JobId, request.NormalizedAudioPath, TranscriptionError.MidiWriteFailed, "MIDI_WRITE_FAILED", runtimeSec, engineVersion: engineVer);
             }
 
+            // Strict path trust and workspace containment validation
+            string fullExpected = Path.GetFullPath(expectedMidiPath);
+            string fullReturned = Path.GetFullPath(returnedMidiPath);
+            string jobDir = Path.GetFullPath(outputDir);
+
+            if (!string.Equals(fullExpected, fullReturned, StringComparison.OrdinalIgnoreCase) ||
+                !fullReturned.StartsWith(jobDir, StringComparison.OrdinalIgnoreCase))
+            {
+                workspace.CleanJob(request.JobId);
+                return TranscriptionResult.Failed(request.JobId, request.NormalizedAudioPath, "워커가 반환한 MIDI 경로가 작업 디렉터리 내 예상 경로와 일치하지 않습니다.", "UNTRUSTED_MIDI_PATH", runtimeSec, engineVersion: engineVer);
+            }
+
             progress?.Report(TranscriptionProgress.Validating());
             ct.ThrowIfCancellationRequested();
 
-            // 3. Validate generated MIDI through existing ImportPipeline
+            // 3. Validate generated MIDI through existing ImportPipeline with profile-awareness
             var importReq = new ImportRequest(
                 returnedMidiPath,
                 request.SourceTitle ?? Path.GetFileNameWithoutExtension(request.NormalizedAudioPath),
                 targetFolderId: null,
-                addToLibrary: false
+                addToLibrary: false,
+                targetPianoProfile: request.TargetPianoProfile
             );
 
             var importResult = await _importPipeline.ImportFileAsync(importReq, ct: ct);
@@ -300,6 +350,22 @@ public class PythonBasicPitchTranscriptionEngine : ITranscriptionEngine
             {
                 _detectedBasicPitchVersion = bpProp.GetString();
             }
+            if (helloJson.TryGetProperty("engine_available", out var eaProp))
+            {
+                _engineAvailable = eaProp.ValueKind == JsonValueKind.True;
+            }
+            if (helloJson.TryGetProperty("status_message", out var smProp))
+            {
+                _detectedStatusMessage = smProp.GetString();
+            }
+
+            if (!_engineAvailable || !string.Equals(_detectedBasicPitchVersion, "0.4.0", StringComparison.OrdinalIgnoreCase))
+            {
+                string err = !string.IsNullOrWhiteSpace(_detectedStatusMessage)
+                    ? _detectedStatusMessage
+                    : $"Basic Pitch 0.4.0이 필요합니다 (현재: {_detectedBasicPitchVersion ?? "없음"}).";
+                throw new InvalidOperationException(err);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -337,6 +403,19 @@ public class PythonBasicPitchTranscriptionEngine : ITranscriptionEngine
 
             if (string.Equals(type, "hello", StringComparison.OrdinalIgnoreCase))
             {
+                if (root.TryGetProperty("basic_pitch_version", out var bpProp))
+                {
+                    _detectedBasicPitchVersion = bpProp.GetString();
+                }
+                if (root.TryGetProperty("engine_available", out var eaProp))
+                {
+                    _engineAvailable = eaProp.ValueKind == JsonValueKind.True;
+                }
+                if (root.TryGetProperty("status_message", out var smProp))
+                {
+                    _detectedStatusMessage = smProp.GetString();
+                }
+
                 _handshakeTcs?.TrySetResult(root);
                 return;
             }
