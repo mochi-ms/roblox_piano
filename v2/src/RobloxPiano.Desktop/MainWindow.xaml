@@ -46,15 +46,26 @@
 
                 <!-- Right Status / Actions -->
                 <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
-                    <!-- Roblox Status Indicator (Radius = 6) -->
+                    <!-- Roblox Status Indicator -->
                     <Border Background="{StaticResource Surface.Base}" CornerRadius="6" Padding="10,5" Margin="0,0,16,0" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1">
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <Ellipse Width="8" Height="8" Fill="{StaticResource Status.Offline}" Margin="0,0,8,0" />
-                            <TextBlock Text="Roblox 연결 안 됨" FontSize="12" Foreground="{StaticResource Text.Secondary}" VerticalAlignment="Center" />
+                            <Ellipse Width="8" Height="8" Margin="0,0,8,0">
+                                <Ellipse.Style>
+                                    <Style TargetType="Ellipse">
+                                        <Setter Property="Fill" Value="{StaticResource Status.Offline}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding PlayerViewModel.IsRobloxConnected}" Value="True">
+                                                <Setter Property="Fill" Value="{StaticResource Status.Success}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Ellipse.Style>
+                            </Ellipse>
+                            <TextBlock Text="{Binding PlayerViewModel.TargetStatusText}" FontSize="12" Foreground="{StaticResource Text.Secondary}" VerticalAlignment="Center" />
                         </StackPanel>
                     </Border>
                     
-                    <Button Padding="8,4" Background="Transparent" BorderThickness="0" Margin="0,0,8,0" ToolTip="오버레이 표시/숨기기 (F4)">
+                    <Button Padding="8,4" Background="Transparent" BorderThickness="0" Margin="0,0,8,0" ToolTip="오버레이 표시/숨기기 (F4)" Command="{Binding ToggleOverlayCommand}">
                         <Path Data="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14z" Fill="{StaticResource Text.Secondary}" Width="16" Height="16" Stretch="Uniform"/>
                     </Button>
                 </StackPanel>

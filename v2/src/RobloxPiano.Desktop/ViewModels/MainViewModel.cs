@@ -153,6 +153,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         };
     }
 
+    [RelayCommand]
+    private void ToggleOverlay()
+    {
+        _playerViewModel.OverlayViewModel.IsVisible = !_playerViewModel.OverlayViewModel.IsVisible;
+    }
+
     public void Dispose()
     {
         if (_disposed) return;

@@ -28,6 +28,7 @@
             <SolidColorBrush x:Key="Background.Deep" Color="#0A0F14" />
             <SolidColorBrush x:Key="Surface.Base" Color="#121820" />
             <SolidColorBrush x:Key="Surface.Elevated" Color="#171E27" />
+            <SolidColorBrush x:Key="Surface.Card" Color="#171E27" />
             <SolidColorBrush x:Key="Surface.Hover" Color="#202833" />
             <SolidColorBrush x:Key="Surface.Active" Color="#243143" />
             <SolidColorBrush x:Key="Surface.Selected" Color="#243143" />
@@ -48,6 +49,7 @@
             <SolidColorBrush x:Key="Status.Success" Color="#35A854" />
             <SolidColorBrush x:Key="Status.Warning" Color="#D39B32" />
             <SolidColorBrush x:Key="Status.Error" Color="#E55757" />
+            <SolidColorBrush x:Key="Status.Danger" Color="#E55757" />
             <SolidColorBrush x:Key="Status.Offline" Color="#9AA7B5" />
 
             <!-- Fonts -->

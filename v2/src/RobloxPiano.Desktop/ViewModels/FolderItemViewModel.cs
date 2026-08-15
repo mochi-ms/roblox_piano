@@ -1,3 +1,4 @@
+using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using RobloxPiano.Core.Library;
 
@@ -17,14 +18,25 @@ public partial class FolderItemViewModel : ObservableObject
     private bool _isSelected;
 
     [ObservableProperty]
+    private bool _isCurrent;
+
+    [ObservableProperty]
+    private int _depth;
+
+    [ObservableProperty]
+    private Thickness _indentPadding = new(12, 6, 12, 6);
+
+    [ObservableProperty]
     private string _icon = FolderIconPath;
 
     public string Id => Model.Id;
     public string? ParentId => Model.ParentId;
 
-    public FolderItemViewModel(FolderItem model)
+    public FolderItemViewModel(FolderItem model, int depth = 0)
     {
         _model = model;
         _name = model.Name;
+        _depth = depth;
+        _indentPadding = new Thickness(12 + (depth * 14), 6, 12, 6);
     }
 }

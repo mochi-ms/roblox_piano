@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using RobloxPiano.Core.Library;
 using RobloxPiano.Core.Services;
+using RobloxPiano.Desktop.Services;
 using RobloxPiano.Infrastructure.Data;
 
 namespace RobloxPiano.Desktop.ViewModels;
@@ -14,6 +15,7 @@ public partial class LibraryViewModel : ObservableObject
     private readonly LibraryFileService _fileService;
     private readonly FolderService _folderService;
     private readonly LibraryService _libraryService;
+    private readonly IUserInteractionService _interactionService;
 
     private CancellationTokenSource? _searchCts;
     private int _queryGeneration = 0;
@@ -34,6 +36,9 @@ public partial class LibraryViewModel : ObservableObject
     private ScoreItemViewModel? _selectedScore;
 
     [ObservableProperty]
+    private FolderItemViewModel? _selectedFolder;
+
+    [ObservableProperty]
     private string _searchText = string.Empty;
 
     [ObservableProperty]
@@ -47,6 +52,9 @@ public partial class LibraryViewModel : ObservableObject
 
     [ObservableProperty]
     private bool _isFavoritesView = false;
+
+    [ObservableProperty]
+    private bool _isRootView = true;
 
     [ObservableProperty]
     private bool _isLoading = false;
@@ -82,6 +90,9 @@ public partial class LibraryViewModel : ObservableObject
     private bool _canGoUp = false;
 
     [ObservableProperty]
+    private bool _canPaste = false;
+
+    [ObservableProperty]
     private LibrarySortColumn _currentSortColumn = LibrarySortColumn.Title;
 
     [ObservableProperty]
@@ -96,6 +107,12 @@ public partial class LibraryViewModel : ObservableObject
     public bool IsSortAscending => !SortDescending;
     public bool IsSortDescending => SortDescending;
 
+    public bool HasScoreSelected => SelectedScore != null;
+    public bool CanRenameSelectedItem => (SelectedScore != null) || (SelectedFolder != null && !IsFavoritesView);
+    public bool CanDeleteSelectedItem => (SelectedScore != null) || (SelectedFolder != null && !IsFavoritesView);
+    public bool CanCutSelectedItem => SelectedScore != null;
+    public bool CanCopySelectedItem => SelectedScore != null;
+
     public LibraryViewModel()
     {
         var dbPath = LibraryDatabasePathProvider.GetDefaultDatabasePath();
@@ -105,6 +122,7 @@ public partial class LibraryViewModel : ObservableObject
         _fileService = new LibraryFileService(storageRoot);
         _folderService = new FolderService(_repository, _fileService);
         _libraryService = new LibraryService(_repository, _fileService, _folderService);
+        _interactionService = new WpfUserInteractionService();
 
         _ = InitializeAsync();
     }
@@ -113,12 +131,14 @@ public partial class LibraryViewModel : ObservableObject
         ILibraryRepository repository,
         LibraryFileService fileService,
         FolderService folderService,
-        LibraryService libraryService)
+        LibraryService libraryService,
+        IUserInteractionService? interactionService = null)
     {
         _repository = repository;
         _fileService = fileService;
         _folderService = folderService;
         _libraryService = libraryService;
+        _interactionService = interactionService ?? new WpfUserInteractionService();
 
         _ = InitializeAsync();
     }
@@ -140,6 +160,7 @@ public partial class LibraryViewModel : ObservableObject
         {
             IsLoading = false;
             UpdateEmptyState();
+            UpdateSelectionCommandStates();
         }
     }
 
@@ -172,10 +193,17 @@ public partial class LibraryViewModel : ObservableObject
                 await Task.Delay(150, ct); // 150ms debounce
                 if (!ct.IsCancellationRequested)
                 {
-                    await Application.Current.Dispatcher.InvokeAsync(async () =>
+                    if (Application.Current != null)
+                    {
+                        await Application.Current.Dispatcher.InvokeAsync(async () =>
+                        {
+                            await ReloadQueryAsync(ct);
+                        });
+                    }
+                    else
                     {
                         await ReloadQueryAsync(ct);
-                    });
+                    }
                 }
             }
             catch (TaskCanceledException) { }
@@ -185,16 +213,62 @@ public partial class LibraryViewModel : ObservableObject
     partial void OnSelectedScoreChanged(ScoreItemViewModel? value)
     {
         UpdateStatusText();
+        UpdateSelectionCommandStates();
+    }
+
+    partial void OnSelectedFolderChanged(FolderItemViewModel? value)
+    {
+        UpdateSelectionCommandStates();
+    }
+
+    private void UpdateSelectionCommandStates()
+    {
+        OnPropertyChanged(nameof(HasScoreSelected));
+        OnPropertyChanged(nameof(CanRenameSelectedItem));
+        OnPropertyChanged(nameof(CanDeleteSelectedItem));
+        OnPropertyChanged(nameof(CanCutSelectedItem));
+        OnPropertyChanged(nameof(CanCopySelectedItem));
+        OnPropertyChanged(nameof(CanPaste));
     }
 
     public async Task LoadFoldersAsync(CancellationToken ct = default)
     {
         var folders = await _repository.GetAllFoldersAsync(ct);
-        FolderList.Clear();
-        foreach (var f in folders)
+        
+        // Group by parent to build deterministic hierarchy
+        var byParent = folders
+            .GroupBy(f => f.ParentId ?? string.Empty)
+            .ToDictionary(g => g.Key, g => g.OrderBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase).ToList());
+
+        var result = new List<FolderItemViewModel>();
+
+        void AddSubtree(string parentIdKey, int depth)
         {
-            FolderList.Add(new FolderItemViewModel(f));
+            if (byParent.TryGetValue(parentIdKey, out var children))
+            {
+                foreach (var folder in children)
+                {
+                    var vm = new FolderItemViewModel(folder, depth)
+                    {
+                        IsCurrent = folder.Id == CurrentFolderId
+                    };
+                    result.Add(vm);
+                    AddSubtree(folder.Id, depth + 1);
+                }
+            }
         }
+
+        AddSubtree(string.Empty, 0);
+
+        FolderList.Clear();
+        foreach (var item in result)
+        {
+            FolderList.Add(item);
+        }
+
+        // Update selected folder VM if current folder is set
+        SelectedFolder = FolderList.FirstOrDefault(f => f.Id == CurrentFolderId);
+        UpdateSelectionCommandStates();
     }
 
     [RelayCommand]
@@ -228,12 +302,14 @@ public partial class LibraryViewModel : ObservableObject
 
             TotalItemCount = page.TotalCount;
             HasMoreItems = DisplayedScores.Count < TotalItemCount;
+            SelectedScore = null;
             UpdateStatusText();
             UpdateEmptyState();
         }
         finally
         {
             IsLoading = false;
+            UpdateSelectionCommandStates();
         }
     }
 
@@ -331,7 +407,7 @@ public partial class LibraryViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task NavigateToFolderAsync(string? folderId)
+    public async Task NavigateToFolderAsync(string? folderId)
     {
         if (CurrentFolderId != folderId || IsFavoritesView)
         {
@@ -342,13 +418,15 @@ public partial class LibraryViewModel : ObservableObject
 
             IsFavoritesView = false;
             CurrentFolderId = folderId;
+            IsRootView = string.IsNullOrEmpty(folderId);
             await UpdateBreadcrumbAsync();
+            await LoadFoldersAsync();
             await ReloadQueryAsync();
         }
     }
 
     [RelayCommand]
-    private async Task NavigateToFavoritesAsync()
+    public async Task NavigateToFavoritesAsync()
     {
         _backStack.Push(CurrentFolderId);
         _forwardStack.Clear();
@@ -356,15 +434,18 @@ public partial class LibraryViewModel : ObservableObject
         CanGoForward = false;
 
         IsFavoritesView = true;
+        IsRootView = false;
         BreadcrumbPath = "즐겨찾기";
         CurrentFolderName = "즐겨찾기";
         CanGoUp = true;
+        SelectedFolder = null;
 
+        await LoadFoldersAsync();
         await ReloadQueryAsync();
     }
 
     [RelayCommand]
-    private async Task NavigateBackAsync()
+    public async Task NavigateBackAsync()
     {
         if (_backStack.Count > 0)
         {
@@ -376,13 +457,15 @@ public partial class LibraryViewModel : ObservableObject
 
             IsFavoritesView = false;
             CurrentFolderId = prev;
+            IsRootView = string.IsNullOrEmpty(prev);
             await UpdateBreadcrumbAsync();
+            await LoadFoldersAsync();
             await ReloadQueryAsync();
         }
     }
 
     [RelayCommand]
-    private async Task NavigateForwardAsync()
+    public async Task NavigateForwardAsync()
     {
         if (_forwardStack.Count > 0)
         {
@@ -394,13 +477,15 @@ public partial class LibraryViewModel : ObservableObject
 
             IsFavoritesView = false;
             CurrentFolderId = next;
+            IsRootView = string.IsNullOrEmpty(next);
             await UpdateBreadcrumbAsync();
+            await LoadFoldersAsync();
             await ReloadQueryAsync();
         }
     }
 
     [RelayCommand]
-    private async Task NavigateUpAsync()
+    public async Task NavigateUpAsync()
     {
         if (IsFavoritesView)
         {
@@ -442,14 +527,25 @@ public partial class LibraryViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task CreateFolderAsync()
+    public async Task CreateFolderAsync()
     {
-        var newFolder = await _folderService.CreateFolderAsync("새 폴더", CurrentFolderId);
-        FolderList.Add(new FolderItemViewModel(newFolder));
+        var folderName = _interactionService.PromptText("새 폴더", "폴더 이름을 입력하세요:", "새 폴더");
+        if (string.IsNullOrWhiteSpace(folderName)) return;
+
+        folderName = folderName.Trim();
+        try
+        {
+            var newFolder = await _folderService.CreateFolderAsync(folderName, CurrentFolderId);
+            await LoadFoldersAsync();
+        }
+        catch (Exception ex)
+        {
+            _interactionService.ShowError("폴더 생성 실패", ex.Message);
+        }
     }
 
     [RelayCommand]
-    private async Task AddFileAsync()
+    public async Task AddFilesAsync()
     {
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
@@ -465,13 +561,12 @@ public partial class LibraryViewModel : ObservableObject
                 try
                 {
                     var score = await _libraryService.ImportExternalFileAsync(file, CurrentFolderId);
-                    // Incremental addition to UI collection
                     DisplayedScores.Insert(0, new ScoreItemViewModel(score));
                     TotalItemCount++;
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show(ex.Message, "가져오기 실패", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    _interactionService.ShowError("가져오기 실패", ex.Message);
                 }
             }
             UpdateStatusText();
@@ -480,36 +575,104 @@ public partial class LibraryViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task DeleteSelectedScoreAsync()
+    public async Task DeleteSelectedItemAsync()
     {
-        if (SelectedScore == null) return;
+        if (SelectedScore != null)
+        {
+            var target = SelectedScore;
+            if (!_interactionService.Confirm("악보 삭제", $"'{target.Title}' 악보를 삭제하시겠습니까?"))
+                return;
 
-        var target = SelectedScore;
-        await _libraryService.DeleteScoreAsync(target.Id);
+            try
+            {
+                await _libraryService.DeleteScoreAsync(target.Id);
+                DisplayedScores.Remove(target);
+                TotalItemCount = Math.Max(0, TotalItemCount - 1);
+                SelectedScore = null;
+                UpdateStatusText();
+                UpdateEmptyState();
+                UpdateSelectionCommandStates();
+            }
+            catch (Exception ex)
+            {
+                _interactionService.ShowError("삭제 실패", ex.Message);
+            }
+        }
+        else if (SelectedFolder != null && !IsFavoritesView)
+        {
+            var target = SelectedFolder;
+            if (!_interactionService.Confirm("폴더 삭제", $"'{target.Name}' 폴더와 안의 악보를 모두 삭제하시겠습니까?"))
+                return;
 
-        // Incremental removal
-        DisplayedScores.Remove(target);
-        TotalItemCount = Math.Max(0, TotalItemCount - 1);
-        SelectedScore = null;
-        UpdateStatusText();
-        UpdateEmptyState();
+            try
+            {
+                await _folderService.DeleteFolderAsync(target.Id);
+                
+                // If deleted folder was active, navigate to parent
+                if (CurrentFolderId == target.Id)
+                {
+                    await NavigateToFolderAsync(target.ParentId);
+                }
+                else
+                {
+                    await LoadFoldersAsync();
+                    await ReloadQueryAsync();
+                }
+                SelectedFolder = null;
+                UpdateSelectionCommandStates();
+            }
+            catch (Exception ex)
+            {
+                _interactionService.ShowError("폴더 삭제 실패", ex.Message);
+            }
+        }
     }
 
     [RelayCommand]
-    private async Task RenameSelectedScoreAsync()
+    public async Task RenameSelectedItemAsync()
     {
-        if (SelectedScore == null) return;
+        if (SelectedScore != null)
+        {
+            var target = SelectedScore;
+            var currentTitle = target.Title;
+            var newTitle = _interactionService.PromptText("악보 이름 변경", "새 악보 이름을 입력하세요:", currentTitle);
+            if (string.IsNullOrWhiteSpace(newTitle) || newTitle.Trim() == currentTitle) return;
 
-        var target = SelectedScore;
-        string newTitle = target.Title + " (수정)";
-        var updated = await _libraryService.RenameScoreAsync(target.Id, newTitle);
+            newTitle = newTitle.Trim();
+            try
+            {
+                var updated = await _libraryService.RenameScoreAsync(target.Id, newTitle);
+                target.UpdateFromModel(updated);
+            }
+            catch (Exception ex)
+            {
+                _interactionService.ShowError("이름 변경 실패", ex.Message);
+            }
+        }
+        else if (SelectedFolder != null && !IsFavoritesView)
+        {
+            var target = SelectedFolder;
+            var currentName = target.Name;
+            var newName = _interactionService.PromptText("폴더 이름 변경", "새 폴더 이름을 입력하세요:", currentName);
+            if (string.IsNullOrWhiteSpace(newName) || newName.Trim() == currentName) return;
 
-        // Incremental update
-        target.UpdateFromModel(updated);
+            newName = newName.Trim();
+            try
+            {
+                var updated = await _folderService.RenameFolderAsync(target.Id, newName);
+                target.Name = updated.Name;
+                await UpdateBreadcrumbAsync();
+                await LoadFoldersAsync();
+            }
+            catch (Exception ex)
+            {
+                _interactionService.ShowError("이름 변경 실패", ex.Message);
+            }
+        }
     }
 
     [RelayCommand]
-    private async Task ToggleFavoriteScoreAsync(ScoreItemViewModel? scoreVm)
+    public async Task ToggleFavoriteScoreAsync(ScoreItemViewModel? scoreVm)
     {
         var target = scoreVm ?? SelectedScore;
         if (target == null) return;
@@ -527,44 +690,56 @@ public partial class LibraryViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void CutSelectedScore()
+    public void CutSelectedScore()
     {
         if (SelectedScore == null) return;
         _clipboardScore = SelectedScore;
         _isCut = true;
+        CanPaste = true;
+        UpdateSelectionCommandStates();
     }
 
     [RelayCommand]
-    private void CopySelectedScore()
+    public void CopySelectedScore()
     {
         if (SelectedScore == null) return;
         _clipboardScore = SelectedScore;
         _isCut = false;
+        CanPaste = true;
+        UpdateSelectionCommandStates();
     }
 
     [RelayCommand]
-    private async Task PasteScoreAsync()
+    public async Task PasteScoreAsync()
     {
-        if (_clipboardScore == null) return;
+        if (_clipboardScore == null || IsFavoritesView) return;
 
-        if (_isCut)
+        try
         {
-            await _libraryService.MoveScoreAsync(_clipboardScore.Id, CurrentFolderId);
-            if (_clipboardScore.FolderId != CurrentFolderId)
+            if (_isCut)
             {
-                DisplayedScores.Remove(_clipboardScore);
+                await _libraryService.MoveScoreAsync(_clipboardScore.Id, CurrentFolderId);
+                _clipboardScore = null;
+                CanPaste = false;
+                await ReloadQueryAsync();
             }
-            _clipboardScore = null;
+            else
+            {
+                var newScore = await _libraryService.CopyScoreAsync(_clipboardScore.Id, CurrentFolderId);
+                DisplayedScores.Insert(0, new ScoreItemViewModel(newScore));
+                TotalItemCount++;
+                UpdateStatusText();
+                UpdateEmptyState();
+            }
         }
-        else
+        catch (Exception ex)
         {
-            var newScore = await _libraryService.CopyScoreAsync(_clipboardScore.Id, CurrentFolderId);
-            DisplayedScores.Insert(0, new ScoreItemViewModel(newScore));
-            TotalItemCount++;
+            _interactionService.ShowError("붙여넣기 실패", ex.Message);
         }
-
-        UpdateStatusText();
-        UpdateEmptyState();
+        finally
+        {
+            UpdateSelectionCommandStates();
+        }
     }
 
     public event EventHandler<ScoreItem>? OpenScoreRequested;

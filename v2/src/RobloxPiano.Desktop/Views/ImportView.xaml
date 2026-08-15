@@ -113,7 +113,7 @@
                                                                     <Setter Property="Foreground" Value="{StaticResource Status.Success}" />
                                                                 </DataTrigger>
                                                                 <DataTrigger Binding="{Binding IsFailed}" Value="True">
-                                                                    <Setter Property="Foreground" Value="{StaticResource Status.Danger}" />
+                                                                    <Setter Property="Foreground" Value="{StaticResource Status.Error}" />
                                                                 </DataTrigger>
                                                                 <DataTrigger Binding="{Binding IsImporting}" Value="True">
                                                                     <Setter Property="Foreground" Value="{StaticResource Accent.Primary}" />
@@ -136,7 +136,7 @@
                                                 </StackPanel>
 
                                                 <!-- If Failed -->
-                                                <TextBlock Text="{Binding ErrorMessage}" FontSize="11" Foreground="{StaticResource Status.Danger}" TextTrimming="CharacterEllipsis"
+                                                <TextBlock Text="{Binding ErrorMessage}" FontSize="11" Foreground="{StaticResource Status.Error}" TextTrimming="CharacterEllipsis"
                                                            Visibility="{Binding IsFailed, Converter={StaticResource BoolToVis}}" ToolTip="{Binding ErrorMessage}" />
                                             </StackPanel>
 

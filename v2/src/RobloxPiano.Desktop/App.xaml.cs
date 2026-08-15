@@ -64,22 +64,33 @@ public partial class App : Application
         }
     }
 
+    private static int _isShowingDialog = 0;
+
     private static void ShowCrashDialog(Exception ex)
     {
+        if (Interlocked.CompareExchange(ref _isShowingDialog, 1, 0) != 0)
+        {
+            return;
+        }
+
         try
         {
             var logPath = GetLogPath();
             MessageBox.Show(
-                $"Roblox Piano를 시작하는 중 오류가 발생했습니다.\n\n" +
+                $"Roblox Piano 실행 중 예외가 발생했습니다.\n\n" +
                 $"오류 내용: {ex.Message}\n" +
                 $"로그 파일: {logPath}",
-                "Roblox Piano 시작 오류",
+                "Roblox Piano 오류",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
         catch
         {
             // UI failure must never throw
+        }
+        finally
+        {
+            _isShowingDialog = 0;
         }
     }
 }
