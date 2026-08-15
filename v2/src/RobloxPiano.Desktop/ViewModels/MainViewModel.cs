@@ -23,10 +23,10 @@ public partial class MainViewModel : ObservableObject
     {
         CurrentView = viewName switch
         {
-            "Player" => _playerViewModel,
-            "Library" => _libraryViewModel,
-            "Transcribe" => _transcribeViewModel,
-            "Settings" => _settingsViewModel,
+            "Player" or "플레이어" => _playerViewModel,
+            "Library" or "라이브러리" => _libraryViewModel,
+            "Transcribe" or "오디오 변환" => _transcribeViewModel,
+            "Settings" or "설정" => _settingsViewModel,
             _ => _playerViewModel
         };
     }

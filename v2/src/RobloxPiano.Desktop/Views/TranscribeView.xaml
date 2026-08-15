@@ -5,137 +5,164 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="clr-namespace:RobloxPiano.Desktop.ViewModels"
              mc:Ignorable="d" 
-             d:DesignHeight="700" d:DesignWidth="1000">
+             Background="{StaticResource Background.Root}"
+             d:DesignHeight="700" d:DesignWidth="1100">
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
     </UserControl.Resources>
 
-    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="32,24">
-        <StackPanel MaxWidth="720" HorizontalAlignment="Left">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="32,24" Background="{StaticResource Background.Root}">
+        <StackPanel MaxWidth="1040" HorizontalAlignment="Left">
             
             <!-- 1. Header -->
-            <StackPanel Margin="0,0,0,24">
-                <TextBlock Text="Transcribe" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,4" />
-                <TextBlock Text="Convert piano audio into editable MIDI" FontSize="12.5" Foreground="{StaticResource Text.Secondary}" />
+            <StackPanel Margin="0,0,0,20">
+                <TextBlock Text="오디오 변환" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" Margin="0,0,0,4" />
+                <TextBlock Text="피아노 음원을 MIDI로 변환합니다." FontSize="12.5" Foreground="{StaticResource Text.Secondary}" />
             </StackPanel>
 
-            <!-- 2. Source Selector (Segmented Radio Group) -->
-            <TextBlock Text="Audio Source" FontSize="12.5" FontWeight="SemiBold" Margin="0,0,0,8" />
-            <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="4" Margin="0,0,0,16" HorizontalAlignment="Left">
-                <StackPanel Orientation="Horizontal">
-                    <RadioButton Content="YouTube Video" Style="{StaticResource NavButtonStyle}" IsChecked="{Binding IsYouTubeSource}" Command="{Binding SelectSourceCommand}" CommandParameter="YouTube" />
-                    <RadioButton Content="Local Audio File" Style="{StaticResource NavButtonStyle}" IsChecked="{Binding IsLocalFileSource}" Command="{Binding SelectSourceCommand}" CommandParameter="Local" />
-                </StackPanel>
-            </Border>
+            <!-- 2. Main 2-Column Work Area (Input / Quality on Left, Pipeline Progress on Right) -->
+            <Grid Margin="0,0,0,20">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" MinWidth="480" />
+                    <ColumnDefinition Width="24" />
+                    <ColumnDefinition Width="380" />
+                </Grid.ColumnDefinitions>
 
-            <!-- 3. Source Input Container -->
-            <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="16" Margin="0,0,0,20">
-                <StackPanel>
-                    <!-- YouTube Input Panel -->
-                    <StackPanel Visibility="{Binding IsYouTubeSource, Converter={StaticResource BoolToVis}}">
-                        <TextBlock Text="YouTube URL" FontSize="12" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,6" />
-                        <Grid Margin="0,0,0,8">
+                <!-- Left Column: Source & Quality Settings -->
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="입력 소스" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" Margin="0,0,0,8" />
+                    
+                    <!-- Segmented Source Toggle -->
+                    <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="4" Margin="0,0,0,12" HorizontalAlignment="Left">
+                        <StackPanel Orientation="Horizontal">
+                            <RadioButton Content="YouTube" Style="{StaticResource NavButtonStyle}" IsChecked="{Binding IsYouTubeSource}" Command="{Binding SelectSourceCommand}" CommandParameter="YouTube" />
+                            <RadioButton Content="로컬 파일" Style="{StaticResource NavButtonStyle}" IsChecked="{Binding IsLocalFileSource}" Command="{Binding SelectSourceCommand}" CommandParameter="Local" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Source Input Container -->
+                    <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="16" Margin="0,0,0,16">
+                        <StackPanel>
+                            <!-- YouTube Input Panel -->
+                            <StackPanel Visibility="{Binding IsYouTubeSource, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="YouTube 주소" FontSize="12" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,6" />
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Grid.Column="0" Text="{Binding YouTubeUrl, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0" VerticalContentAlignment="Center" />
+                                    <Button Grid.Column="1" Content="붙여넣기" Command="{Binding PasteUrlCommand}" Margin="0,0,6,0" Padding="12,6" />
+                                    <Button Grid.Column="2" Content="지우기" Command="{Binding ClearUrlCommand}" Padding="12,6" />
+                                </Grid>
+                                <TextBlock Text="일반 YouTube 영상, YouTube Music, Shorts 주소를 지원합니다." FontSize="11" Foreground="{StaticResource Text.Tertiary}" />
+                            </StackPanel>
+
+                            <!-- Local File Input Panel -->
+                            <StackPanel Visibility="{Binding IsLocalFileSource, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="로컬 오디오 파일" FontSize="12" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,6" />
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Grid.Column="0" Text="{Binding LocalFilePath, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0" VerticalContentAlignment="Center" />
+                                    <Button Grid.Column="1" Content="찾아보기..." Command="{Binding BrowseFileCommand}" Padding="14,6" />
+                                </Grid>
+                                <TextBlock Text="지원 포맷: WAV, MP3, FLAC, AAC, OGG, M4A" FontSize="11" Foreground="{StaticResource Text.Tertiary}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Quality / Mode Group -->
+                    <TextBlock Text="변환 품질" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" Margin="0,0,0,8" />
+                    <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="16">
+                        <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="220" />
                             </Grid.ColumnDefinitions>
-                            <TextBox Grid.Column="0" Text="{Binding YouTubeUrl, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0" VerticalContentAlignment="Center" />
-                            <Button Grid.Column="1" Content="Paste" Command="{Binding PasteUrlCommand}" Margin="0,0,6,0" Padding="12,6" />
-                            <Button Grid.Column="2" Content="Clear" Command="{Binding ClearUrlCommand}" Padding="12,6" />
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <TextBlock Text="분석 모드" FontSize="12.5" FontWeight="Medium" Foreground="{StaticResource Text.Primary}" Margin="0,0,0,2" />
+                                <TextBlock Text="다성 피아노 추출에 최적화된 신경망 모델을 사용합니다." FontSize="11" Foreground="{StaticResource Text.Secondary}" />
+                            </StackPanel>
+                            <ComboBox Grid.Column="1" SelectedIndex="{Binding SelectedModeIndex}" VerticalAlignment="Center">
+                                <ComboBoxItem Content="고품질 피아노 (Basic Pitch)" />
+                                <ComboBoxItem Content="빠른 변환 (경량 모델)" />
+                            </ComboBox>
                         </Grid>
-                        <TextBlock Text="Supports standard YouTube videos, YouTube Music, and Shorts URLs" FontSize="11" Foreground="{StaticResource Text.Disabled}" />
-                    </StackPanel>
-
-                    <!-- Local File Input Panel -->
-                    <StackPanel Visibility="{Binding IsLocalFileSource, Converter={StaticResource BoolToVis}}">
-                        <TextBlock Text="Local Audio File" FontSize="12" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,6" />
-                        <Grid Margin="0,0,0,8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBox Grid.Column="0" Text="{Binding LocalFilePath, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0" VerticalContentAlignment="Center" />
-                            <Button Grid.Column="1" Content="Browse..." Command="{Binding BrowseFileCommand}" Padding="14,6" />
-                        </Grid>
-                        <TextBlock Text="Supported formats: WAV, MP3, FLAC, AAC, OGG, M4A" FontSize="11" Foreground="{StaticResource Text.Disabled}" />
-                    </StackPanel>
+                    </Border>
                 </StackPanel>
-            </Border>
 
-            <!-- 4. Extraction Mode / Quality -->
-            <TextBlock Text="Extraction Mode" FontSize="12.5" FontWeight="SemiBold" Margin="0,0,0,8" />
-            <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="16" Margin="0,0,0,20">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="240" />
-                    </Grid.ColumnDefinitions>
-                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                        <TextBlock Text="Recognition Model" FontSize="12.5" FontWeight="Medium" Margin="0,0,0,2" />
-                        <TextBlock Text="Neural network model tuned for polyphonic piano transcription" FontSize="11" Foreground="{StaticResource Text.Secondary}" />
-                    </StackPanel>
-                    <ComboBox Grid.Column="1" SelectedIndex="{Binding SelectedModeIndex}" VerticalAlignment="Center">
-                        <ComboBoxItem Content="High Quality Piano (Basic Pitch)" />
-                        <ComboBoxItem Content="Fast Mode (Lightweight)" />
-                    </ComboBox>
-                </Grid>
-            </Border>
+                <!-- Right Column: Pipeline Status & Progress -->
+                <StackPanel Grid.Column="2">
+                    <TextBlock Text="변환 진행" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" Margin="0,0,0,8" />
+                    <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="18">
+                        <StackPanel>
+                            <!-- 4-Step Vertical Stepper -->
+                            <StackPanel Margin="0,0,0,20">
+                                <!-- Step 1: Completed -->
+                                <Grid Margin="0,0,0,14">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="20" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Ellipse Grid.Column="0" Width="8" Height="8" Fill="{StaticResource Status.Success}" HorizontalAlignment="Left" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="1" Text="오디오 준비" FontSize="12.5" FontWeight="Medium" Foreground="{StaticResource Text.Primary}" VerticalAlignment="Center" />
+                                </Grid>
 
-            <!-- 5. Processing Pipeline & Progress -->
-            <TextBlock Text="Transcription Pipeline" FontSize="12.5" FontWeight="SemiBold" Margin="0,0,0,8" />
-            <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="16" Margin="0,0,0,20">
-                <StackPanel>
-                    <!-- 4-Step Stepper -->
-                    <Grid Margin="0,0,0,16">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
+                                <!-- Step 2: Active -->
+                                <Grid Margin="0,0,0,14">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="20" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Ellipse Grid.Column="0" Width="8" Height="8" Fill="{StaticResource Accent.Primary}" HorizontalAlignment="Left" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="1" Text="음표 분석" FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource Accent.Primary}" VerticalAlignment="Center" />
+                                </Grid>
 
-                        <!-- Step 1: Completed -->
-                        <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                            <Ellipse Width="8" Height="8" Fill="{StaticResource Status.Success}" Margin="0,0,6,0" />
-                            <TextBlock Text="Audio Prepare" FontSize="11.5" FontWeight="Medium" Foreground="{StaticResource Text.Primary}" />
+                                <!-- Step 3: Pending -->
+                                <Grid Margin="0,0,0,14">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="20" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Ellipse Grid.Column="0" Width="8" Height="8" Fill="{StaticResource Text.Disabled}" HorizontalAlignment="Left" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="1" Text="후처리" FontSize="12.5" Foreground="{StaticResource Text.Secondary}" VerticalAlignment="Center" />
+                                </Grid>
+
+                                <!-- Step 4: Pending -->
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="20" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Ellipse Grid.Column="0" Width="8" Height="8" Fill="{StaticResource Text.Disabled}" HorizontalAlignment="Left" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="1" Text="MIDI 생성" FontSize="12.5" Foreground="{StaticResource Text.Secondary}" VerticalAlignment="Center" />
+                                </Grid>
+                            </StackPanel>
+
+                            <Separator Margin="0,0,0,16"/>
+
+                            <!-- Progress Bar & Status Text -->
+                            <Grid Margin="0,0,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="{Binding ProgressStatus}" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                <TextBlock Grid.Column="1" Text="62%" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource Accent.Primary}" />
+                            </Grid>
+                            <ProgressBar Value="{Binding ProgressPercent}" Maximum="100" />
                         </StackPanel>
-
-                        <!-- Step 2: Active -->
-                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                            <Ellipse Width="8" Height="8" Fill="{StaticResource Accent.Primary}" Margin="0,0,6,0" />
-                            <TextBlock Text="Analyze" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource Accent.Primary}" />
-                        </StackPanel>
-
-                        <!-- Step 3: Pending -->
-                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                            <Ellipse Width="8" Height="8" Fill="{StaticResource Text.Disabled}" Margin="0,0,6,0" />
-                            <TextBlock Text="Postprocess" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
-                        </StackPanel>
-
-                        <!-- Step 4: Pending -->
-                        <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
-                            <Ellipse Width="8" Height="8" Fill="{StaticResource Text.Disabled}" Margin="0,0,6,0" />
-                            <TextBlock Text="MIDI" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
-                        </StackPanel>
-                    </Grid>
-
-                    <!-- Progress Bar & Status Text -->
-                    <Grid Margin="0,0,0,6">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock Grid.Column="0" Text="{Binding ProgressStatus}" FontSize="12" Foreground="{StaticResource Text.Secondary}" />
-                        <TextBlock Grid.Column="1" Text="62%" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource Accent.Primary}" />
-                    </Grid>
-                    <ProgressBar Value="{Binding ProgressPercent}" Maximum="100" Margin="0,0,0,4" />
+                    </Border>
                 </StackPanel>
-            </Border>
+            </Grid>
 
-            <!-- 6. Result Summary -->
-            <TextBlock Text="Result Preview" FontSize="12.5" FontWeight="SemiBold" Margin="0,0,0,8" />
-            <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="16" Margin="0,0,0,24">
+            <!-- 3. Result Summary Section (Full Width across bottom) -->
+            <TextBlock Text="변환 결과" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" Margin="0,0,0,8" />
+            <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="18">
                 <StackPanel>
                     <Grid Margin="0,0,0,16">
                         <Grid.ColumnDefinitions>
@@ -146,38 +173,38 @@
                         </Grid.ColumnDefinitions>
 
                         <StackPanel Grid.Column="0">
-                            <TextBlock Text="Estimated Duration" FontSize="11" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,2" />
-                            <TextBlock Text="04:21" FontSize="13" FontWeight="SemiBold" />
+                            <TextBlock Text="예상 길이" FontSize="11" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,2" />
+                            <TextBlock Text="04:21" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" />
                         </StackPanel>
                         <StackPanel Grid.Column="1">
-                            <TextBlock Text="Detected Notes" FontSize="11" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,2" />
-                            <TextBlock Text="1,284" FontSize="13" FontWeight="SemiBold" />
+                            <TextBlock Text="감지 음표" FontSize="11" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,2" />
+                            <TextBlock Text="1,284" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" />
                         </StackPanel>
                         <StackPanel Grid.Column="2">
-                            <TextBlock Text="Detected Range" FontSize="11" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,2" />
-                            <TextBlock Text="A2 – C7" FontSize="13" FontWeight="SemiBold" />
+                            <TextBlock Text="감지 음역" FontSize="11" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,2" />
+                            <TextBlock Text="A2 – C7" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" />
                         </StackPanel>
                         <StackPanel Grid.Column="3">
-                            <TextBlock Text="Confidence" FontSize="11" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,2" />
+                            <TextBlock Text="신뢰도" FontSize="11" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,2" />
                             <TextBlock Text="91%" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource Status.Success}" />
                         </StackPanel>
                     </Grid>
 
-                    <Separator />
+                    <Separator Margin="0,4,0,12"/>
 
                     <!-- Output File & Action Buttons -->
-                    <Grid Margin="0,8,0,0">
+                    <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                            <TextBlock Text="Output Target" FontSize="11" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,2" />
-                            <TextBlock Text="transcription_output.mid" FontSize="12.5" FontWeight="Medium" />
+                            <TextBlock Text="저장 파일" FontSize="11" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,2" />
+                            <TextBlock Text="transcription_output.mid" FontSize="12.5" FontWeight="Medium" Foreground="{StaticResource Text.Primary}" />
                         </StackPanel>
                         <StackPanel Grid.Column="1" Orientation="Horizontal">
-                            <Button Content="Save MIDI" Margin="0,0,8,0" Padding="14,6" />
-                            <Button Content="Open in Player" Style="{StaticResource AccentButtonStyle}" Padding="16,6" />
+                            <Button Content="MIDI 저장" Margin="0,0,8,0" Padding="14,6" />
+                            <Button Content="플레이어에서 열기" Style="{StaticResource AccentButtonStyle}" Padding="16,6" />
                         </StackPanel>
                     </Grid>
                 </StackPanel>

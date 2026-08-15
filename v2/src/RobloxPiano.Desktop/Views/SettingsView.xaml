@@ -5,73 +5,74 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="clr-namespace:RobloxPiano.Desktop.ViewModels"
              mc:Ignorable="d" 
-             d:DesignHeight="700" d:DesignWidth="1000">
-    <Grid>
+             Background="{StaticResource Background.Root}"
+             d:DesignHeight="700" d:DesignWidth="1100">
+    <Grid Background="{StaticResource Background.Root}">
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="200" />
+            <ColumnDefinition Width="210" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
-        <!-- 1. Left Section Navigation Pane (200 DIP) -->
+        <!-- 1. Left Section Navigation Pane (210 DIP) -->
         <Border Grid.Column="0" Background="{StaticResource Surface.Base}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="0,0,1,0" Padding="16,20">
             <StackPanel>
-                <TextBlock Text="Settings" FontSize="18" FontWeight="SemiBold" Margin="4,0,0,16" />
+                <TextBlock Text="설정" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" Margin="4,0,0,16" />
 
                 <!-- Navigation List -->
-                <RadioButton Content="General" Style="{StaticResource SideNavButtonStyle}" Command="{Binding SelectSectionCommand}" CommandParameter="General" IsChecked="True" />
-                <RadioButton Content="Playback" Style="{StaticResource SideNavButtonStyle}" Command="{Binding SelectSectionCommand}" CommandParameter="Playback" />
+                <RadioButton Content="일반" Style="{StaticResource SideNavButtonStyle}" Command="{Binding SelectSectionCommand}" CommandParameter="일반" IsChecked="True" />
+                <RadioButton Content="재생" Style="{StaticResource SideNavButtonStyle}" Command="{Binding SelectSectionCommand}" CommandParameter="재생" />
                 <RadioButton Content="Roblox" Style="{StaticResource SideNavButtonStyle}" Command="{Binding SelectSectionCommand}" CommandParameter="Roblox" />
-                <RadioButton Content="Hotkeys" Style="{StaticResource SideNavButtonStyle}" Command="{Binding SelectSectionCommand}" CommandParameter="Hotkeys" />
-                <RadioButton Content="Appearance" Style="{StaticResource SideNavButtonStyle}" Command="{Binding SelectSectionCommand}" CommandParameter="Appearance" />
-                <RadioButton Content="Advanced" Style="{StaticResource SideNavButtonStyle}" Command="{Binding SelectSectionCommand}" CommandParameter="Advanced" />
+                <RadioButton Content="단축키" Style="{StaticResource SideNavButtonStyle}" Command="{Binding SelectSectionCommand}" CommandParameter="단축키" />
+                <RadioButton Content="화면" Style="{StaticResource SideNavButtonStyle}" Command="{Binding SelectSectionCommand}" CommandParameter="화면" />
+                <RadioButton Content="고급" Style="{StaticResource SideNavButtonStyle}" Command="{Binding SelectSectionCommand}" CommandParameter="고급" />
             </StackPanel>
         </Border>
 
         <!-- 2. Right Detail Content Area -->
-        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="32,24">
-            <StackPanel MaxWidth="680" HorizontalAlignment="Left">
+        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="32,24" Background="{StaticResource Background.Root}">
+            <StackPanel MaxWidth="860" HorizontalAlignment="Left">
 
-                <!-- SECTION 1: GENERAL -->
+                <!-- SECTION 1: 일반 (GENERAL) -->
                 <StackPanel>
                     <StackPanel.Style>
                         <Style TargetType="StackPanel">
                             <Setter Property="Visibility" Value="Collapsed"/>
                             <Style.Triggers>
-                                <DataTrigger Binding="{Binding SelectedSection}" Value="General">
+                                <DataTrigger Binding="{Binding SelectedSection}" Value="일반">
                                     <Setter Property="Visibility" Value="Visible"/>
                                 </DataTrigger>
                             </Style.Triggers>
                         </Style>
                     </StackPanel.Style>
 
-                    <TextBlock Text="General" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,4" />
-                    <TextBlock Text="Application startup and default behavior" FontSize="12.5" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,20" />
+                    <TextBlock Text="일반" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" Margin="0,0,0,4" />
+                    <TextBlock Text="시작 및 기본 설정" FontSize="12.5" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,20" />
 
-                    <!-- Startup Group -->
-                    <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="16" Margin="0,0,0,16">
+                    <!-- Settings Card Container -->
+                    <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="18" Margin="0,0,0,16">
                         <StackPanel>
-                            <Grid Margin="0,0,0,12">
+                            <Grid Margin="0,0,0,14">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0">
-                                    <TextBlock Text="Open last workspace on startup" FontSize="13" FontWeight="Medium" />
-                                    <TextBlock Text="Restore previously loaded score and player position" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                    <TextBlock Text="마지막 작업 복원" FontSize="13" FontWeight="Medium" Foreground="{StaticResource Text.Primary}" />
+                                    <TextBlock Text="마지막으로 열었던 악보와 재생 위치를 복원합니다." FontSize="11.5" Foreground="{StaticResource Text.Secondary}" Margin="0,2,0,0" />
                                 </StackPanel>
                                 <CheckBox Grid.Column="1" IsChecked="{Binding OpenLastWorkspace}" VerticalAlignment="Center" />
                             </Grid>
 
                             <Separator />
 
-                            <Grid Margin="0,0,0,12">
+                            <Grid Margin="0,0,0,14">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0">
-                                    <TextBlock Text="Check for updates automatically" FontSize="13" FontWeight="Medium" />
-                                    <TextBlock Text="Notify when newer versions of Roblox Piano are released" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                    <TextBlock Text="업데이트 자동 확인" FontSize="13" FontWeight="Medium" Foreground="{StaticResource Text.Primary}" />
+                                    <TextBlock Text="새 버전이 있으면 알려줍니다." FontSize="11.5" Foreground="{StaticResource Text.Secondary}" Margin="0,2,0,0" />
                                 </StackPanel>
                                 <CheckBox Grid.Column="1" IsChecked="{Binding CheckForUpdates}" VerticalAlignment="Center" />
                             </Grid>
@@ -81,48 +82,48 @@
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="180" />
+                                    <ColumnDefinition Width="200" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                    <TextBlock Text="Default startup page" FontSize="13" FontWeight="Medium" />
-                                    <TextBlock Text="Initial view shown when launching the application" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                    <TextBlock Text="시작 화면" FontSize="13" FontWeight="Medium" Foreground="{StaticResource Text.Primary}" />
+                                    <TextBlock Text="프로그램을 실행했을 때 처음 표시할 화면입니다." FontSize="11.5" Foreground="{StaticResource Text.Secondary}" Margin="0,2,0,0" />
                                 </StackPanel>
                                 <ComboBox Grid.Column="1" SelectedIndex="{Binding DefaultStartupPageIndex}" VerticalAlignment="Center">
-                                    <ComboBoxItem Content="Player" />
-                                    <ComboBoxItem Content="Library" />
-                                    <ComboBoxItem Content="Transcribe" />
+                                    <ComboBoxItem Content="플레이어" />
+                                    <ComboBoxItem Content="라이브러리" />
+                                    <ComboBoxItem Content="오디오 변환" />
                                 </ComboBox>
                             </Grid>
                         </StackPanel>
                     </Border>
                 </StackPanel>
 
-                <!-- SECTION 2: PLAYBACK -->
+                <!-- SECTION 2: 재생 (PLAYBACK) -->
                 <StackPanel>
                     <StackPanel.Style>
                         <Style TargetType="StackPanel">
                             <Setter Property="Visibility" Value="Collapsed"/>
                             <Style.Triggers>
-                                <DataTrigger Binding="{Binding SelectedSection}" Value="Playback">
+                                <DataTrigger Binding="{Binding SelectedSection}" Value="재생">
                                     <Setter Property="Visibility" Value="Visible"/>
                                 </DataTrigger>
                             </Style.Triggers>
                         </Style>
                     </StackPanel.Style>
 
-                    <TextBlock Text="Playback" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,4" />
-                    <TextBlock Text="Note timing, speed, and sustain control" FontSize="12.5" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,20" />
+                    <TextBlock Text="재생" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" Margin="0,0,0,4" />
+                    <TextBlock Text="음표 타이밍, 속도 및 서스테인 설정" FontSize="12.5" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,20" />
 
-                    <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="16" Margin="0,0,0,16">
+                    <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="18" Margin="0,0,0,16">
                         <StackPanel>
-                            <Grid Margin="0,0,0,12">
+                            <Grid Margin="0,0,0,14">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="180" />
+                                    <ColumnDefinition Width="200" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                    <TextBlock Text="Default playback speed" FontSize="13" FontWeight="Medium" />
-                                    <TextBlock Text="Initial speed multiplier applied to loaded scores" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                    <TextBlock Text="기본 재생 속도" FontSize="13" FontWeight="Medium" Foreground="{StaticResource Text.Primary}" />
+                                    <TextBlock Text="악보를 불러올 때 기본으로 적용할 배속입니다." FontSize="11.5" Foreground="{StaticResource Text.Secondary}" Margin="0,2,0,0" />
                                 </StackPanel>
                                 <ComboBox Grid.Column="1" SelectedIndex="{Binding DefaultSpeedIndex}" VerticalAlignment="Center">
                                     <ComboBoxItem Content="0.50x" />
@@ -135,33 +136,33 @@
 
                             <Separator />
 
-                            <Grid Margin="0,0,0,12">
+                            <Grid Margin="0,0,0,14">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="180" />
+                                    <ColumnDefinition Width="200" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                    <TextBlock Text="Default transpose (semitones)" FontSize="13" FontWeight="Medium" />
-                                    <TextBlock Text="Pitch shift offset applied automatically on load" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                    <TextBlock Text="기본 조옮김" FontSize="13" FontWeight="Medium" Foreground="{StaticResource Text.Primary}" />
+                                    <TextBlock Text="불러올 때 기본으로 적용할 반음 단위 오프셋입니다." FontSize="11.5" Foreground="{StaticResource Text.Secondary}" Margin="0,2,0,0" />
                                 </StackPanel>
                                 <TextBox Grid.Column="1" Text="{Binding DefaultTranspose}" Width="80" HorizontalAlignment="Right" VerticalContentAlignment="Center" TextAlignment="Center" />
                             </Grid>
 
                             <Separator />
 
-                            <Grid Margin="0,0,0,12">
+                            <Grid Margin="0,0,0,14">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="180" />
+                                    <ColumnDefinition Width="200" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                    <TextBlock Text="Sustain pedal behavior" FontSize="13" FontWeight="Medium" />
-                                    <TextBlock Text="Control how MIDI CC64 sustain messages are emitted" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                    <TextBlock Text="서스테인 방식" FontSize="13" FontWeight="Medium" Foreground="{StaticResource Text.Primary}" />
+                                    <TextBlock Text="MIDI CC64 서스테인 이벤트 처리 방식입니다." FontSize="11.5" Foreground="{StaticResource Text.Secondary}" Margin="0,2,0,0" />
                                 </StackPanel>
                                 <ComboBox Grid.Column="1" SelectedIndex="{Binding SustainBehaviorIndex}" VerticalAlignment="Center">
-                                    <ComboBoxItem Content="MIDI Sustain Events" />
-                                    <ComboBoxItem Content="Auto Sustain" />
-                                    <ComboBoxItem Content="Disabled" />
+                                    <ComboBoxItem Content="MIDI 서스테인 이벤트" />
+                                    <ComboBoxItem Content="자동 서스테인" />
+                                    <ComboBoxItem Content="사용 안 함" />
                                 </ComboBox>
                             </Grid>
 
@@ -170,11 +171,11 @@
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="180" />
+                                    <ColumnDefinition Width="200" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                    <TextBlock Text="Humanization timing jitter (ms)" FontSize="13" FontWeight="Medium" />
-                                    <TextBlock Text="Micro-timing variance to simulate natural performance" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                    <TextBlock Text="타이밍 자연화 (ms)" FontSize="13" FontWeight="Medium" Foreground="{StaticResource Text.Primary}" />
+                                    <TextBlock Text="자연스러운 연주를 위한 미세 타이밍 오차입니다." FontSize="11.5" Foreground="{StaticResource Text.Secondary}" Margin="0,2,0,0" />
                                 </StackPanel>
                                 <TextBox Grid.Column="1" Text="{Binding HumanizeJitterMs}" Width="80" HorizontalAlignment="Right" VerticalContentAlignment="Center" TextAlignment="Center" />
                             </Grid>
@@ -195,53 +196,53 @@
                         </Style>
                     </StackPanel.Style>
 
-                    <TextBlock Text="Roblox Integration" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,4" />
-                    <TextBlock Text="Target window and virtual piano layout configuration" FontSize="12.5" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,20" />
+                    <TextBlock Text="Roblox" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" Margin="0,0,0,4" />
+                    <TextBlock Text="피아노 건반 및 대상 창 연동 설정" FontSize="12.5" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,20" />
 
-                    <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="16" Margin="0,0,0,16">
+                    <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="18" Margin="0,0,0,16">
                         <StackPanel>
-                            <Grid Margin="0,0,0,12">
+                            <Grid Margin="0,0,0,14">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="200" />
+                                    <ColumnDefinition Width="220" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                    <TextBlock Text="Virtual piano key layout" FontSize="13" FontWeight="Medium" />
-                                    <TextBlock Text="Roblox piano sheet key mapping mode" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                    <TextBlock Text="피아노 건반" FontSize="13" FontWeight="Medium" Foreground="{StaticResource Text.Primary}" />
+                                    <TextBlock Text="Roblox 피아노 악보 키 매핑 방식입니다." FontSize="11.5" Foreground="{StaticResource Text.Secondary}" Margin="0,2,0,0" />
                                 </StackPanel>
                                 <ComboBox Grid.Column="1" SelectedIndex="{Binding PianoLayoutIndex}" VerticalAlignment="Center">
-                                    <ComboBoxItem Content="61 Keys (Standard Sheet)" />
-                                    <ComboBoxItem Content="88 Keys (Full Grand)" />
+                                    <ComboBoxItem Content="61건반 (표준 악보)" />
+                                    <ComboBoxItem Content="88건반 (풀 그랜드)" />
                                 </ComboBox>
                             </Grid>
 
                             <Separator />
 
-                            <Grid Margin="0,0,0,12">
+                            <Grid Margin="0,0,0,14">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="200" />
+                                    <ColumnDefinition Width="220" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                    <TextBlock Text="Target window detection" FontSize="13" FontWeight="Medium" />
-                                    <TextBlock Text="Identification method for active Roblox client process" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                    <TextBlock Text="Roblox 창 감지" FontSize="13" FontWeight="Medium" Foreground="{StaticResource Text.Primary}" />
+                                    <TextBlock Text="실행 중인 Roblox 클라이언트 프로세스를 감지합니다." FontSize="11.5" Foreground="{StaticResource Text.Secondary}" Margin="0,2,0,0" />
                                 </StackPanel>
                                 <ComboBox Grid.Column="1" SelectedIndex="{Binding TargetModeIndex}" VerticalAlignment="Center">
-                                    <ComboBoxItem Content="Auto-detect Roblox Client" />
-                                    <ComboBoxItem Content="Foreground Window" />
+                                    <ComboBoxItem Content="Roblox 자동 감지" />
+                                    <ComboBoxItem Content="현재 활성 창" />
                                 </ComboBox>
                             </Grid>
 
                             <Separator />
 
-                            <Grid Margin="0,0,0,12">
+                            <Grid Margin="0,0,0,14">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0">
-                                    <TextBlock Text="Stop playback when Roblox loses focus" FontSize="13" FontWeight="Medium" />
-                                    <TextBlock Text="Automatically pause note input if player switches windows" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                    <TextBlock Text="Roblox 창을 벗어나면 재생 중지" FontSize="13" FontWeight="Medium" Foreground="{StaticResource Text.Primary}" />
+                                    <TextBlock Text="다른 창으로 전환 시 키 입력을 일시정지합니다." FontSize="11.5" Foreground="{StaticResource Text.Secondary}" Margin="0,2,0,0" />
                                 </StackPanel>
                                 <CheckBox Grid.Column="1" IsChecked="{Binding StopOnFocusLost}" VerticalAlignment="Center" />
                             </Grid>
@@ -251,75 +252,75 @@
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="200" />
+                                    <ColumnDefinition Width="220" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                    <TextBlock Text="Input simulation method" FontSize="13" FontWeight="Medium" />
-                                    <TextBlock Text="Windows API method used for low-latency keystroke injection" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                    <TextBlock Text="키 입력 방식" FontSize="13" FontWeight="Medium" Foreground="{StaticResource Text.Primary}" />
+                                    <TextBlock Text="저지연 가상 키 입력 API 방식입니다." FontSize="11.5" Foreground="{StaticResource Text.Secondary}" Margin="0,2,0,0" />
                                 </StackPanel>
                                 <ComboBox Grid.Column="1" SelectedIndex="{Binding InputMethodIndex}" VerticalAlignment="Center">
-                                    <ComboBoxItem Content="Win32 SendInput (Direct)" />
-                                    <ComboBoxItem Content="Virtual Scan Codes" />
+                                    <ComboBoxItem Content="Win32 SendInput (직접 전송)" />
+                                    <ComboBoxItem Content="가상 스캔코드" />
                                 </ComboBox>
                             </Grid>
                         </StackPanel>
                     </Border>
                 </StackPanel>
 
-                <!-- SECTION 4: HOTKEYS -->
+                <!-- SECTION 4: 단축키 (HOTKEYS) -->
                 <StackPanel>
                     <StackPanel.Style>
                         <Style TargetType="StackPanel">
                             <Setter Property="Visibility" Value="Collapsed"/>
                             <Style.Triggers>
-                                <DataTrigger Binding="{Binding SelectedSection}" Value="Hotkeys">
+                                <DataTrigger Binding="{Binding SelectedSection}" Value="단축키">
                                     <Setter Property="Visibility" Value="Visible"/>
                                 </DataTrigger>
                             </Style.Triggers>
                         </Style>
                     </StackPanel.Style>
 
-                    <TextBlock Text="Global Hotkeys" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,4" />
-                    <TextBlock Text="Configure shortcut keys for in-game playback control" FontSize="12.5" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,20" />
+                    <TextBlock Text="단축키" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" Margin="0,0,0,4" />
+                    <TextBlock Text="인게임 연주 제어를 위한 글로벌 단축키 설정" FontSize="12.5" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,20" />
 
-                    <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="16" Margin="0,0,0,16">
+                    <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="18" Margin="0,0,0,16">
                         <StackPanel>
-                            <Grid Margin="0,0,0,12">
+                            <Grid Margin="0,0,0,14">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="100" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                    <TextBlock Text="Play / Pause" FontSize="13" FontWeight="Medium" />
-                                    <TextBlock Text="Start or pause automated piano playback" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                    <TextBlock Text="재생 / 일시정지" FontSize="13" FontWeight="Medium" Foreground="{StaticResource Text.Primary}" />
+                                    <TextBlock Text="피아노 자동 연주를 시작하거나 일시정지합니다." FontSize="11.5" Foreground="{StaticResource Text.Secondary}" Margin="0,2,0,0" />
                                 </StackPanel>
                                 <TextBox Grid.Column="1" Text="{Binding HotkeyPlayPause}" IsReadOnly="True" HorizontalAlignment="Right" Width="80" TextAlignment="Center" FontFamily="{StaticResource Font.Mono}" VerticalContentAlignment="Center" />
                             </Grid>
 
                             <Separator />
 
-                            <Grid Margin="0,0,0,12">
+                            <Grid Margin="0,0,0,14">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="100" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                    <TextBlock Text="Stop Playback" FontSize="13" FontWeight="Medium" />
-                                    <TextBlock Text="Halt playback and reset playhead to beginning" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                    <TextBlock Text="재생 중지" FontSize="13" FontWeight="Medium" Foreground="{StaticResource Text.Primary}" />
+                                    <TextBlock Text="연주를 즉시 중지하고 처음 위치로 되돌립니다." FontSize="11.5" Foreground="{StaticResource Text.Secondary}" Margin="0,2,0,0" />
                                 </StackPanel>
                                 <TextBox Grid.Column="1" Text="{Binding HotkeyStop}" IsReadOnly="True" HorizontalAlignment="Right" Width="80" TextAlignment="Center" FontFamily="{StaticResource Font.Mono}" VerticalContentAlignment="Center" />
                             </Grid>
 
                             <Separator />
 
-                            <Grid Margin="0,0,0,12">
+                            <Grid Margin="0,0,0,14">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="100" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                    <TextBlock Text="Toggle Overlay Window" FontSize="13" FontWeight="Medium" />
-                                    <TextBlock Text="Show or hide compact transparent HUD over Roblox" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                    <TextBlock Text="오버레이 표시/숨기기" FontSize="13" FontWeight="Medium" Foreground="{StaticResource Text.Primary}" />
+                                    <TextBlock Text="Roblox 위에 투명 오버레이 HUD를 켜거나 끕니다." FontSize="11.5" Foreground="{StaticResource Text.Secondary}" Margin="0,2,0,0" />
                                 </StackPanel>
                                 <TextBox Grid.Column="1" Text="{Binding HotkeyOverlay}" IsReadOnly="True" HorizontalAlignment="Right" Width="80" TextAlignment="Center" FontFamily="{StaticResource Font.Mono}" VerticalContentAlignment="Center" />
                             </Grid>
@@ -332,8 +333,8 @@
                                     <ColumnDefinition Width="100" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                    <TextBlock Text="Emergency Panic Stop" FontSize="13" FontWeight="Medium" />
-                                    <TextBlock Text="Instantly terminate all keystroke events and release keys" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                    <TextBlock Text="긴급 정지" FontSize="13" FontWeight="Medium" Foreground="{StaticResource Text.Primary}" />
+                                    <TextBlock Text="모든 키 입력을 즉시 해제하고 비상 정지합니다." FontSize="11.5" Foreground="{StaticResource Text.Secondary}" Margin="0,2,0,0" />
                                 </StackPanel>
                                 <TextBox Grid.Column="1" Text="{Binding HotkeyPanic}" IsReadOnly="True" HorizontalAlignment="Right" Width="80" TextAlignment="Center" FontFamily="{StaticResource Font.Mono}" VerticalContentAlignment="Center" />
                             </Grid>
@@ -341,54 +342,54 @@
                     </Border>
                 </StackPanel>
 
-                <!-- SECTION 5: APPEARANCE -->
+                <!-- SECTION 5: 화면 (APPEARANCE) -->
                 <StackPanel>
                     <StackPanel.Style>
                         <Style TargetType="StackPanel">
                             <Setter Property="Visibility" Value="Collapsed"/>
                             <Style.Triggers>
-                                <DataTrigger Binding="{Binding SelectedSection}" Value="Appearance">
+                                <DataTrigger Binding="{Binding SelectedSection}" Value="화면">
                                     <Setter Property="Visibility" Value="Visible"/>
                                 </DataTrigger>
                             </Style.Triggers>
                         </Style>
                     </StackPanel.Style>
 
-                    <TextBlock Text="Appearance" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,4" />
-                    <TextBlock Text="Visual personalization and display scaling" FontSize="12.5" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,20" />
+                    <TextBlock Text="화면" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" Margin="0,0,0,4" />
+                    <TextBlock Text="테마 및 디스플레이 배율 설정" FontSize="12.5" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,20" />
 
-                    <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="16" Margin="0,0,0,16">
+                    <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="18" Margin="0,0,0,16">
                         <StackPanel>
-                            <Grid Margin="0,0,0,12">
+                            <Grid Margin="0,0,0,14">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="180" />
+                                    <ColumnDefinition Width="200" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                    <TextBlock Text="Application theme" FontSize="13" FontWeight="Medium" />
-                                    <TextBlock Text="Color mode for the user interface" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                    <TextBlock Text="테마" FontSize="13" FontWeight="Medium" Foreground="{StaticResource Text.Primary}" />
+                                    <TextBlock Text="애플리케이션 색상 모드입니다." FontSize="11.5" Foreground="{StaticResource Text.Secondary}" Margin="0,2,0,0" />
                                 </StackPanel>
                                 <ComboBox Grid.Column="1" SelectedIndex="{Binding ThemeIndex}" VerticalAlignment="Center">
-                                    <ComboBoxItem Content="Dark Graphite (Default)" />
-                                    <ComboBoxItem Content="Windows System" />
+                                    <ComboBoxItem Content="다크 그래파이트 (기본)" />
+                                    <ComboBoxItem Content="Windows 시스템" />
                                 </ComboBox>
                             </Grid>
 
                             <Separator />
 
-                            <Grid Margin="0,0,0,12">
+                            <Grid Margin="0,0,0,14">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="180" />
+                                    <ColumnDefinition Width="200" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                    <TextBlock Text="Accent color" FontSize="13" FontWeight="Medium" />
-                                    <TextBlock Text="Highlight color for active interactive elements" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                    <TextBlock Text="강조 색상" FontSize="13" FontWeight="Medium" Foreground="{StaticResource Text.Primary}" />
+                                    <TextBlock Text="선택 및 활성 항목의 강조 색상입니다." FontSize="11.5" Foreground="{StaticResource Text.Secondary}" Margin="0,2,0,0" />
                                 </StackPanel>
                                 <ComboBox Grid.Column="1" SelectedIndex="{Binding AccentIndex}" VerticalAlignment="Center">
-                                    <ComboBoxItem Content="Fluent Blue (#388BFD)" />
-                                    <ComboBoxItem Content="Obsidian Slate" />
-                                    <ComboBoxItem Content="Emerald Green" />
+                                    <ComboBoxItem Content="블루 (#4387F5)" />
+                                    <ComboBoxItem Content="옵시디언 슬레이트" />
+                                    <ComboBoxItem Content="에메랄드 그린" />
                                 </ComboBox>
                             </Grid>
 
@@ -397,14 +398,14 @@
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="180" />
+                                    <ColumnDefinition Width="200" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                    <TextBlock Text="UI display scaling" FontSize="13" FontWeight="Medium" />
-                                    <TextBlock Text="Adjust overall user interface scale factor" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                    <TextBlock Text="UI 크기" FontSize="13" FontWeight="Medium" Foreground="{StaticResource Text.Primary}" />
+                                    <TextBlock Text="전체 인터페이스 배율을 조정합니다." FontSize="11.5" Foreground="{StaticResource Text.Secondary}" Margin="0,2,0,0" />
                                 </StackPanel>
                                 <ComboBox Grid.Column="1" SelectedIndex="{Binding UiScaleIndex}" VerticalAlignment="Center">
-                                    <ComboBoxItem Content="100% (Standard)" />
+                                    <ComboBoxItem Content="100% (표준)" />
                                     <ComboBoxItem Content="125%" />
                                     <ComboBoxItem Content="150%" />
                                 </ComboBox>
@@ -413,52 +414,52 @@
                     </Border>
                 </StackPanel>
 
-                <!-- SECTION 6: ADVANCED -->
+                <!-- SECTION 6: 고급 (ADVANCED) -->
                 <StackPanel>
                     <StackPanel.Style>
                         <Style TargetType="StackPanel">
                             <Setter Property="Visibility" Value="Collapsed"/>
                             <Style.Triggers>
-                                <DataTrigger Binding="{Binding SelectedSection}" Value="Advanced">
+                                <DataTrigger Binding="{Binding SelectedSection}" Value="고급">
                                     <Setter Property="Visibility" Value="Visible"/>
                                 </DataTrigger>
                             </Style.Triggers>
                         </Style>
                     </StackPanel.Style>
 
-                    <TextBlock Text="Advanced" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,4" />
-                    <TextBlock Text="Application diagnostics, storage paths, and maintenance" FontSize="12.5" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,20" />
+                    <TextBlock Text="고급" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" Margin="0,0,0,4" />
+                    <TextBlock Text="애플리케이션 진단, 저장소 및 설정 초기화" FontSize="12.5" Foreground="{StaticResource Text.Secondary}" Margin="0,0,0,20" />
 
-                    <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="16" Margin="0,0,0,16">
+                    <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="18" Margin="0,0,0,16">
                         <StackPanel>
-                            <Grid Margin="0,0,0,12">
+                            <Grid Margin="0,0,0,14">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="180" />
+                                    <ColumnDefinition Width="200" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                    <TextBlock Text="Diagnostic logging level" FontSize="13" FontWeight="Medium" />
-                                    <TextBlock Text="Verbosity level written to local debug logs" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                    <TextBlock Text="로그 수준" FontSize="13" FontWeight="Medium" Foreground="{StaticResource Text.Primary}" />
+                                    <TextBlock Text="디버그 로그에 기록할 상세 수준입니다." FontSize="11.5" Foreground="{StaticResource Text.Secondary}" Margin="0,2,0,0" />
                                 </StackPanel>
                                 <ComboBox Grid.Column="1" SelectedIndex="{Binding LogLevelIndex}" VerticalAlignment="Center">
-                                    <ComboBoxItem Content="Normal" />
-                                    <ComboBoxItem Content="Verbose" />
-                                    <ComboBoxItem Content="Debug" />
+                                    <ComboBoxItem Content="보통" />
+                                    <ComboBoxItem Content="상세" />
+                                    <ComboBoxItem Content="디버그" />
                                 </ComboBox>
                             </Grid>
 
                             <Separator />
 
-                            <Grid Margin="0,0,0,12">
+                            <Grid Margin="0,0,0,14">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0" Margin="0,0,12,0">
-                                    <TextBlock Text="Database storage path" FontSize="13" FontWeight="Medium" />
+                                    <TextBlock Text="데이터 저장 위치" FontSize="13" FontWeight="Medium" Foreground="{StaticResource Text.Primary}" />
                                     <TextBox Text="{Binding DatabasePath}" IsReadOnly="True" Foreground="{StaticResource Text.Secondary}" Margin="0,4,0,0" VerticalContentAlignment="Center" />
                                 </StackPanel>
-                                <Button Grid.Column="1" Content="Open Folder" VerticalAlignment="Bottom" Padding="14,6" />
+                                <Button Grid.Column="1" Content="폴더 열기" VerticalAlignment="Bottom" Padding="14,6" />
                             </Grid>
 
                             <Separator />
@@ -469,10 +470,10 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                                    <TextBlock Text="Reset application settings" FontSize="13" FontWeight="Medium" />
-                                    <TextBlock Text="Restore all configurations to their original defaults" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                                    <TextBlock Text="설정 초기화" FontSize="13" FontWeight="Medium" Foreground="{StaticResource Text.Primary}" />
+                                    <TextBlock Text="모든 구성을 원래 기본값으로 복원합니다." FontSize="11.5" Foreground="{StaticResource Text.Secondary}" Margin="0,2,0,0" />
                                 </StackPanel>
-                                <Button Grid.Column="1" Content="Reset Settings" Foreground="{StaticResource Status.Error}" Padding="14,6" />
+                                <Button Grid.Column="1" Content="초기화" Foreground="{StaticResource Status.Error}" Padding="16,6" />
                             </Grid>
                         </StackPanel>
                     </Border>

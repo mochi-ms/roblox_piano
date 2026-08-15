@@ -24,12 +24,12 @@ public partial class TranscribeViewModel : ObservableObject
     private int _progressPercent = 62;
 
     [ObservableProperty]
-    private string _progressStatus = "Analyzing piano notes (Frame 4,120 / 6,540)...";
+    private string _progressStatus = "피아노 음표 분석 중 (프레임 4,120 / 6,540)...";
 
     [RelayCommand]
     private void SelectSource(string source)
     {
-        if (source == "YouTube")
+        if (source is "YouTube" or "유튜브")
         {
             IsYouTubeSource = true;
             IsLocalFileSource = false;

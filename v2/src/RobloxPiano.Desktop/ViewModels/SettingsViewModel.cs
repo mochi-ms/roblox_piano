@@ -6,9 +6,9 @@ namespace RobloxPiano.Desktop.ViewModels;
 public partial class SettingsViewModel : ObservableObject
 {
     [ObservableProperty]
-    private string _selectedSection = "General";
+    private string _selectedSection = "일반";
 
-    // General
+    // General (일반)
     [ObservableProperty]
     private bool _openLastWorkspace = true;
 
@@ -18,7 +18,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private int _defaultStartupPageIndex = 0;
 
-    // Playback
+    // Playback (재생)
     [ObservableProperty]
     private int _defaultSpeedIndex = 2;
 
@@ -44,7 +44,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private int _inputMethodIndex = 0;
 
-    // Hotkeys
+    // Hotkeys (단축키)
     [ObservableProperty]
     private string _hotkeyPlayPause = "F6";
 
@@ -57,7 +57,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private string _hotkeyPanic = "F8";
 
-    // Appearance
+    // Appearance (화면)
     [ObservableProperty]
     private int _themeIndex = 0;
 
@@ -67,7 +67,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private int _uiScaleIndex = 0;
 
-    // Advanced
+    // Advanced (고급)
     [ObservableProperty]
     private int _logLevelIndex = 0;
 
@@ -77,6 +77,15 @@ public partial class SettingsViewModel : ObservableObject
     [RelayCommand]
     private void SelectSection(string section)
     {
-        SelectedSection = section;
+        SelectedSection = section switch
+        {
+            "General" or "일반" => "일반",
+            "Playback" or "재생" => "재생",
+            "Roblox" => "Roblox",
+            "Hotkeys" or "단축키" => "단축키",
+            "Appearance" or "화면" => "화면",
+            "Advanced" or "고급" => "고급",
+            _ => "일반"
+        };
     }
 }
