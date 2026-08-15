@@ -119,4 +119,140 @@ public class KeyStateManagerTests
         Assert.Empty(manager.ActiveKeys);
         Assert.Empty(blockingBackend.PressedKeys);
     }
+
+    [Fact]
+    public async Task KeyStateManager_BlockedModifierDown_ReleaseAllCannotLeaveLateStuckModifier()
+    {
+        var blockingBackend = new PlaybackSchedulerTests.ControlledBlockingPlaybackBackend();
+        using var manager = new KeyStateManager(blockingBackend);
+
+        blockingBackend.SetBlockKey("shift");
+
+        var modTask = Task.Run(() => manager.SetModifier("SHIFT", true));
+
+        await blockingBackend.WaitForBlockEnteredAsync();
+
+        // ReleaseAll is called while SetModifier KeyDown is blocked
+        manager.ReleaseAll();
+
+        Assert.Empty(manager.ActiveModifiers);
+
+        // Unblock backend KeyDown
+        blockingBackend.ReleaseBlock();
+        await modTask;
+
+        // When SetModifier finishes, epoch check must undo the late KeyDown
+        Assert.Empty(manager.ActiveModifiers);
+        Assert.Empty(blockingBackend.PressedKeys);
+    }
+
+    [Fact]
+    public void KeyStateManager_ModifierKeyDownFailure_RollsBackAndPropagates()
+    {
+        var backend = new ActionFailingPlaybackBackend { FailOnKeyDown = true, FailKeyDownKey = "shift" };
+        using var manager = new KeyStateManager(backend);
+
+        Assert.Throws<InvalidOperationException>(() => manager.SetModifier("SHIFT", true));
+
+        Assert.DoesNotContain("SHIFT", manager.ActiveModifiers);
+        Assert.Empty(backend.PressedKeys);
+    }
+
+    [Fact]
+    public void KeyStateManager_ModifierKeyUpFailure_PropagatesAndEmergencyReleaseRemainsPossible()
+    {
+        var backend = new ActionFailingPlaybackBackend { FailOnKeyUp = true, FailKeyUpKey = "shift", FailKeyUpCount = 1 };
+        using var manager = new KeyStateManager(backend);
+
+        manager.SetModifier("SHIFT", true);
+        Assert.Contains("SHIFT", manager.ActiveModifiers);
+        Assert.Contains("shift", backend.PressedKeys);
+
+        // Normal modifier release throws
+        Assert.Throws<InvalidOperationException>(() => manager.SetModifier("SHIFT", false));
+
+        // State remains intact so emergency ReleaseAll knows about it
+        Assert.Contains("SHIFT", manager.ActiveModifiers);
+
+        // Disable failure for emergency release
+        backend.FailOnKeyUp = false;
+        manager.ReleaseAll();
+
+        Assert.Empty(manager.ActiveModifiers);
+        Assert.Empty(backend.PressedKeys);
+    }
+
+    [Fact]
+    public void KeyStateManager_PhysicalKeyUpFailure_PropagatesAndEmergencyReleaseRemainsPossible()
+    {
+        var backend = new ActionFailingPlaybackBackend { FailOnKeyUp = true, FailKeyUpKey = "q", FailKeyUpCount = 1 };
+        using var manager = new KeyStateManager(backend);
+
+        manager.PressPhysicalKey("q");
+        Assert.Contains("q", manager.ActiveKeys);
+        Assert.Contains("q", backend.PressedKeys);
+
+        // Normal physical key release throws
+        Assert.Throws<InvalidOperationException>(() => manager.ReleasePhysicalKey("q"));
+
+        // State remains intact so emergency ReleaseAll knows about it
+        Assert.Contains("q", manager.ActiveKeys);
+
+        // Emergency ReleaseAll
+        backend.FailOnKeyUp = false;
+        manager.ReleaseAll();
+
+        Assert.Empty(manager.ActiveKeys);
+        Assert.Empty(backend.PressedKeys);
+    }
+
+    internal class ActionFailingPlaybackBackend : IPlaybackBackend
+    {
+        public bool FailOnKeyDown { get; set; }
+        public string? FailKeyDownKey { get; set; }
+        public bool FailOnKeyUp { get; set; }
+        public string? FailKeyUpKey { get; set; }
+        public int FailKeyUpCount { get; set; } = -1;
+        private int _keyUpCounter;
+
+        public HashSet<string> PressedKeys { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public void KeyDown(string key)
+        {
+            if (FailOnKeyDown && (FailKeyDownKey == null || string.Equals(key, FailKeyDownKey, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidOperationException($"Simulated KeyDown failure for key {key}");
+            }
+            lock (PressedKeys)
+            {
+                PressedKeys.Add(key);
+            }
+        }
+
+        public void KeyUp(string key)
+        {
+            _keyUpCounter++;
+            if (FailOnKeyUp && (FailKeyUpKey == null || string.Equals(key, FailKeyUpKey, StringComparison.OrdinalIgnoreCase)))
+            {
+                if (FailKeyUpCount < 0 || _keyUpCounter == FailKeyUpCount)
+                {
+                    throw new InvalidOperationException($"Simulated KeyUp failure for key {key}");
+                }
+            }
+            lock (PressedKeys)
+            {
+                PressedKeys.Remove(key);
+            }
+        }
+
+        public void ReleaseAll()
+        {
+            lock (PressedKeys)
+            {
+                PressedKeys.Clear();
+            }
+        }
+
+        public void Dispose() { }
+    }
 }

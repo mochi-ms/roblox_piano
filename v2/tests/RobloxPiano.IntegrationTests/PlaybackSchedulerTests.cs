@@ -1195,6 +1195,90 @@ public class PlaybackSchedulerTests
         Assert.True(elapsedSeconds >= 0.25 && elapsedSeconds <= 1.20, $"100 events measured duration was {elapsedSeconds:F3}s");
     }
 
+    [Fact]
+    public async Task Playback_KeyUpFailure_FiresPlaybackErrorAndReleaseAll()
+    {
+        var backend = new KeyStateManagerTests.ActionFailingPlaybackBackend
+        {
+            FailOnKeyUp = true,
+            FailKeyUpKey = "t",
+            FailKeyUpCount = 1
+        };
+        using var keyState = new KeyStateManager(backend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 10);
+        using var scheduler = new PlaybackScheduler(engine, keyState);
+        scheduler.CountdownSeconds = 0;
+
+        var timeline = new MusicTimeline("KeyUp Failure Test");
+        timeline.AddNote(new NoteEvent(60, 0.0, 0.05)); // pitch 60 -> 't'
+
+        scheduler.SetTimeline(timeline);
+
+        Exception? caughtError = null;
+        scheduler.PlaybackError += (_, ex) => caughtError = ex;
+
+        scheduler.Play();
+
+        for (int i = 0; i < 30; i++)
+        {
+            if (caughtError != null || scheduler.State == PlaybackState.Stopped) break;
+            await Task.Delay(20);
+        }
+
+        Assert.NotNull(caughtError);
+        Assert.Equal(PlaybackState.Stopped, scheduler.State);
+        Assert.Empty(keyState.ActiveKeys);
+        Assert.Empty(keyState.ActiveModifiers);
+        Assert.False(scheduler.HasActiveWorker);
+    }
+
+    [Fact]
+    public async Task Playback_ModifierKeyDownFailure_DoesNotPlayUnshiftedNote()
+    {
+        var backend = new KeyStateManagerTests.ActionFailingPlaybackBackend
+        {
+            FailOnKeyDown = true,
+            FailKeyDownKey = "shift"
+        };
+        using var keyState = new KeyStateManager(backend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 10);
+        using var scheduler = new PlaybackScheduler(engine, keyState);
+        scheduler.CountdownSeconds = 0;
+
+        // Pitch 37 is C#2, mapped to Shift + '1'
+        var km = mapper.MapPitch(37);
+        Assert.NotNull(km);
+        Assert.Contains("SHIFT", km.Modifiers);
+        Assert.Equal("1", km.PhysicalKey);
+
+        var timeline = new MusicTimeline("Shift Failure Test");
+        timeline.AddNote(new NoteEvent(37, 0.0, 0.1));
+
+        scheduler.SetTimeline(timeline);
+
+        Exception? caughtError = null;
+        scheduler.PlaybackError += (_, ex) => caughtError = ex;
+
+        scheduler.Play();
+
+        for (int i = 0; i < 30; i++)
+        {
+            if (caughtError != null || scheduler.State == PlaybackState.Stopped) break;
+            await Task.Delay(20);
+        }
+
+        Assert.NotNull(caughtError);
+        Assert.Equal(PlaybackState.Stopped, scheduler.State);
+
+        // Crucial invariant: '1' must NOT have been pressed because SHIFT failed!
+        Assert.DoesNotContain("1", backend.PressedKeys);
+        Assert.Empty(keyState.ActiveKeys);
+        Assert.Empty(keyState.ActiveModifiers);
+        Assert.False(scheduler.HasActiveWorker);
+    }
+
     internal class ControlledBlockingPlaybackBackend : IPlaybackBackend
     {
         private string? _blockKey;

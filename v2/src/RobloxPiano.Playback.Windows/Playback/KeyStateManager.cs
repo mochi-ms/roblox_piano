@@ -79,7 +79,19 @@ public class KeyStateManager : IDisposable
 
         if (changeToActive)
         {
-            try { _backend.KeyDown(modLower); } catch { }
+            try
+            {
+                _backend.KeyDown(modLower);
+            }
+            catch
+            {
+                lock (_lock)
+                {
+                    _activeModifiers.Remove(modUpper);
+                }
+                throw;
+            }
+
             if (Volatile.Read(ref _releaseAllEpoch) != epoch)
             {
                 try { _backend.KeyUp(modLower); } catch { }
@@ -91,7 +103,18 @@ public class KeyStateManager : IDisposable
         }
         else if (changeToInactive)
         {
-            try { _backend.KeyUp(modLower); } catch { }
+            try
+            {
+                _backend.KeyUp(modLower);
+            }
+            catch
+            {
+                lock (_lock)
+                {
+                    _activeModifiers.Add(modUpper);
+                }
+                throw;
+            }
         }
     }
 
@@ -149,7 +172,18 @@ public class KeyStateManager : IDisposable
 
         if (wasPressed)
         {
-            try { _backend.KeyUp(keyLower); } catch { }
+            try
+            {
+                _backend.KeyUp(keyLower);
+            }
+            catch
+            {
+                lock (_lock)
+                {
+                    _pressedPhysicalKeys.Add(keyLower);
+                }
+                throw;
+            }
         }
     }
 
@@ -204,6 +238,7 @@ public class KeyStateManager : IDisposable
 
     private void WatchdogCheck(object? state)
     {
+        bool shouldRelease = false;
         lock (_lock)
         {
             if (_pressedPhysicalKeys.Count == 0 && _activeModifiers.Count == 0)
@@ -214,8 +249,13 @@ public class KeyStateManager : IDisposable
             var elapsed = Stopwatch.GetElapsedTime(_lastActivityTimestamp);
             if (elapsed > _idleTimeout)
             {
-                ReleaseAll();
+                shouldRelease = true;
             }
+        }
+
+        if (shouldRelease)
+        {
+            ReleaseAll();
         }
     }
 
