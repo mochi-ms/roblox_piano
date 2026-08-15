@@ -19,4 +19,10 @@ public static class LibraryDatabasePathProvider
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         return Path.Combine(localAppData, "RobloxPianoPlayer", "library.db");
     }
+
+    public static string GetDefaultAudioWorkspaceRoot()
+    {
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        return Path.Combine(localAppData, "RobloxPianoPlayer", "AudioWorkspace");
+    }
 }

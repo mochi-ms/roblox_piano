@@ -138,6 +138,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _hotkeyService.HotkeyPressed -= _hotkeyHandler;
         _hotkeyService.Dispose();
         _importViewModel.Dispose();
+        _transcribeViewModel.Dispose();
         _playerViewModel.Dispose();
     }
 }
