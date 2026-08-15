@@ -66,21 +66,16 @@ public class PlaybackScheduler : IDisposable, IAsyncDisposable
 
     internal long CurrentGeneration
     {
-        get { lock (_stateLock) return _activeRun?.Generation ?? 0; }
-    }
-
-    internal bool HasActiveWorker
-    {
         get
         {
             lock (_stateLock)
             {
-                bool activeLive = _activeRun?.WorkerTask != null && !_activeRun.WorkerTask.IsCompleted;
-                bool terminatingLive = _terminatingRun?.WorkerTask != null && !_terminatingRun.WorkerTask.IsCompleted;
-                return activeLive || terminatingLive;
+                return _activeRun?.Generation ?? 0;
             }
         }
     }
+
+    public bool HasActiveWorker => LiveWorkerCount > 0;
 
     internal int LiveWorkerCount
     {
@@ -90,7 +85,7 @@ public class PlaybackScheduler : IDisposable, IAsyncDisposable
             {
                 int count = 0;
                 if (_activeRun?.WorkerTask != null && !_activeRun.WorkerTask.IsCompleted) count++;
-                if (_terminatingRun?.WorkerTask != null && !_terminatingRun.WorkerTask.IsCompleted) count++;
+                if (_terminatingRun?.WorkerTask != null && !_terminatingRun.WorkerTask.IsCompleted && !ReferenceEquals(_terminatingRun, _activeRun)) count++;
                 return count;
             }
         }
@@ -191,7 +186,7 @@ public class PlaybackScheduler : IDisposable, IAsyncDisposable
         await _controlGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            await TerminateActiveWorkerInternalAsync(ct).ConfigureAwait(false);
+            await EnsureNoLiveWorkerInternalAsync(ct).ConfigureAwait(false);
 
             lock (_stateLock)
             {
@@ -383,7 +378,7 @@ public class PlaybackScheduler : IDisposable, IAsyncDisposable
         await _controlGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            await TerminateActiveWorkerInternalAsync(ct).ConfigureAwait(false);
+            await EnsureNoLiveWorkerInternalAsync(ct).ConfigureAwait(false);
 
             lock (_stateLock)
             {
@@ -428,7 +423,7 @@ public class PlaybackScheduler : IDisposable, IAsyncDisposable
             else if (wasPaused)
             {
                 // Fully terminate old worker, reset position, remain Paused
-                await TerminateActiveWorkerInternalAsync(ct).ConfigureAwait(false);
+                await EnsureNoLiveWorkerInternalAsync(ct).ConfigureAwait(false);
 
                 lock (_stateLock)
                 {
@@ -490,46 +485,42 @@ public class PlaybackScheduler : IDisposable, IAsyncDisposable
         _transpose = Math.Clamp(semitones, -24, 24);
     }
 
-    private async Task TerminateActiveWorkerInternalAsync(CancellationToken ct = default)
+    private async Task EnsureNoLiveWorkerInternalAsync(CancellationToken ct = default)
     {
-        PlaybackRunContext? oldRun;
+        // 1. First, check and await any existing terminating run from previous timeouts
+        PlaybackRunContext? existingTerminatingRun;
         lock (_stateLock)
         {
-            oldRun = _activeRun;
-            _activeRun = null;
-            if (oldRun != null)
-            {
-                _terminatingRun = oldRun;
-            }
+            existingTerminatingRun = _terminatingRun;
         }
 
-        if (oldRun != null)
+        if (existingTerminatingRun != null)
         {
             try
             {
-                oldRun.Cts.Cancel();
+                existingTerminatingRun.Cts.Cancel();
             }
             catch { }
 
             _controlWakeEvent.Set();
             _pauseEvent.Set();
 
-            if (oldRun.WorkerTask != null)
+            if (existingTerminatingRun.WorkerTask != null && !existingTerminatingRun.WorkerTask.IsCompleted)
             {
                 try
                 {
                     using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                    var completed = await Task.WhenAny(oldRun.WorkerTask, Task.Delay(_workerTerminationTimeout, timeoutCts.Token)).ConfigureAwait(false);
-                    if (completed != oldRun.WorkerTask)
+                    var completed = await Task.WhenAny(existingTerminatingRun.WorkerTask, Task.Delay(_workerTerminationTimeout, timeoutCts.Token)).ConfigureAwait(false);
+                    if (completed != existingTerminatingRun.WorkerTask)
                     {
                         _keyState.ReleaseAll();
                         _pedal.Release();
-                        throw new TimeoutException($"Playback worker failed to terminate within {_workerTerminationTimeout.TotalMilliseconds}ms bounded timeout.");
+                        throw new TimeoutException($"Terminating playback worker failed to terminate within {_workerTerminationTimeout.TotalMilliseconds}ms bounded timeout.");
                     }
                     timeoutCts.Cancel();
-                    await oldRun.WorkerTask.ConfigureAwait(false);
+                    await existingTerminatingRun.WorkerTask.ConfigureAwait(false);
                 }
-                catch (OperationCanceledException) when (oldRun.Cts.IsCancellationRequested)
+                catch (OperationCanceledException) when (existingTerminatingRun.Cts.IsCancellationRequested)
                 {
                 }
             }
@@ -539,7 +530,7 @@ public class PlaybackScheduler : IDisposable, IAsyncDisposable
 
             lock (_stateLock)
             {
-                if (ReferenceEquals(_terminatingRun, oldRun))
+                if (ReferenceEquals(_terminatingRun, existingTerminatingRun))
                 {
                     _terminatingRun = null;
                 }
@@ -547,7 +538,72 @@ public class PlaybackScheduler : IDisposable, IAsyncDisposable
 
             try
             {
-                oldRun.Cts.Dispose();
+                existingTerminatingRun.Cts.Dispose();
+            }
+            catch { }
+        }
+
+        // 2. Next, check and terminate the active run
+        PlaybackRunContext? activeRun;
+        lock (_stateLock)
+        {
+            activeRun = _activeRun;
+            _activeRun = null;
+            if (activeRun != null)
+            {
+                if (_terminatingRun != null && _terminatingRun.WorkerTask != null && !_terminatingRun.WorkerTask.IsCompleted)
+                {
+                    throw new InvalidOperationException("Lifecycle invariant violation: Cannot terminate active run while a terminating run is still executing.");
+                }
+                _terminatingRun = activeRun;
+            }
+        }
+
+        if (activeRun != null)
+        {
+            try
+            {
+                activeRun.Cts.Cancel();
+            }
+            catch { }
+
+            _controlWakeEvent.Set();
+            _pauseEvent.Set();
+
+            if (activeRun.WorkerTask != null && !activeRun.WorkerTask.IsCompleted)
+            {
+                try
+                {
+                    using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    var completed = await Task.WhenAny(activeRun.WorkerTask, Task.Delay(_workerTerminationTimeout, timeoutCts.Token)).ConfigureAwait(false);
+                    if (completed != activeRun.WorkerTask)
+                    {
+                        _keyState.ReleaseAll();
+                        _pedal.Release();
+                        throw new TimeoutException($"Active playback worker failed to terminate within {_workerTerminationTimeout.TotalMilliseconds}ms bounded timeout.");
+                    }
+                    timeoutCts.Cancel();
+                    await activeRun.WorkerTask.ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (activeRun.Cts.IsCancellationRequested)
+                {
+                }
+            }
+
+            _keyState.ReleaseAll();
+            _pedal.Release();
+
+            lock (_stateLock)
+            {
+                if (ReferenceEquals(_terminatingRun, activeRun))
+                {
+                    _terminatingRun = null;
+                }
+            }
+
+            try
+            {
+                activeRun.Cts.Dispose();
             }
             catch { }
         }
@@ -560,7 +616,7 @@ public class PlaybackScheduler : IDisposable, IAsyncDisposable
         CancellationToken externalCt = default)
     {
         // 1. Cancel and await old worker to fully exit before starting new worker
-        await TerminateActiveWorkerInternalAsync(externalCt).ConfigureAwait(false);
+        await EnsureNoLiveWorkerInternalAsync(externalCt).ConfigureAwait(false);
 
         ThrowIfDisposed();
 
@@ -568,6 +624,11 @@ public class PlaybackScheduler : IDisposable, IAsyncDisposable
         PlaybackRunContext newRun;
         lock (_stateLock)
         {
+            if (_activeRun != null || _terminatingRun != null)
+            {
+                throw new InvalidOperationException("Lifecycle invariant violation: Cannot start new generation while active or terminating worker exists.");
+            }
+
             long generation = Interlocked.Increment(ref _generationCounter);
             newRun = new PlaybackRunContext(generation);
             _activeRun = newRun;
@@ -931,7 +992,7 @@ public class PlaybackScheduler : IDisposable, IAsyncDisposable
         await _controlGate.WaitAsync().ConfigureAwait(false);
         try
         {
-            await TerminateActiveWorkerInternalAsync().ConfigureAwait(false);
+            await EnsureNoLiveWorkerInternalAsync().ConfigureAwait(false);
 
             lock (_stateLock)
             {

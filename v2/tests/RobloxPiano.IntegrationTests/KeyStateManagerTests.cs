@@ -92,4 +92,31 @@ public class KeyStateManagerTests
         Assert.Empty(manager.ActiveModifiers);
         Assert.Empty(backend.PressedKeys);
     }
+
+    [Fact]
+    public async Task KeyStateManager_BlockedKeyDown_ReleaseAllCannotLeaveLateStuckKey()
+    {
+        var blockingBackend = new PlaybackSchedulerTests.ControlledBlockingPlaybackBackend();
+        using var manager = new KeyStateManager(blockingBackend);
+
+        blockingBackend.SetBlockKey("t");
+
+        // Start KeyDown in background task (which enters block)
+        var keyDownTask = Task.Run(() => manager.PressPhysicalKey("t"));
+
+        await blockingBackend.WaitForBlockEnteredAsync();
+
+        // ReleaseAll is called while KeyDown is blocked
+        manager.ReleaseAll();
+
+        Assert.Empty(manager.ActiveKeys);
+
+        // Unblock backend KeyDown
+        blockingBackend.ReleaseBlock();
+        await keyDownTask;
+
+        // When KeyDown finishes, epoch check must undo the late KeyDown
+        Assert.Empty(manager.ActiveKeys);
+        Assert.Empty(blockingBackend.PressedKeys);
+    }
 }

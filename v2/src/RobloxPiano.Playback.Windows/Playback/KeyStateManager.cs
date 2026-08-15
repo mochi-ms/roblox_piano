@@ -9,6 +9,7 @@ public class KeyStateManager : IDisposable
     private readonly HashSet<string> _pressedPhysicalKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _activeModifiers = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _lock = new();
+    private long _releaseAllEpoch;
 
     private readonly TimeSpan _idleTimeout;
     private readonly Timer? _watchdogTimer;
@@ -57,9 +58,11 @@ public class KeyStateManager : IDisposable
         var modLower = modifier.ToLowerInvariant();
         bool changeToActive = false;
         bool changeToInactive = false;
+        long epoch;
 
         lock (_lock)
         {
+            epoch = Volatile.Read(ref _releaseAllEpoch);
             _lastActivityTimestamp = Stopwatch.GetTimestamp();
 
             if (active && !_activeModifiers.Contains(modUpper))
@@ -76,11 +79,19 @@ public class KeyStateManager : IDisposable
 
         if (changeToActive)
         {
-            _backend.KeyDown(modLower);
+            try { _backend.KeyDown(modLower); } catch { }
+            if (Volatile.Read(ref _releaseAllEpoch) != epoch)
+            {
+                try { _backend.KeyUp(modLower); } catch { }
+                lock (_lock)
+                {
+                    _activeModifiers.Remove(modUpper);
+                }
+            }
         }
         else if (changeToInactive)
         {
-            _backend.KeyUp(modLower);
+            try { _backend.KeyUp(modLower); } catch { }
         }
     }
 
@@ -88,8 +99,11 @@ public class KeyStateManager : IDisposable
     {
         var keyLower = physicalKey.ToLowerInvariant();
         bool alreadyPressed;
+        long epoch;
+
         lock (_lock)
         {
+            epoch = Volatile.Read(ref _releaseAllEpoch);
             _lastActivityTimestamp = Stopwatch.GetTimestamp();
             alreadyPressed = _pressedPhysicalKeys.Contains(keyLower);
             _pressedPhysicalKeys.Add(keyLower);
@@ -97,9 +111,30 @@ public class KeyStateManager : IDisposable
 
         if (alreadyPressed)
         {
-            _backend.KeyUp(keyLower);
+            try { _backend.KeyUp(keyLower); } catch { }
         }
-        _backend.KeyDown(keyLower);
+
+        try
+        {
+            _backend.KeyDown(keyLower);
+        }
+        catch
+        {
+            lock (_lock)
+            {
+                _pressedPhysicalKeys.Remove(keyLower);
+            }
+            throw;
+        }
+
+        if (Volatile.Read(ref _releaseAllEpoch) != epoch)
+        {
+            try { _backend.KeyUp(keyLower); } catch { }
+            lock (_lock)
+            {
+                _pressedPhysicalKeys.Remove(keyLower);
+            }
+        }
     }
 
     public void ReleasePhysicalKey(string physicalKey)
@@ -114,7 +149,7 @@ public class KeyStateManager : IDisposable
 
         if (wasPressed)
         {
-            _backend.KeyUp(keyLower);
+            try { _backend.KeyUp(keyLower); } catch { }
         }
     }
 
@@ -125,6 +160,7 @@ public class KeyStateManager : IDisposable
 
         lock (_lock)
         {
+            Interlocked.Increment(ref _releaseAllEpoch);
             _lastActivityTimestamp = Stopwatch.GetTimestamp();
             keysToRelease = _pressedPhysicalKeys.ToList();
             _pressedPhysicalKeys.Clear();

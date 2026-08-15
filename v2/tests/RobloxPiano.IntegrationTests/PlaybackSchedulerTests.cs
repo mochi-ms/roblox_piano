@@ -416,6 +416,213 @@ public class PlaybackSchedulerTests
     }
 
     [Fact]
+    public async Task Playback_DoubleDisposeTimeout_StillPreservesLiveWorkerResources()
+    {
+        var blockingBackend = new ControlledBlockingPlaybackBackend();
+        using var keyState = new KeyStateManager(blockingBackend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 10);
+
+        var scheduler = new PlaybackScheduler(engine, keyState, workerTerminationTimeout: TimeSpan.FromMilliseconds(150));
+        scheduler.CountdownSeconds = 0;
+
+        var timeline = new MusicTimeline("Double Dispose Timeout Test");
+        timeline.AddNote(new NoteEvent(60, 0.0, 0.5));
+
+        scheduler.SetTimeline(timeline);
+        blockingBackend.SetBlockKey("t");
+        scheduler.Play();
+
+        await blockingBackend.WaitForBlockEnteredAsync();
+
+        // First Dispose -> times out because worker is blocked
+        Assert.Throws<TimeoutException>(() => scheduler.Dispose());
+        Assert.True(scheduler.HasActiveWorker);
+        Assert.Equal(1, scheduler.LiveWorkerCount);
+
+        // Second Dispose immediately, WITHOUT unblocking worker:
+        // Must wait for the SAME terminating run, time out again, resources remain intact!
+        Assert.Throws<TimeoutException>(() => scheduler.Dispose());
+        Assert.True(scheduler.HasActiveWorker);
+        Assert.Equal(1, scheduler.LiveWorkerCount);
+
+        // Now unblock worker
+        blockingBackend.ReleaseBlock();
+        await Task.Delay(50);
+
+        // Third Dispose -> now completes cleanly
+        scheduler.Dispose();
+        Assert.False(scheduler.HasActiveWorker);
+        Assert.Equal(0, scheduler.LiveWorkerCount);
+    }
+
+    [Fact]
+    public async Task Playback_StopTimeout_PlayCannotStartUntilTerminatingWorkerExits()
+    {
+        var blockingBackend = new ControlledBlockingPlaybackBackend();
+        using var keyState = new KeyStateManager(blockingBackend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 10);
+        var scheduler = new PlaybackScheduler(engine, keyState, workerTerminationTimeout: TimeSpan.FromMilliseconds(150));
+        scheduler.CountdownSeconds = 0;
+
+        var timeline = new MusicTimeline("Stop Timeout Recovery Test");
+        timeline.AddNote(new NoteEvent(60, 0.0, 0.5));
+        timeline.AddNote(new NoteEvent(72, 1.0, 1.5));
+
+        scheduler.SetTimeline(timeline);
+        blockingBackend.SetBlockKey("t");
+        scheduler.Play();
+
+        await blockingBackend.WaitForBlockEnteredAsync();
+        long initialGeneration = scheduler.CurrentGeneration;
+
+        // StopAsync times out because worker is blocked
+        await Assert.ThrowsAsync<TimeoutException>(async () => await scheduler.StopAsync());
+
+        Assert.True(scheduler.HasActiveWorker);
+        Assert.Equal(1, scheduler.LiveWorkerCount);
+
+        // Calling PlayAsync while terminating worker is still executing MUST NOT start a new worker!
+        // It must attempt to ensure no live worker, time out, and leave no new active run.
+        await Assert.ThrowsAsync<TimeoutException>(async () => await scheduler.PlayAsync());
+        Assert.Equal(0, scheduler.CurrentGeneration);
+        Assert.Equal(1, scheduler.LiveWorkerCount);
+
+        // Unblock worker
+        blockingBackend.ReleaseBlock();
+        await Task.Delay(50);
+
+        // Once terminating worker exits, PlayAsync can successfully start a new worker
+        blockingBackend.SetBlockKey(null!);
+        await scheduler.PlayAsync();
+        Assert.True(scheduler.CurrentGeneration > initialGeneration);
+        Assert.Equal(1, scheduler.LiveWorkerCount);
+
+        await Task.Delay(20);
+        await scheduler.StopAsync();
+        Assert.False(scheduler.HasActiveWorker);
+        Assert.Equal(0, scheduler.LiveWorkerCount);
+        scheduler.Dispose();
+    }
+
+    [Fact]
+    public async Task Playback_TerminatingRunCompletion_AllowsCleanDisposeRetry()
+    {
+        var blockingBackend = new ControlledBlockingPlaybackBackend();
+        using var keyState = new KeyStateManager(blockingBackend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 10);
+        var scheduler = new PlaybackScheduler(engine, keyState, workerTerminationTimeout: TimeSpan.FromMilliseconds(150));
+        scheduler.CountdownSeconds = 0;
+
+        var timeline = new MusicTimeline("Clean Dispose Retry Test");
+        timeline.AddNote(new NoteEvent(60, 0.0, 0.5));
+
+        scheduler.SetTimeline(timeline);
+        blockingBackend.SetBlockKey("t");
+        scheduler.Play();
+
+        await blockingBackend.WaitForBlockEnteredAsync();
+
+        // DisposeAsync times out
+        await Assert.ThrowsAsync<TimeoutException>(async () => await scheduler.DisposeAsync());
+        Assert.True(scheduler.HasActiveWorker);
+
+        // Unblock worker
+        blockingBackend.ReleaseBlock();
+        await Task.Delay(50);
+
+        // DisposeAsync retry succeeds cleanly without throwing TimeoutException
+        await scheduler.DisposeAsync();
+        Assert.False(scheduler.HasActiveWorker);
+        Assert.Equal(0, scheduler.LiveWorkerCount);
+    }
+
+    [Fact]
+    public async Task Playback_TerminatingRunCompletion_AllowsFuturePlayAfterStopTimeout()
+    {
+        var blockingBackend = new ControlledBlockingPlaybackBackend();
+        using var keyState = new KeyStateManager(blockingBackend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 10);
+        using var scheduler = new PlaybackScheduler(engine, keyState, workerTerminationTimeout: TimeSpan.FromMilliseconds(150));
+        scheduler.CountdownSeconds = 0;
+
+        var timeline = new MusicTimeline("Future Play After Stop Timeout Test");
+        timeline.AddNote(new NoteEvent(60, 0.0, 0.5));
+
+        scheduler.SetTimeline(timeline);
+        blockingBackend.SetBlockKey("t");
+        scheduler.Play();
+
+        await blockingBackend.WaitForBlockEnteredAsync();
+
+        // StopAsync times out
+        await Assert.ThrowsAsync<TimeoutException>(async () => await scheduler.StopAsync());
+        Assert.True(scheduler.HasActiveWorker);
+
+        // Unblock worker
+        blockingBackend.ReleaseBlock();
+        await Task.Delay(50);
+
+        // PlayAsync now proceeds and plays successfully
+        blockingBackend.SetBlockKey(null!);
+        await scheduler.PlayAsync();
+
+        Assert.True(scheduler.HasActiveWorker);
+        Assert.Equal(PlaybackState.Playing, scheduler.State);
+
+        await Task.Delay(20);
+        await scheduler.StopAsync();
+        Assert.False(scheduler.HasActiveWorker);
+    }
+
+    [Fact]
+    public async Task Playback_LiveWorkerCount_NeverExceedsOneDuringTimeoutRecovery()
+    {
+        var blockingBackend = new ControlledBlockingPlaybackBackend();
+        using var keyState = new KeyStateManager(blockingBackend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 10);
+        using var scheduler = new PlaybackScheduler(engine, keyState, workerTerminationTimeout: TimeSpan.FromMilliseconds(150));
+        scheduler.CountdownSeconds = 0;
+
+        var timeline = new MusicTimeline("Worker Count Invariant Test");
+        timeline.AddNote(new NoteEvent(60, 0.0, 0.5));
+
+        scheduler.SetTimeline(timeline);
+        blockingBackend.SetBlockKey("t");
+        scheduler.Play();
+
+        await blockingBackend.WaitForBlockEnteredAsync();
+        Assert.Equal(1, scheduler.LiveWorkerCount);
+
+        // Stop times out -> terminating run still tracked
+        await Assert.ThrowsAsync<TimeoutException>(async () => await scheduler.StopAsync());
+        Assert.Equal(1, scheduler.LiveWorkerCount);
+
+        // Play attempt times out -> must not create second worker
+        await Assert.ThrowsAsync<TimeoutException>(async () => await scheduler.PlayAsync());
+        Assert.Equal(1, scheduler.LiveWorkerCount);
+
+        // Seek attempt times out -> must not create second worker
+        await Assert.ThrowsAsync<TimeoutException>(async () => await scheduler.SeekAsync(0.5));
+        Assert.Equal(1, scheduler.LiveWorkerCount);
+
+        // SetTimeline attempt times out -> must not create second worker
+        await Assert.ThrowsAsync<TimeoutException>(async () => await scheduler.SetTimelineAsync(timeline));
+        Assert.Equal(1, scheduler.LiveWorkerCount);
+
+        blockingBackend.ReleaseBlock();
+        await Task.Delay(50);
+
+        // Now that terminating worker completed, Stop cleans up
+        await scheduler.StopAsync();
+        Assert.Equal(0, scheduler.LiveWorkerCount);
+    }
+
+    [Fact]
     public async Task Playback_Replacement_DoesNotStartNewWorkerUntilOldWorkerExits()
     {
         var blockingBackend = new ControlledBlockingPlaybackBackend();
@@ -988,13 +1195,14 @@ public class PlaybackSchedulerTests
         Assert.True(elapsedSeconds >= 0.25 && elapsedSeconds <= 1.20, $"100 events measured duration was {elapsedSeconds:F3}s");
     }
 
-    private class ControlledBlockingPlaybackBackend : IPlaybackBackend
+    internal class ControlledBlockingPlaybackBackend : IPlaybackBackend
     {
         private string? _blockKey;
         private readonly TaskCompletionSource _blockEnteredTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly ManualResetEventSlim _releaseEvent = new(false);
 
         public List<PlaybackBackendEvent> Events { get; } = new();
+        public HashSet<string> PressedKeys { get; } = new(StringComparer.OrdinalIgnoreCase);
 
         public void SetBlockKey(string key) => _blockKey = key;
         public Task WaitForBlockEnteredAsync() => _blockEnteredTcs.Task;
@@ -1002,6 +1210,10 @@ public class PlaybackSchedulerTests
 
         public void KeyDown(string key)
         {
+            lock (PressedKeys)
+            {
+                PressedKeys.Add(key);
+            }
             Events.Add(new PlaybackBackendEvent(Stopwatch.GetTimestamp(), BackendAction.KeyDown, key));
             if (string.Equals(key, _blockKey, StringComparison.OrdinalIgnoreCase))
             {
@@ -1012,10 +1224,20 @@ public class PlaybackSchedulerTests
 
         public void KeyUp(string key)
         {
+            lock (PressedKeys)
+            {
+                PressedKeys.Remove(key);
+            }
             Events.Add(new PlaybackBackendEvent(Stopwatch.GetTimestamp(), BackendAction.KeyUp, key));
         }
 
-        public void ReleaseAll() { }
+        public void ReleaseAll()
+        {
+            lock (PressedKeys)
+            {
+                PressedKeys.Clear();
+            }
+        }
 
         public void Dispose()
         {
