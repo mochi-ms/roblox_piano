@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using RobloxPiano.Core.Importing;
 using RobloxPiano.Core.Library;
+using RobloxPiano.Core.Piano;
 using RobloxPiano.Core.Services;
 using RobloxPiano.Infrastructure.Data;
 
@@ -12,6 +13,7 @@ namespace RobloxPiano.Desktop.ViewModels;
 public partial class ImportViewModel : ObservableObject, IDisposable
 {
     private readonly IImportPipeline _pipeline;
+    private readonly PianoProfileContext _profileContext;
     private CancellationTokenSource? _cts;
     private bool _disposed;
 
@@ -37,8 +39,13 @@ public partial class ImportViewModel : ObservableObject, IDisposable
     public event EventHandler? ViewLibraryRequested;
     public event EventHandler? ScoreImported;
 
-    public ImportViewModel(IImportPipeline? pipeline = null)
+    public PianoProfileContext ProfileContext => _profileContext;
+
+    public ImportViewModel(IImportPipeline? pipeline = null, PianoProfileContext? profileContext = null)
     {
+        _profileContext = profileContext ?? new PianoProfileContext();
+        _profileContext.ProfileChanged += OnProfileChanged;
+
         if (pipeline != null)
         {
             _pipeline = pipeline;
@@ -52,6 +59,18 @@ public partial class ImportViewModel : ObservableObject, IDisposable
             var folderService = new FolderService(repository, fileService);
             var libraryService = new LibraryService(repository, fileService, folderService);
             _pipeline = new ImportPipeline(libraryService, repository);
+        }
+    }
+
+    private void OnProfileChanged(object? sender, PianoProfile newProfile)
+    {
+        foreach (var item in QueueItems)
+        {
+            if (item.Result?.Timeline != null)
+            {
+                var validation = ImportTimelineValidator.Validate(item.Result.Timeline, newProfile);
+                item.UpdateDiagnostics(validation.PlayableNotes, validation.OutOfRangeNotes);
+            }
         }
     }
 
@@ -127,7 +146,7 @@ public partial class ImportViewModel : ObservableObject, IDisposable
                 item.SetImporting();
                 ProgressStatusText = $"{i + 1} / {total} 가져오는 중: {item.FileName}";
 
-                var req = new ImportRequest(item.FilePath, addToLibrary: true);
+                var req = new ImportRequest(item.FilePath, addToLibrary: true, targetPianoProfile: _profileContext.CurrentProfile);
 
                 ImportResult result;
                 try
@@ -213,6 +232,28 @@ public partial class ImportViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
+    public void RemoveItem(ImportQueueItemViewModel? item)
+    {
+        if (item == null || IsImporting) return;
+        QueueItems.Remove(item);
+        HasItems = QueueItems.Count > 0;
+        SummaryText = HasItems ? $"{QueueItems.Count}개 파일 대기 중" : string.Empty;
+    }
+
+    [RelayCommand]
+    public void ClearCompleted()
+    {
+        if (IsImporting) return;
+        var toRemove = QueueItems.Where(q => q.Status == ImportItemStatus.Completed || q.Status == ImportItemStatus.Failed || q.Status == ImportItemStatus.Cancelled).ToList();
+        foreach (var item in toRemove)
+        {
+            QueueItems.Remove(item);
+        }
+        HasItems = QueueItems.Count > 0;
+        SummaryText = HasItems ? $"{QueueItems.Count}개 파일 대기 중" : string.Empty;
+    }
+
+    [RelayCommand]
     public void ClearQueue()
     {
         if (IsImporting) return;
@@ -258,6 +299,7 @@ public partial class ImportViewModel : ObservableObject, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _profileContext.ProfileChanged -= OnProfileChanged;
         _cts?.Cancel();
         _cts?.Dispose();
     }

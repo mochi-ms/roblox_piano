@@ -7,6 +7,7 @@ public interface IPythonProcessSession : IDisposable
 {
     bool IsRunning { get; }
     int? ProcessId { get; }
+    Task<int> Completion { get; }
     Task SendLineAsync(string line, CancellationToken ct = default);
     void Kill();
 }

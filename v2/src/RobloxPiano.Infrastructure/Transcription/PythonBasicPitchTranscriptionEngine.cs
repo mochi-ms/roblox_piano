@@ -170,6 +170,9 @@ public class PythonBasicPitchTranscriptionEngine : ITranscriptionEngine
             };
 
             string jsonLine = JsonSerializer.Serialize(reqObj);
+            var session = _session!;
+            var requestTask = _currentRequestTcs.Task;
+            var exitTask = session.Completion;
 
             using var reg = ct.Register(() =>
             {
@@ -177,12 +180,32 @@ public class PythonBasicPitchTranscriptionEngine : ITranscriptionEngine
                 _currentRequestTcs.TrySetCanceled(ct);
             });
 
-            await _session!.SendLineAsync(jsonLine, ct);
+            await session.SendLineAsync(jsonLine, ct);
+
+            var firstCompleted = await Task.WhenAny(requestTask, exitTask);
+            if (ct.IsCancellationRequested)
+            {
+                ct.ThrowIfCancellationRequested();
+            }
+
+            if (firstCompleted == exitTask)
+            {
+                int exitCode = await exitTask;
+                KillSession();
+                workspace.CleanJob(request.JobId);
+                string stderr = TruncateDiagnostic(_rollingStderr.ToString(), 1024);
+                return TranscriptionResult.Failed(
+                    request.JobId,
+                    request.NormalizedAudioPath,
+                    $"AI 워커 프로세스가 작업 수행 중 예기치 않게 종료되었습니다. (종료 코드: {exitCode}) {stderr}".Trim(),
+                    "WORKER_CRASHED"
+                );
+            }
 
             JsonElement responseElement;
             try
             {
-                responseElement = await _currentRequestTcs.Task;
+                responseElement = await requestTask;
             }
             catch (OperationCanceledException)
             {
@@ -343,9 +366,26 @@ public class PythonBasicPitchTranscriptionEngine : ITranscriptionEngine
         using var ctsTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, ctsTimeout.Token);
 
+        var handshakeTask = _handshakeTcs.Task;
+        var exitTask = _session.Completion;
+
+        var firstCompleted = await Task.WhenAny(handshakeTask, exitTask);
+        if (linkedCts.Token.IsCancellationRequested)
+        {
+            linkedCts.Token.ThrowIfCancellationRequested();
+        }
+
+        if (firstCompleted == exitTask)
+        {
+            int exitCode = await exitTask;
+            KillSession();
+            string stderr = TruncateDiagnostic(_rollingStderr.ToString(), 1024);
+            throw new InvalidOperationException($"AI 워커가 초기화 중 종료되었습니다. (종료 코드: {exitCode}) {stderr}".Trim());
+        }
+
         try
         {
-            var helloJson = await _handshakeTcs.Task.WaitAsync(linkedCts.Token);
+            var helloJson = await handshakeTask.WaitAsync(linkedCts.Token);
             if (helloJson.TryGetProperty("basic_pitch_version", out var bpProp))
             {
                 _detectedBasicPitchVersion = bpProp.GetString();
@@ -389,7 +429,9 @@ public class PythonBasicPitchTranscriptionEngine : ITranscriptionEngine
 
         if (line.Length > 1_048_576) // 1MB protection
         {
-            _currentRequestTcs?.TrySetException(new InvalidOperationException("워커 출력 크기가 허용치(1MB)를 초과했습니다."));
+            var ex = new InvalidOperationException("워커 출력 크기가 허용치(1MB)를 초과했습니다.");
+            _handshakeTcs?.TrySetException(ex);
+            _currentRequestTcs?.TrySetException(ex);
             return;
         }
 
@@ -398,33 +440,59 @@ public class PythonBasicPitchTranscriptionEngine : ITranscriptionEngine
             using var doc = JsonDocument.Parse(line);
             var root = doc.RootElement.Clone();
 
-            if (!root.TryGetProperty("type", out var typeProp)) return;
-            string type = typeProp.GetString() ?? "";
+            if (!root.TryGetProperty("type", out var typeProp) || string.IsNullOrWhiteSpace(typeProp.GetString()))
+            {
+                var ex = new InvalidOperationException("프로토콜 오류: 메시지 타입('type') 필드가 누락되었거나 유효하지 않습니다.");
+                _handshakeTcs?.TrySetException(ex);
+                _currentRequestTcs?.TrySetException(ex);
+                return;
+            }
+
+            string type = typeProp.GetString()!;
+
+            // Strict protocol version 1 check
+            if (!root.TryGetProperty("protocol", out var protoProp) || protoProp.ValueKind != JsonValueKind.Number || protoProp.GetInt32() != 1)
+            {
+                int protoVal = (protoProp.ValueKind == JsonValueKind.Number) ? protoProp.GetInt32() : -1;
+                var ex = new InvalidOperationException($"프로토콜 버전 불일치: 지원되지 않는 프로토콜 버전 {protoVal} (기대치: 1)");
+                _handshakeTcs?.TrySetException(ex);
+                _currentRequestTcs?.TrySetException(ex);
+                return;
+            }
+
+            if (!root.TryGetProperty("request_id", out var reqIdProp) || string.IsNullOrWhiteSpace(reqIdProp.GetString()))
+            {
+                var ex = new InvalidOperationException("프로토콜 오류: 'request_id' 필드가 누락되었습니다.");
+                _handshakeTcs?.TrySetException(ex);
+                _currentRequestTcs?.TrySetException(ex);
+                return;
+            }
+
+            string reqId = reqIdProp.GetString()!;
 
             if (string.Equals(type, "hello", StringComparison.OrdinalIgnoreCase))
             {
-                if (root.TryGetProperty("basic_pitch_version", out var bpProp))
+                if (!string.Equals(reqId, "startup", StringComparison.Ordinal))
                 {
-                    _detectedBasicPitchVersion = bpProp.GetString();
+                    _handshakeTcs?.TrySetException(new InvalidOperationException("프로토콜 오류: hello 메시지의 request_id가 'startup'이 아닙니다."));
+                    return;
                 }
-                if (root.TryGetProperty("engine_available", out var eaProp))
+
+                if (!root.TryGetProperty("python_version", out _) || !root.TryGetProperty("basic_pitch_version", out _))
                 {
-                    _engineAvailable = eaProp.ValueKind == JsonValueKind.True;
-                }
-                if (root.TryGetProperty("status_message", out var smProp))
-                {
-                    _detectedStatusMessage = smProp.GetString();
+                    _handshakeTcs?.TrySetException(new InvalidOperationException("프로토콜 오류: hello 메시지에 필수 버전 정보가 누락되었습니다."));
+                    return;
                 }
 
                 _handshakeTcs?.TrySetResult(root);
                 return;
             }
 
+            // For status, result, and error messages
+            string jId = root.TryGetProperty("job_id", out var jProp) ? jProp.GetString() ?? "" : "";
+
             if (string.Equals(type, "status", StringComparison.OrdinalIgnoreCase))
             {
-                string reqId = root.TryGetProperty("request_id", out var rProp) ? rProp.GetString() ?? "" : "";
-                string jId = root.TryGetProperty("job_id", out var jProp) ? jProp.GetString() ?? "" : "";
-
                 if (string.Equals(reqId, _activeRequestId, StringComparison.Ordinal) &&
                     string.Equals(jId, _activeJobId, StringComparison.Ordinal))
                 {
@@ -448,19 +516,22 @@ public class PythonBasicPitchTranscriptionEngine : ITranscriptionEngine
             if (string.Equals(type, "result", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(type, "error", StringComparison.OrdinalIgnoreCase))
             {
-                string reqId = root.TryGetProperty("request_id", out var rProp) ? rProp.GetString() ?? "" : "";
-                string jId = root.TryGetProperty("job_id", out var jProp) ? jProp.GetString() ?? "" : "";
-
                 // Match request and job ID
                 if (string.Equals(reqId, _activeRequestId, StringComparison.Ordinal) &&
                     (string.IsNullOrEmpty(_activeJobId) || string.Equals(jId, _activeJobId, StringComparison.Ordinal)))
                 {
                     _currentRequestTcs?.TrySetResult(root);
                 }
+                return;
             }
+
+            // Unknown message type
+            var unknownTypeEx = new InvalidOperationException($"알 수 없는 프로토콜 메시지 타입: '{type}'");
+            _currentRequestTcs?.TrySetException(unknownTypeEx);
         }
         catch (Exception ex)
         {
+            _handshakeTcs?.TrySetException(new InvalidOperationException($"워커 프로토콜 파싱 오류: {ex.Message}"));
             _currentRequestTcs?.TrySetException(new InvalidOperationException($"워커 프로토콜 파싱 오류: {ex.Message}"));
         }
     }

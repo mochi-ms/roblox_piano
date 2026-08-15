@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.Input;
 using RobloxPiano.Core.Audio;
 using RobloxPiano.Core.Importing;
 using RobloxPiano.Core.Music;
+using RobloxPiano.Core.Piano;
 using RobloxPiano.Core.Transcription;
 using RobloxPiano.Infrastructure.Audio;
 using RobloxPiano.Infrastructure.Transcription;
@@ -18,6 +19,7 @@ public partial class TranscribeViewModel : ObservableObject, IDisposable
     private readonly IFfmpegToolLocator _toolLocator;
     private readonly ITranscriptionEngine _transcriptionEngine;
     private readonly IImportPipeline _importPipeline;
+    private readonly PianoProfileContext _profileContext;
 
     private CancellationTokenSource? _audioCts;
     private CancellationTokenSource? _aiCts;
@@ -25,6 +27,8 @@ public partial class TranscribeViewModel : ObservableObject, IDisposable
 
     public event EventHandler<MusicTimeline>? OpenScoreRequested;
     public event EventHandler? ScoreImported;
+
+    public PianoProfileContext ProfileContext => _profileContext;
 
     [ObservableProperty]
     private ObservableCollection<AudioQueueItemViewModel> _queueItems = new();
@@ -66,14 +70,30 @@ public partial class TranscribeViewModel : ObservableObject, IDisposable
         IAudioIngestionService? ingestionService = null,
         IFfmpegToolLocator? toolLocator = null,
         ITranscriptionEngine? transcriptionEngine = null,
-        IImportPipeline? importPipeline = null)
+        IImportPipeline? importPipeline = null,
+        PianoProfileContext? profileContext = null)
     {
         _toolLocator = toolLocator ?? new FfmpegToolLocator();
         _ingestionService = ingestionService ?? new AudioIngestionService(_toolLocator);
         _transcriptionEngine = transcriptionEngine ?? new PythonBasicPitchTranscriptionEngine();
         _importPipeline = importPipeline ?? new ImportPipeline();
+        _profileContext = profileContext ?? new PianoProfileContext();
+
+        _profileContext.ProfileChanged += OnProfileChanged;
 
         _ = CheckToolsAsync();
+    }
+
+    private void OnProfileChanged(object? sender, PianoProfile newProfile)
+    {
+        foreach (var item in QueueItems)
+        {
+            if (item.AiResult?.Timeline != null)
+            {
+                var validation = ImportTimelineValidator.Validate(item.AiResult.Timeline, newProfile);
+                item.UpdateDiagnostics(validation.PlayableNotes, validation.OutOfRangeNotes);
+            }
+        }
     }
 
     public async Task CheckToolsAsync()
@@ -315,7 +335,8 @@ public partial class TranscribeViewModel : ObservableObject, IDisposable
             var req = new TranscriptionRequest(
                 item.JobId,
                 item.NormalizedAudioPath!,
-                SourceTitle: item.Result?.Metadata?.Title ?? Path.GetFileNameWithoutExtension(item.FilePath)
+                SourceTitle: item.Result?.Metadata?.Title ?? Path.GetFileNameWithoutExtension(item.FilePath),
+                TargetPianoProfile: _profileContext.CurrentProfile
             );
 
             var progress = new Progress<TranscriptionProgress>(p =>
@@ -400,7 +421,8 @@ public partial class TranscribeViewModel : ObservableObject, IDisposable
                 var req = new TranscriptionRequest(
                     item.JobId,
                     item.NormalizedAudioPath!,
-                    SourceTitle: item.Result?.Metadata?.Title ?? Path.GetFileNameWithoutExtension(item.FilePath)
+                    SourceTitle: item.Result?.Metadata?.Title ?? Path.GetFileNameWithoutExtension(item.FilePath),
+                    TargetPianoProfile: _profileContext.CurrentProfile
                 );
 
                 var progress = new Progress<TranscriptionProgress>(p =>
@@ -510,7 +532,8 @@ public partial class TranscribeViewModel : ObservableObject, IDisposable
                 item.GeneratedMidiPath,
                 title,
                 targetFolderId: null,
-                addToLibrary: true
+                addToLibrary: true,
+                targetPianoProfile: _profileContext.CurrentProfile
             );
 
             var res = await _importPipeline.ImportFileAsync(req);
@@ -568,6 +591,8 @@ public partial class TranscribeViewModel : ObservableObject, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+
+        _profileContext.ProfileChanged -= OnProfileChanged;
 
         _audioCts?.Cancel();
         _audioCts?.Dispose();

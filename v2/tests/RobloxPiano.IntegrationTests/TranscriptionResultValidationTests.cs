@@ -43,8 +43,10 @@ public class TranscriptionResultValidationTests : IDisposable
     private class MockPythonSession : IPythonProcessSession
     {
         private readonly Action<string>? _onStdOut;
+        private readonly TaskCompletionSource<int> _completionTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public bool IsRunning { get; private set; } = true;
         public int? ProcessId => 9999;
+        public Task<int> Completion => _completionTcs.Task;
         private readonly Func<string, (string Type, string ResponseJson)>? _responder;
 
         public MockPythonSession(Action<string>? onStdOut, Func<string, (string Type, string ResponseJson)>? responder = null)
@@ -67,7 +69,12 @@ public class TranscriptionResultValidationTests : IDisposable
             return Task.CompletedTask;
         }
 
-        public void Kill() => IsRunning = false;
+        public void Kill()
+        {
+            IsRunning = false;
+            _completionTcs.TrySetResult(-1);
+        }
+
         public void Dispose() => Kill();
     }
 

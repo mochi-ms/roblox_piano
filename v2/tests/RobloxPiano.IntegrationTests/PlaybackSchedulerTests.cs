@@ -66,11 +66,11 @@ public class PlaybackSchedulerTests
         var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 5);
         using var scheduler = new PlaybackScheduler(engine, keyState);
         scheduler.CountdownSeconds = 0;
-        scheduler.Speed = 1.0;
+        scheduler.Speed = 2.0;
 
         var timeline = new MusicTimeline("Pause Test");
         timeline.AddNote(new NoteEvent(60, 0.0, 0.1));
-        timeline.AddNote(new NoteEvent(64, 0.5, 0.6));
+        timeline.AddNote(new NoteEvent(64, 0.3, 0.4));
 
         scheduler.SetTimeline(timeline);
         scheduler.Play();
@@ -82,12 +82,12 @@ public class PlaybackSchedulerTests
         Assert.Empty(keyState.ActiveKeys);
 
         // Wait while paused
-        await Task.Delay(150);
+        await Task.Delay(50);
 
         scheduler.Resume();
         Assert.Equal(PlaybackState.Playing, scheduler.State);
 
-        for (int i = 0; i < 30; i++)
+        for (int i = 0; i < 50; i++)
         {
             if (scheduler.State == PlaybackState.Completed) break;
             await Task.Delay(20);

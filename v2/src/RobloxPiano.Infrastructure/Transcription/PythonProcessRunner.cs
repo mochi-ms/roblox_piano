@@ -9,10 +9,12 @@ public class PythonProcessSession : IPythonProcessSession
 {
     private readonly Process _process;
     private readonly StreamWriter _stdinWriter;
+    private readonly TaskCompletionSource<int> _completionTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private bool _disposed;
 
     public bool IsRunning => !_disposed && !_process.HasExited;
     public int? ProcessId => !_disposed ? _process.Id : null;
+    public Task<int> Completion => _completionTcs.Task;
 
     public PythonProcessSession(
         string executablePath,
@@ -44,7 +46,7 @@ public class PythonProcessSession : IPythonProcessSession
             psi.ArgumentList.Add(arg);
         }
 
-        _process = new Process { StartInfo = psi };
+        _process = new Process { StartInfo = psi, EnableRaisingEvents = true };
 
         _process.OutputDataReceived += (_, e) =>
         {
@@ -62,8 +64,16 @@ public class PythonProcessSession : IPythonProcessSession
             }
         };
 
+        _process.Exited += (_, _) =>
+        {
+            int exitCode = -1;
+            try { exitCode = _process.ExitCode; } catch { }
+            _completionTcs.TrySetResult(exitCode);
+        };
+
         if (!_process.Start())
         {
+            _completionTcs.TrySetResult(-1);
             throw new InvalidOperationException($"Python 프로세스를 시작할 수 없습니다: {executablePath}");
         }
 
@@ -97,6 +107,12 @@ public class PythonProcessSession : IPythonProcessSession
         catch
         {
             // Ignore failure to kill already exited process
+        }
+        finally
+        {
+            int exitCode = -1;
+            try { exitCode = _process.ExitCode; } catch { }
+            _completionTcs.TrySetResult(exitCode);
         }
     }
 

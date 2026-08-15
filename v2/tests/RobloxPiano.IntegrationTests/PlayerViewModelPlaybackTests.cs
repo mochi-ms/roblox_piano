@@ -345,4 +345,204 @@ public class PlayerViewModelPlaybackTests : IDisposable
         Assert.Equal(eventsAtDispose, backend.Events.Count);
         Assert.Empty(backend.PressedKeys);
     }
+
+    [Fact]
+    public void DefaultProductionContext_Is88Key()
+    {
+        var context = new RobloxPiano.Core.Piano.PianoProfileContext();
+        Assert.Equal(RobloxPiano.Core.Piano.RobloxPianoProfileKind.Key88, context.CurrentKind);
+        Assert.Equal(88, context.CurrentProfile.Keys.Count);
+    }
+
+    [Fact]
+    public void MainVM_UsesSingleSharedPianoProfileContext()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var playerVm = new PlayerViewModel(backend);
+        using var mainVm = new MainViewModel(playerVm);
+
+        Assert.Same(mainVm.ProfileContext, mainVm.PlayerViewModel.ProfileContext);
+        Assert.Same(mainVm.ProfileContext, mainVm.ImportViewModel.ProfileContext);
+        Assert.Same(mainVm.ProfileContext, mainVm.TranscribeViewModel.ProfileContext);
+    }
+
+    private class CapturingImportPipeline : RobloxPiano.Core.Importing.IImportPipeline
+    {
+        public RobloxPiano.Core.Importing.ImportRequest? LastRequest { get; private set; }
+
+        public Task<RobloxPiano.Core.Importing.ImportResult> ImportFileAsync(RobloxPiano.Core.Importing.ImportRequest request, CancellationToken ct = default)
+        {
+            LastRequest = request;
+            var tl = new MusicTimeline("Mock");
+            tl.Notes.Add(new NoteEvent(21, 0, 1));
+            return Task.FromResult(RobloxPiano.Core.Importing.ImportResult.Successful(request.FilePath, RobloxPiano.Core.Importing.ImportSourceType.Midi, "Mock", tl, 1, 0, 21, 21));
+        }
+
+        public Task<RobloxPiano.Core.Importing.ImportBatchResult> ImportBatchAsync(IReadOnlyList<RobloxPiano.Core.Importing.ImportRequest> requests, IProgress<(int Current, int Total, string FileName)>? progress = null, CancellationToken ct = default)
+        {
+            return Task.FromResult(new RobloxPiano.Core.Importing.ImportBatchResult(new List<RobloxPiano.Core.Importing.ImportResult>()));
+        }
+    }
+
+    private class CapturingTranscriptionEngine : RobloxPiano.Core.Transcription.ITranscriptionEngine
+    {
+        public RobloxPiano.Core.Transcription.TranscriptionRequest? LastRequest { get; private set; }
+        public int TranscribeCallCount { get; private set; }
+
+        public Task<RobloxPiano.Core.Transcription.TranscriptionEngineStatus> CheckAvailabilityAsync(CancellationToken ct = default)
+        {
+            return Task.FromResult(RobloxPiano.Core.Transcription.TranscriptionEngineStatus.Available(@"C:\mock\python.exe", "3.11", "0.4.0"));
+        }
+
+        public Task<RobloxPiano.Core.Transcription.TranscriptionResult> TranscribeAsync(RobloxPiano.Core.Transcription.TranscriptionRequest request, IProgress<RobloxPiano.Core.Transcription.TranscriptionProgress>? progress = null, CancellationToken ct = default)
+        {
+            LastRequest = request;
+            TranscribeCallCount++;
+            var tl = new MusicTimeline("AiMock");
+            tl.Notes.Add(new NoteEvent(21, 0, 1));
+            return Task.FromResult(RobloxPiano.Core.Transcription.TranscriptionResult.Successful(request.JobId, request.NormalizedAudioPath, @"C:\mock\out.mid", tl, 1, 0, 21, 21, 0.5));
+        }
+
+        public void Dispose() { }
+    }
+
+    [Fact]
+    public async Task ProfileSwitchTo61_ImportRequestUses61Profile()
+    {
+        var capturingPipeline = new CapturingImportPipeline();
+        var context = new RobloxPiano.Core.Piano.PianoProfileContext();
+        using var importVm = new ImportViewModel(pipeline: capturingPipeline, profileContext: context);
+
+        context.SetKind(RobloxPiano.Core.Piano.RobloxPianoProfileKind.Key61);
+
+        string testFile = Path.Combine(_tempDir, "test.mid");
+        File.WriteAllBytes(testFile, new byte[] { 1, 2, 3 });
+        importVm.AddFiles(new[] { testFile });
+
+        await importVm.StartImportAsync();
+
+        Assert.NotNull(capturingPipeline.LastRequest);
+        Assert.NotNull(capturingPipeline.LastRequest.TargetPianoProfile);
+        Assert.Equal(61, capturingPipeline.LastRequest.TargetPianoProfile.Keys.Count);
+    }
+
+    [Fact]
+    public async Task ProfileSwitchTo88_ImportRequestUses88Profile()
+    {
+        var capturingPipeline = new CapturingImportPipeline();
+        var context = new RobloxPiano.Core.Piano.PianoProfileContext();
+        using var importVm = new ImportViewModel(pipeline: capturingPipeline, profileContext: context);
+
+        context.SetKind(RobloxPiano.Core.Piano.RobloxPianoProfileKind.Key88);
+
+        string testFile = Path.Combine(_tempDir, "test2.mid");
+        File.WriteAllBytes(testFile, new byte[] { 1, 2, 3 });
+        importVm.AddFiles(new[] { testFile });
+
+        await importVm.StartImportAsync();
+
+        Assert.NotNull(capturingPipeline.LastRequest);
+        Assert.NotNull(capturingPipeline.LastRequest.TargetPianoProfile);
+        Assert.Equal(88, capturingPipeline.LastRequest.TargetPianoProfile.Keys.Count);
+    }
+
+    [Fact]
+    public async Task ProfileSwitchTo61_AiRequestUses61Profile()
+    {
+        var capturingEngine = new CapturingTranscriptionEngine();
+        var context = new RobloxPiano.Core.Piano.PianoProfileContext();
+        using var transcribeVm = new TranscribeViewModel(transcriptionEngine: capturingEngine, profileContext: context);
+
+        context.SetKind(RobloxPiano.Core.Piano.RobloxPianoProfileKind.Key61);
+
+        string testFile = Path.Combine(_tempDir, "audio.wav");
+        File.WriteAllBytes(testFile, new byte[] { 1, 2, 3 });
+        var item = new AudioQueueItemViewModel(testFile);
+        var meta = new RobloxPiano.Core.Audio.AudioMetadata(testFile, "wav", "pcm_s16le", 1.0, 44100, 2, 1411200, 100, 1, "audio");
+        item.SetPrepared(RobloxPiano.Core.Audio.AudioIngestResult.Successful(item.JobId, testFile, testFile, meta));
+
+        await transcribeVm.StartAiTranscriptionAsync(item);
+
+        Assert.NotNull(capturingEngine.LastRequest);
+        Assert.NotNull(capturingEngine.LastRequest.TargetPianoProfile);
+        Assert.Equal(61, capturingEngine.LastRequest.TargetPianoProfile.Keys.Count);
+    }
+
+    [Fact]
+    public async Task ProfileSwitchTo88_AiRequestUses88Profile()
+    {
+        var capturingEngine = new CapturingTranscriptionEngine();
+        var context = new RobloxPiano.Core.Piano.PianoProfileContext();
+        using var transcribeVm = new TranscribeViewModel(transcriptionEngine: capturingEngine, profileContext: context);
+
+        context.SetKind(RobloxPiano.Core.Piano.RobloxPianoProfileKind.Key88);
+
+        string testFile = Path.Combine(_tempDir, "audio88.wav");
+        File.WriteAllBytes(testFile, new byte[] { 1, 2, 3 });
+        var item = new AudioQueueItemViewModel(testFile);
+        var meta = new RobloxPiano.Core.Audio.AudioMetadata(testFile, "wav", "pcm_s16le", 1.0, 44100, 2, 1411200, 100, 1, "audio88");
+        item.SetPrepared(RobloxPiano.Core.Audio.AudioIngestResult.Successful(item.JobId, testFile, testFile, meta));
+
+        await transcribeVm.StartAiTranscriptionAsync(item);
+
+        Assert.NotNull(capturingEngine.LastRequest);
+        Assert.NotNull(capturingEngine.LastRequest.TargetPianoProfile);
+        Assert.Equal(88, capturingEngine.LastRequest.TargetPianoProfile.Keys.Count);
+    }
+
+    [Fact]
+    public void ProfileSwitch_RecomputesLoadedTimelineDiagnostics()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var vm = new PlayerViewModel(backend);
+
+        var timeline = new MusicTimeline("Range Recompute Test");
+        timeline.AddNote(new NoteEvent(21, 0.0, 1.0)); // A0
+        timeline.AddNote(new NoteEvent(60, 0.0, 1.0)); // C4
+        timeline.AddNote(new NoteEvent(108, 0.0, 1.0)); // C8
+
+        vm.LoadTimeline(timeline);
+
+        // In 88-key: all 3 playable, 0 out of range
+        Assert.Contains("88키 기준", vm.PitchRangeText);
+        Assert.Contains("3음 연주 가능", vm.PitchRangeText);
+        Assert.Contains("범위 밖 0", vm.PitchRangeText);
+
+        // Switch to 61-key: only 1 playable (pitch 60), 2 out of range (21, 108)
+        vm.SelectedPianoProfile = "Roblox 61키";
+
+        Assert.Contains("61키 기준", vm.PitchRangeText);
+        Assert.Contains("1음 연주 가능", vm.PitchRangeText);
+        Assert.Contains("범위 밖 2", vm.PitchRangeText);
+
+        // Switch back to 88-key: all 3 playable
+        vm.SelectedPianoProfile = "Roblox 88키 (기본)";
+
+        Assert.Contains("88키 기준", vm.PitchRangeText);
+        Assert.Contains("3음 연주 가능", vm.PitchRangeText);
+        Assert.Contains("범위 밖 0", vm.PitchRangeText);
+    }
+
+    [Fact]
+    public async Task ProfileSwitch_DoesNotRetranscribeAiResult()
+    {
+        var capturingEngine = new CapturingTranscriptionEngine();
+        var context = new RobloxPiano.Core.Piano.PianoProfileContext();
+        using var transcribeVm = new TranscribeViewModel(transcriptionEngine: capturingEngine, profileContext: context);
+
+        string testFile = Path.Combine(_tempDir, "audio_no_retranscribe.wav");
+        File.WriteAllBytes(testFile, new byte[] { 1, 2, 3 });
+        var item = new AudioQueueItemViewModel(testFile);
+        var meta = new RobloxPiano.Core.Audio.AudioMetadata(testFile, "wav", "pcm_s16le", 1.0, 44100, 2, 1411200, 100, 1, "audio_no_retranscribe");
+        item.SetPrepared(RobloxPiano.Core.Audio.AudioIngestResult.Successful(item.JobId, testFile, testFile, meta));
+
+        await transcribeVm.StartAiTranscriptionAsync(item);
+        Assert.Equal(1, capturingEngine.TranscribeCallCount);
+
+        // Profile changed
+        context.SetKind(RobloxPiano.Core.Piano.RobloxPianoProfileKind.Key61);
+
+        // TranscribeCallCount MUST NOT increase!
+        Assert.Equal(1, capturingEngine.TranscribeCallCount);
+    }
 }

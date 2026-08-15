@@ -4,6 +4,7 @@ using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using RobloxPiano.Core.Importers;
+using RobloxPiano.Core.Importing;
 using RobloxPiano.Core.Library;
 using RobloxPiano.Core.Music;
 using RobloxPiano.Core.Piano;
@@ -26,9 +27,11 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
     private readonly IRobloxTargetWindowService _targetService;
     private readonly IPlaybackTargetGuard _targetGuard;
     private readonly OverlayViewModel _overlayViewModel;
+    private readonly PianoProfileContext _profileContext;
 
     private readonly Dictionary<int, PianoKeyViewModel> _keyLookup = new();
     private bool _isUpdatingProgressFromScheduler;
+    private bool _isUpdatingProfileInternally;
     private bool _disposed;
 
     [ObservableProperty]
@@ -131,22 +134,29 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
     public PlaybackScheduler Scheduler => _scheduler;
     public RobloxPianoMapper Mapper => _mapper;
     public PianoProfile CurrentPianoProfile => _mapper.Profile;
+    public PianoProfileContext ProfileContext => _profileContext;
     public IRobloxTargetWindowService TargetService => _targetService;
     public IPlaybackTargetGuard TargetGuard => _targetGuard;
     public OverlayViewModel OverlayViewModel => _overlayViewModel;
 
-    public PlayerViewModel() : this(new WindowsSendInputBackend())
+    public PlayerViewModel() : this(new WindowsSendInputBackend(), profileContext: null)
+    {
+    }
+
+    public PlayerViewModel(PianoProfileContext? profileContext) : this(new WindowsSendInputBackend(), profileContext: profileContext)
     {
     }
 
     public PlayerViewModel(
         IPlaybackBackend backend,
         IRobloxTargetWindowService? targetService = null,
-        IPlaybackTargetGuard? targetGuard = null)
+        IPlaybackTargetGuard? targetGuard = null,
+        PianoProfileContext? profileContext = null)
     {
         _backend = backend;
+        _profileContext = profileContext ?? new PianoProfileContext();
         _keyState = new KeyStateManager(_backend, idleTimeoutSeconds: 2.0, enableWatchdog: true);
-        _mapper = new RobloxPianoMapper();
+        _mapper = new RobloxPianoMapper(_profileContext.CurrentProfile);
         _chordEngine = new ChordEngine(_keyState, _mapper);
         _pedal = new PedalController(_backend);
         _scheduler = new PlaybackScheduler(_chordEngine, _keyState, _pedal);
@@ -154,6 +164,12 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
         _targetService = targetService ?? new RobloxTargetWindowService();
         _targetGuard = targetGuard ?? new PlaybackTargetGuard(_targetService);
         _overlayViewModel = new OverlayViewModel(_scheduler);
+
+        _selectedPianoProfile = _profileContext.CurrentKind == RobloxPianoProfileKind.Key61
+            ? "Roblox 61키"
+            : "Roblox 88키 (기본)";
+
+        _profileContext.ProfileChanged += OnProfileContextChanged;
 
         _scheduler.StateChanged += OnSchedulerStateChanged;
         _scheduler.ProgressChanged += OnSchedulerProgressChanged;
@@ -169,9 +185,46 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
         RefreshRobloxWindows();
     }
 
+    private void OnProfileContextChanged(object? sender, PianoProfile newProfile)
+    {
+        if (_disposed || _isUpdatingProfileInternally) return;
+
+        PostToDispatcherOrDirect(() =>
+        {
+            // 1. Safety: stop active playback before switching profile
+            if (_scheduler.State is PlaybackState.Playing or PlaybackState.Paused or PlaybackState.Countdown)
+            {
+                _scheduler.Stop();
+                _backend.ReleaseAll();
+                _keyState.ReleaseAll();
+            }
+
+            _isUpdatingProfileInternally = true;
+            try
+            {
+                SelectedPianoProfile = _profileContext.CurrentKind == RobloxPianoProfileKind.Key61
+                    ? "Roblox 61키"
+                    : "Roblox 88키 (기본)";
+            }
+            finally
+            {
+                _isUpdatingProfileInternally = false;
+            }
+
+            _mapper.SetProfile(newProfile);
+            InitializePianoKeys(newProfile);
+
+            if (CurrentTimeline != null)
+            {
+                RefreshPianoRoll(CurrentTimeline);
+                UpdatePitchRangeText();
+            }
+        });
+    }
+
     partial void OnSelectedPianoProfileChanged(string value)
     {
-        if (_disposed) return;
+        if (_disposed || _isUpdatingProfileInternally) return;
 
         // 1. Safety: stop active playback before switching profile
         if (_scheduler.State is PlaybackState.Playing or PlaybackState.Paused or PlaybackState.Countdown)
@@ -181,10 +234,21 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
             _keyState.ReleaseAll();
         }
 
-        // 2. Load target profile
-        var newProfile = value.Contains("61")
+        // 2. Determine target kind & profile
+        var kind = value.Contains("61") ? RobloxPianoProfileKind.Key61 : RobloxPianoProfileKind.Key88;
+        var newProfile = kind == RobloxPianoProfileKind.Key61
             ? PianoProfileLoader.Load61KeyProfile()
             : PianoProfileLoader.Load88KeyProfile();
+
+        _isUpdatingProfileInternally = true;
+        try
+        {
+            _profileContext.SetKind(kind);
+        }
+        finally
+        {
+            _isUpdatingProfileInternally = false;
+        }
 
         // 3. Update existing mapper instance
         _mapper.SetProfile(newProfile);
@@ -192,10 +256,25 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
         // 4. Rebuild visible piano keyboard
         InitializePianoKeys(newProfile);
 
-        // 5. Refresh piano roll if timeline is loaded
+        // 5. Refresh piano roll and range diagnostics if timeline is loaded
         if (CurrentTimeline != null)
         {
             RefreshPianoRoll(CurrentTimeline);
+            UpdatePitchRangeText();
+        }
+    }
+
+    private void UpdatePitchRangeText()
+    {
+        if (CurrentTimeline != null && CurrentTimeline.Notes.Count > 0)
+        {
+            var validation = ImportTimelineValidator.Validate(CurrentTimeline, _mapper.Profile);
+            string profileName = _mapper.Profile.Name.Contains("61") ? "61키" : "88키";
+            PitchRangeText = $"{profileName} 기준: {validation.PlayableNotes:N0}음 연주 가능 · 범위 밖 {validation.OutOfRangeNotes:N0}";
+        }
+        else
+        {
+            PitchRangeText = "-";
         }
     }
 
@@ -346,15 +425,7 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
         FormattedBpm = $"{Math.Round(timeline.InitialBpm)}";
         FormattedTotalNotes = $"{timeline.Notes.Count:N0}";
 
-        var (minPitch, maxPitch) = timeline.PitchRange;
-        if (minPitch <= maxPitch && minPitch > 0)
-        {
-            PitchRangeText = $"{FormatPitch(minPitch)} – {FormatPitch(maxPitch)}";
-        }
-        else
-        {
-            PitchRangeText = "-";
-        }
+        UpdatePitchRangeText();
 
         // Build real timeline-backed piano roll notes
         RefreshPianoRoll(timeline);
@@ -799,6 +870,7 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
         if (_disposed) return;
         _disposed = true;
 
+        _profileContext.ProfileChanged -= OnProfileContextChanged;
         _targetGuard.StopMonitoring();
 
         _targetService.TargetChanged -= OnTargetChanged;

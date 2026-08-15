@@ -161,6 +161,14 @@ public partial class AudioQueueItemViewModel : ObservableObject
         OnPropertyChanged(nameof(HasAiResult));
     }
 
+    public void UpdateDiagnostics(int playableNotes, int outOfRangeNotes)
+    {
+        if (AiResult != null)
+        {
+            NoteStatsText = $"총 {AiResult.NoteCount}음 (연주 가능 {playableNotes}음)";
+        }
+    }
+
     public void SetAiFailed(string error)
     {
         Status = AudioItemStatus.Failed;

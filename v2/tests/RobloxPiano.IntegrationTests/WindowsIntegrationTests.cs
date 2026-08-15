@@ -282,10 +282,10 @@ public class WindowsIntegrationTests
         // User Alt+Tabs away to Chrome (HWND 7777)
         fakeApi.ForegroundWindow = 7777;
 
-        // Wait for monitor interval (50ms)
-        for (int i = 0; i < 20; i++)
+        // Wait for monitor interval (50ms) and scheduler stop
+        for (int i = 0; i < 30; i++)
         {
-            if (focusLostTriggered) break;
+            if (focusLostTriggered && !scheduler.HasActiveWorker) break;
             await Task.Delay(20);
         }
 

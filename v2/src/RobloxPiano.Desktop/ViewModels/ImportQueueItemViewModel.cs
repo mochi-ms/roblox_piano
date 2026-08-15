@@ -93,6 +93,14 @@ public partial class ImportQueueItemViewModel : ObservableObject
         BpmText = $"{Math.Round(result.InitialBpm)}";
     }
 
+    public void UpdateDiagnostics(int playableNotes, int outOfRangeNotes)
+    {
+        if (Result != null)
+        {
+            NotesText = $"{Result.NoteCount:N0}개 (연주 가능 {playableNotes}개)";
+        }
+    }
+
     public void SetFailed(string error)
     {
         Status = ImportItemStatus.Failed;

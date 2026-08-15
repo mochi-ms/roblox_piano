@@ -71,8 +71,10 @@ public class TranscriptionEngineTests : IDisposable
     private class MockPythonSession : IPythonProcessSession
     {
         private readonly Action<string>? _onStdOut;
+        private readonly TaskCompletionSource<int> _completionTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public bool IsRunning { get; private set; } = true;
         public int? ProcessId => 9999;
+        public Task<int> Completion => _completionTcs.Task;
         public bool KillCalled { get; private set; }
         public string? LastReceivedLine { get; private set; }
         private readonly Func<string, (string Type, string ResponseJson)>? _responder;
@@ -80,14 +82,29 @@ public class TranscriptionEngineTests : IDisposable
         public MockPythonSession(
             Action<string>? onStdOut,
             Func<string, (string Type, string ResponseJson)>? responder = null,
-            string? customHelloJson = null)
+            string? customHelloJson = null,
+            bool exitImmediately = false,
+            int exitCode = 0)
         {
             _onStdOut = onStdOut;
             _responder = responder;
 
+            if (exitImmediately)
+            {
+                IsRunning = false;
+                _completionTcs.TrySetResult(exitCode);
+                return;
+            }
+
             // Emit hello handshake
             string hello = customHelloJson ?? "{\"type\":\"hello\",\"protocol\":1,\"request_id\":\"startup\",\"worker_version\":\"1.0.0\",\"python_version\":\"3.11.2\",\"basic_pitch_version\":\"0.4.0\",\"engine_available\":true,\"status_message\":\"정상\"}";
             _onStdOut?.Invoke(hello);
+        }
+
+        public void TriggerExit(int exitCode = 1)
+        {
+            IsRunning = false;
+            _completionTcs.TrySetResult(exitCode);
         }
 
         public Task SendLineAsync(string line, CancellationToken ct = default)
@@ -108,6 +125,7 @@ public class TranscriptionEngineTests : IDisposable
         {
             KillCalled = true;
             IsRunning = false;
+            _completionTcs.TrySetResult(-1);
         }
 
         public void Dispose() => Kill();
@@ -118,11 +136,22 @@ public class TranscriptionEngineTests : IDisposable
         public MockPythonSession? CurrentSession { get; private set; }
         private readonly Func<string, (string Type, string ResponseJson)>? _responder;
         private readonly string? _customHelloJson;
+        private readonly bool _exitImmediately;
+        private readonly int _exitCode;
+        private readonly Queue<Func<Action<string>?, MockPythonSession>>? _sessionFactoryQueue;
 
-        public MockProcessRunner(Func<string, (string Type, string ResponseJson)>? responder = null, string? customHelloJson = null)
+        public MockProcessRunner(
+            Func<string, (string Type, string ResponseJson)>? responder = null,
+            string? customHelloJson = null,
+            bool exitImmediately = false,
+            int exitCode = 0,
+            Queue<Func<Action<string>?, MockPythonSession>>? sessionFactoryQueue = null)
         {
             _responder = responder;
             _customHelloJson = customHelloJson;
+            _exitImmediately = exitImmediately;
+            _exitCode = exitCode;
+            _sessionFactoryQueue = sessionFactoryQueue;
         }
 
         public Task<ProcessExecutionResult> RunProcessAsync(string executablePath, IReadOnlyList<string> arguments, Action<string>? onStdOutLine = null, Action<string>? onStdErrLine = null, TimeSpan? timeout = null, CancellationToken ct = default)
@@ -132,7 +161,14 @@ public class TranscriptionEngineTests : IDisposable
 
         public IPythonProcessSession StartSession(string executablePath, IReadOnlyList<string> arguments, Action<string>? onStdOutLine = null, Action<string>? onStdErrLine = null, string? workingDir = null)
         {
-            CurrentSession = new MockPythonSession(onStdOutLine, _responder, _customHelloJson);
+            if (_sessionFactoryQueue != null && _sessionFactoryQueue.Count > 0)
+            {
+                var factory = _sessionFactoryQueue.Dequeue();
+                CurrentSession = factory(onStdOutLine);
+                return CurrentSession;
+            }
+
+            CurrentSession = new MockPythonSession(onStdOutLine, _responder, _customHelloJson, _exitImmediately, _exitCode);
             return CurrentSession;
         }
     }
@@ -427,5 +463,382 @@ public class TranscriptionEngineTests : IDisposable
 
         Assert.True(runner.CurrentSession?.KillCalled);
         Assert.False(Directory.Exists(_workspace.GetSafeJobDirectoryPath(jobId, createDirectory: false)));
+    }
+
+    [Fact]
+    public async Task Startup_WorkerExitsBeforeHello_FailsPromptly()
+    {
+        string workerScript = Path.Combine(_tempRoot, "mock_worker.py");
+        File.WriteAllText(workerScript, "# mock");
+
+        var runner = new MockProcessRunner(exitImmediately: true, exitCode: 137);
+
+        using var engine = new PythonBasicPitchTranscriptionEngine(
+            pythonLocator: new MockPythonLocator(true),
+            processRunner: runner,
+            workspaceService: _workspace,
+            explicitWorkerScriptPath: workerScript
+        );
+
+        string inputAudio = Path.Combine(_tempRoot, "audio.wav");
+        File.WriteAllBytes(inputAudio, new byte[] { 1, 2, 3 });
+        var req = new TranscriptionRequest("job_startup_exit", inputAudio);
+
+        var result = await engine.TranscribeAsync(req);
+        Assert.False(result.Success);
+        Assert.Contains("AI 워커가 초기화 중 종료되었습니다", result.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task Transcription_WorkerExitsDuringJob_FailsPromptly()
+    {
+        string jobId = "job_crash_mid";
+        string inputAudio = Path.Combine(_tempRoot, "audio.wav");
+        File.WriteAllBytes(inputAudio, new byte[] { 1, 2, 3 });
+
+        MockProcessRunner? runner = null;
+        runner = new MockProcessRunner(line =>
+        {
+            // Simulate crash during execution without sending result
+            Task.Run(() => runner?.CurrentSession?.TriggerExit(139));
+            return ("none", "");
+        });
+
+        using var engine = new PythonBasicPitchTranscriptionEngine(
+            pythonLocator: new MockPythonLocator(true),
+            processRunner: runner,
+            workspaceService: _workspace,
+            explicitWorkerScriptPath: Path.Combine(_tempRoot, "mock_worker.py")
+        );
+
+        File.WriteAllText(Path.Combine(_tempRoot, "mock_worker.py"), "# mock");
+
+        var req = new TranscriptionRequest(jobId, inputAudio);
+        var result = await engine.TranscribeAsync(req);
+
+        Assert.False(result.Success);
+        Assert.Equal("WORKER_CRASHED", result.ErrorCode);
+        Assert.Contains("종료되었습니다", result.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task Transcription_WorkerExit_CleansWorkspace()
+    {
+        string jobId = "job_crash_clean";
+        string inputAudio = Path.Combine(_tempRoot, "audio.wav");
+        File.WriteAllBytes(inputAudio, new byte[] { 1, 2, 3 });
+
+        MockProcessRunner? runner = null;
+        runner = new MockProcessRunner(line =>
+        {
+            // Worker writes a partial file then crashes
+            string jobDir = _workspace.GetJobDirectory(jobId);
+            File.WriteAllText(Path.Combine(jobDir, "temp.tmp"), "partial");
+            Task.Run(() => runner?.CurrentSession?.TriggerExit(1));
+            return ("none", "");
+        });
+
+        using var engine = new PythonBasicPitchTranscriptionEngine(
+            pythonLocator: new MockPythonLocator(true),
+            processRunner: runner,
+            workspaceService: _workspace,
+            explicitWorkerScriptPath: Path.Combine(_tempRoot, "mock_worker.py")
+        );
+
+        File.WriteAllText(Path.Combine(_tempRoot, "mock_worker.py"), "# mock");
+
+        var req = new TranscriptionRequest(jobId, inputAudio);
+        var result = await engine.TranscribeAsync(req);
+
+        Assert.False(result.Success);
+        Assert.Equal("WORKER_CRASHED", result.ErrorCode);
+        Assert.False(Directory.Exists(_workspace.GetSafeJobDirectoryPath(jobId, createDirectory: false)));
+    }
+
+    [Fact]
+    public async Task Transcription_WorkerExit_PreservesNormalizedAudio()
+    {
+        string jobId = "job_crash_preserve_audio";
+        string inputAudio = Path.Combine(_tempRoot, "normalized_audio.wav");
+        File.WriteAllBytes(inputAudio, new byte[] { 1, 2, 3, 4, 5 });
+
+        MockProcessRunner? runner = null;
+        runner = new MockProcessRunner(line =>
+        {
+            Task.Run(() => runner?.CurrentSession?.TriggerExit(1));
+            return ("none", "");
+        });
+
+        using var engine = new PythonBasicPitchTranscriptionEngine(
+            pythonLocator: new MockPythonLocator(true),
+            processRunner: runner,
+            workspaceService: _workspace,
+            explicitWorkerScriptPath: Path.Combine(_tempRoot, "mock_worker.py")
+        );
+
+        File.WriteAllText(Path.Combine(_tempRoot, "mock_worker.py"), "# mock");
+
+        var req = new TranscriptionRequest(jobId, inputAudio);
+        var result = await engine.TranscribeAsync(req);
+
+        Assert.False(result.Success);
+        Assert.True(File.Exists(inputAudio), "Normalized audio file must remain preserved after crash");
+    }
+
+    [Fact]
+    public async Task Transcription_WorkerExitThenNextJob_RestartsAndSucceeds()
+    {
+        string jobId1 = "job_crash_1";
+        string jobId2 = "job_success_2";
+        string inputAudio = Path.Combine(_tempRoot, "audio.wav");
+        File.WriteAllBytes(inputAudio, new byte[] { 1, 2, 3 });
+
+        var sessionQueue = new Queue<Func<Action<string>?, MockPythonSession>>();
+
+        // Session 1: Crashes on request
+        MockPythonSession? session1 = null;
+        sessionQueue.Enqueue(onStdOut =>
+        {
+            session1 = new MockPythonSession(onStdOut, responder: line =>
+            {
+                Task.Run(() => session1?.TriggerExit(1));
+                return ("none", "");
+            });
+            return session1;
+        });
+
+        // Session 2: Starts normally and responds with valid result
+        sessionQueue.Enqueue(onStdOut =>
+        {
+            return new MockPythonSession(onStdOut, responder: line =>
+            {
+                using var doc = JsonDocument.Parse(line);
+                string reqId = doc.RootElement.GetProperty("request_id").GetString()!;
+                string jId = doc.RootElement.GetProperty("job_id").GetString()!;
+                string expectedMidi = _workspace.GetFinalMidiPath(jId);
+
+                // Write valid MIDI
+                var midiFile = new Melanchall.DryWetMidi.Core.MidiFile(new Melanchall.DryWetMidi.Core.TrackChunk(
+                    new Melanchall.DryWetMidi.Core.NoteOnEvent((Melanchall.DryWetMidi.Common.SevenBitNumber)60, (Melanchall.DryWetMidi.Common.SevenBitNumber)64) { DeltaTime = 0 },
+                    new Melanchall.DryWetMidi.Core.NoteOffEvent((Melanchall.DryWetMidi.Common.SevenBitNumber)60, (Melanchall.DryWetMidi.Common.SevenBitNumber)0) { DeltaTime = 480 }
+                ));
+                midiFile.Write(expectedMidi, true);
+
+                string resp = $"{{\"type\":\"result\",\"protocol\":1,\"request_id\":\"{reqId}\",\"job_id\":\"{jId}\",\"midi_path\":\"{expectedMidi.Replace("\\", "\\\\")}\",\"note_count\":1,\"duration_seconds\":1.0,\"min_pitch\":60,\"max_pitch\":60,\"runtime_seconds\":0.2,\"engine_version\":\"0.4.0\"}}";
+                return ("result", resp);
+            });
+        });
+
+        var runner = new MockProcessRunner(sessionFactoryQueue: sessionQueue);
+
+        using var engine = new PythonBasicPitchTranscriptionEngine(
+            pythonLocator: new MockPythonLocator(true),
+            processRunner: runner,
+            workspaceService: _workspace,
+            explicitWorkerScriptPath: Path.Combine(_tempRoot, "mock_worker.py")
+        );
+
+        File.WriteAllText(Path.Combine(_tempRoot, "mock_worker.py"), "# mock");
+
+        // First job: fails due to crash
+        var req1 = new TranscriptionRequest(jobId1, inputAudio);
+        var result1 = await engine.TranscribeAsync(req1);
+        Assert.False(result1.Success);
+        Assert.Equal("WORKER_CRASHED", result1.ErrorCode);
+
+        // Second job: restarts new worker session and succeeds
+        var req2 = new TranscriptionRequest(jobId2, inputAudio);
+        var result2 = await engine.TranscribeAsync(req2);
+        Assert.True(result2.Success);
+        Assert.Equal(1, result2.NoteCount);
+    }
+
+    [Fact]
+    public async Task Handshake_WrongProtocolVersion_FailsImmediately()
+    {
+        string workerScript = Path.Combine(_tempRoot, "mock_worker.py");
+        File.WriteAllText(workerScript, "# mock");
+
+        string helloProto2 = "{\"type\":\"hello\",\"protocol\":2,\"request_id\":\"startup\",\"worker_version\":\"1.0.0\",\"python_version\":\"3.11.2\",\"basic_pitch_version\":\"0.4.0\",\"engine_available\":true,\"status_message\":\"정상\"}";
+        var runner = new MockProcessRunner(customHelloJson: helloProto2);
+
+        using var engine = new PythonBasicPitchTranscriptionEngine(
+            pythonLocator: new MockPythonLocator(true),
+            processRunner: runner,
+            explicitWorkerScriptPath: workerScript
+        );
+
+        var status = await engine.CheckAvailabilityAsync();
+        Assert.False(status.IsAvailable);
+        Assert.Contains("프로토콜 버전 불일치", status.StatusMessage);
+    }
+
+    [Fact]
+    public async Task Handshake_MissingProtocol_FailsImmediately()
+    {
+        string workerScript = Path.Combine(_tempRoot, "mock_worker.py");
+        File.WriteAllText(workerScript, "# mock");
+
+        string helloNoProto = "{\"type\":\"hello\",\"request_id\":\"startup\",\"worker_version\":\"1.0.0\",\"python_version\":\"3.11.2\",\"basic_pitch_version\":\"0.4.0\",\"engine_available\":true,\"status_message\":\"정상\"}";
+        var runner = new MockProcessRunner(customHelloJson: helloNoProto);
+
+        using var engine = new PythonBasicPitchTranscriptionEngine(
+            pythonLocator: new MockPythonLocator(true),
+            processRunner: runner,
+            explicitWorkerScriptPath: workerScript
+        );
+
+        var status = await engine.CheckAvailabilityAsync();
+        Assert.False(status.IsAvailable);
+        Assert.Contains("프로토콜", status.StatusMessage);
+    }
+
+    [Fact]
+    public async Task Handshake_WrongRequestId_FailsImmediately()
+    {
+        string workerScript = Path.Combine(_tempRoot, "mock_worker.py");
+        File.WriteAllText(workerScript, "# mock");
+
+        string helloWrongReq = "{\"type\":\"hello\",\"protocol\":1,\"request_id\":\"other\",\"worker_version\":\"1.0.0\",\"python_version\":\"3.11.2\",\"basic_pitch_version\":\"0.4.0\",\"engine_available\":true,\"status_message\":\"정상\"}";
+        var runner = new MockProcessRunner(customHelloJson: helloWrongReq);
+
+        using var engine = new PythonBasicPitchTranscriptionEngine(
+            pythonLocator: new MockPythonLocator(true),
+            processRunner: runner,
+            explicitWorkerScriptPath: workerScript
+        );
+
+        var status = await engine.CheckAvailabilityAsync();
+        Assert.False(status.IsAvailable);
+        Assert.Contains("request_id", status.StatusMessage);
+    }
+
+    [Fact]
+    public async Task Result_WrongProtocolVersion_FailsCurrentJob()
+    {
+        string jobId = "job_res_proto2";
+        string inputAudio = Path.Combine(_tempRoot, "audio.wav");
+        File.WriteAllBytes(inputAudio, new byte[] { 1, 2, 3 });
+
+        var runner = new MockProcessRunner(line =>
+        {
+            using var doc = JsonDocument.Parse(line);
+            string reqId = doc.RootElement.GetProperty("request_id").GetString()!;
+            string jId = doc.RootElement.GetProperty("job_id").GetString()!;
+
+            string resp = $"{{\"type\":\"result\",\"protocol\":2,\"request_id\":\"{reqId}\",\"job_id\":\"{jId}\",\"midi_path\":\"dummy.mid\"}}";
+            return ("result", resp);
+        });
+
+        using var engine = new PythonBasicPitchTranscriptionEngine(
+            pythonLocator: new MockPythonLocator(true),
+            processRunner: runner,
+            workspaceService: _workspace,
+            explicitWorkerScriptPath: Path.Combine(_tempRoot, "mock_worker.py")
+        );
+
+        File.WriteAllText(Path.Combine(_tempRoot, "mock_worker.py"), "# mock");
+
+        var req = new TranscriptionRequest(jobId, inputAudio);
+        var result = await engine.TranscribeAsync(req);
+
+        Assert.False(result.Success);
+        Assert.Contains("프로토콜 버전 불일치", result.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task Error_WrongProtocolVersion_FailsCurrentJob()
+    {
+        string jobId = "job_err_proto2";
+        string inputAudio = Path.Combine(_tempRoot, "audio.wav");
+        File.WriteAllBytes(inputAudio, new byte[] { 1, 2, 3 });
+
+        var runner = new MockProcessRunner(line =>
+        {
+            using var doc = JsonDocument.Parse(line);
+            string reqId = doc.RootElement.GetProperty("request_id").GetString()!;
+            string jId = doc.RootElement.GetProperty("job_id").GetString()!;
+
+            string resp = $"{{\"type\":\"error\",\"protocol\":99,\"request_id\":\"{reqId}\",\"job_id\":\"{jId}\",\"error_code\":\"FAIL\"}}";
+            return ("error", resp);
+        });
+
+        using var engine = new PythonBasicPitchTranscriptionEngine(
+            pythonLocator: new MockPythonLocator(true),
+            processRunner: runner,
+            workspaceService: _workspace,
+            explicitWorkerScriptPath: Path.Combine(_tempRoot, "mock_worker.py")
+        );
+
+        File.WriteAllText(Path.Combine(_tempRoot, "mock_worker.py"), "# mock");
+
+        var req = new TranscriptionRequest(jobId, inputAudio);
+        var result = await engine.TranscribeAsync(req);
+
+        Assert.False(result.Success);
+        Assert.Contains("프로토콜 버전 불일치", result.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task Status_WrongProtocolVersion_FailsCurrentJob()
+    {
+        string jobId = "job_stat_proto2";
+        string inputAudio = Path.Combine(_tempRoot, "audio.wav");
+        File.WriteAllBytes(inputAudio, new byte[] { 1, 2, 3 });
+
+        var runner = new MockProcessRunner(line =>
+        {
+            using var doc = JsonDocument.Parse(line);
+            string reqId = doc.RootElement.GetProperty("request_id").GetString()!;
+            string jId = doc.RootElement.GetProperty("job_id").GetString()!;
+
+            // Send corrupted status first
+            string badStatus = $"{{\"type\":\"status\",\"protocol\":0,\"request_id\":\"{reqId}\",\"job_id\":\"{jId}\",\"phase\":\"transcribing\"}}";
+            return ("status", badStatus);
+        });
+
+        using var engine = new PythonBasicPitchTranscriptionEngine(
+            pythonLocator: new MockPythonLocator(true),
+            processRunner: runner,
+            workspaceService: _workspace,
+            explicitWorkerScriptPath: Path.Combine(_tempRoot, "mock_worker.py")
+        );
+
+        File.WriteAllText(Path.Combine(_tempRoot, "mock_worker.py"), "# mock");
+
+        var req = new TranscriptionRequest(jobId, inputAudio);
+        var result = await engine.TranscribeAsync(req);
+
+        Assert.False(result.Success);
+        Assert.Contains("프로토콜 버전 불일치", result.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task MalformedEnvelope_DoesNotHang()
+    {
+        string jobId = "job_malformed";
+        string inputAudio = Path.Combine(_tempRoot, "audio.wav");
+        File.WriteAllBytes(inputAudio, new byte[] { 1, 2, 3 });
+
+        var runner = new MockProcessRunner(line =>
+        {
+            // Send invalid json
+            return ("raw", "{not-valid-json");
+        });
+
+        using var engine = new PythonBasicPitchTranscriptionEngine(
+            pythonLocator: new MockPythonLocator(true),
+            processRunner: runner,
+            workspaceService: _workspace,
+            explicitWorkerScriptPath: Path.Combine(_tempRoot, "mock_worker.py")
+        );
+
+        File.WriteAllText(Path.Combine(_tempRoot, "mock_worker.py"), "# mock");
+
+        var req = new TranscriptionRequest(jobId, inputAudio);
+        var result = await engine.TranscribeAsync(req);
+
+        Assert.False(result.Success);
+        Assert.Contains("파싱 오류", result.ErrorMessage);
     }
 }
