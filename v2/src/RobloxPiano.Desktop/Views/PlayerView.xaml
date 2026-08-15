@@ -15,50 +15,120 @@
             <RowDefinition Height="60" />
         </Grid.RowDefinitions>
 
-        <!-- 1. Track Header & Compact Metadata Strip -->
-        <Border Grid.Row="0" Background="{StaticResource Surface.Base}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="0,0,0,1" Padding="20,12">
+        <!-- 1. Track Header & Compact Metadata Strip + Roblox Target Selector -->
+        <Border Grid.Row="0" Background="{StaticResource Surface.Base}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="0,0,0,1" Padding="20,10">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 
                 <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                    <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" Margin="0,0,0,3"/>
+                    <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" Margin="0,0,0,2"/>
                     <StackPanel Orientation="Horizontal">
                         <Border Background="{StaticResource Surface.Hover}" CornerRadius="4" Padding="6,1" Margin="0,0,8,0">
                             <TextBlock Text="{Binding SourceType}" FontSize="11" Foreground="{StaticResource Text.Secondary}" FontWeight="Medium" />
                         </Border>
-                        <TextBlock Text="{Binding TrackAndTempoInfo}" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding TrackAndTempoInfo}" FontSize="11" Foreground="{StaticResource Text.Secondary}" VerticalAlignment="Center" />
                     </StackPanel>
+                </StackPanel>
+
+                <!-- Roblox Target Status & Selector -->
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,24,0">
+                    <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Default}" BorderThickness="1" CornerRadius="6" Padding="8,4">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <!-- Status Indicator -->
+                            <Ellipse Width="7" Height="7" Margin="0,0,6,0">
+                                <Ellipse.Style>
+                                    <Style TargetType="Ellipse">
+                                        <Setter Property="Fill" Value="#EF4444" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsRobloxConnected}" Value="True">
+                                                <Setter Property="Fill" Value="#10B981" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Ellipse.Style>
+                            </Ellipse>
+
+                            <TextBlock Text="Roblox 대상:" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" Margin="0,0,6,0" VerticalAlignment="Center"/>
+
+                            <!-- ComboBox for multiple Roblox targets, or text if 1/none -->
+                            <ComboBox ItemsSource="{Binding AvailableRobloxWindows}"
+                                      SelectedItem="{Binding SelectedRobloxWindow, Mode=TwoWay}"
+                                      DisplayMemberPath="DisplayName"
+                                      MinWidth="140"
+                                      MaxHeight="26"
+                                      FontSize="11.5"
+                                      Margin="0,0,6,0"
+                                      VerticalAlignment="Center">
+                                <ComboBox.Style>
+                                    <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding AvailableRobloxWindows.Count}" Value="0">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </ComboBox.Style>
+                            </ComboBox>
+
+                            <TextBlock Text="연결 안 됨" FontSize="11.5" Foreground="{StaticResource Text.Disabled}" VerticalAlignment="Center" Margin="0,0,6,0">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding AvailableRobloxWindows.Count}" Value="0">
+                                                <Setter Property="Visibility" Value="Visible"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+
+                            <!-- Refresh Button -->
+                            <Button Command="{Binding RefreshRobloxWindowsCommand}"
+                                    ToolTip="Roblox 창 새로고침"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    Padding="4,2"
+                                    VerticalAlignment="Center">
+                                <Path Data="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"
+                                      Fill="{StaticResource Text.Secondary}"
+                                      Width="12" Height="12"
+                                      Stretch="Uniform"/>
+                            </Button>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
                 
                 <!-- Compact Metadata Strip -->
-                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                    <StackPanel Orientation="Horizontal" Margin="0,0,20,0" VerticalAlignment="Center">
-                        <TextBlock Text="길이" FontSize="11" Foreground="{StaticResource Text.Secondary}" Margin="0,0,6,0" VerticalAlignment="Center"/>
-                        <TextBlock Text="{Binding FormattedDuration}" FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" VerticalAlignment="Center"/>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Margin="0,0,16,0" VerticalAlignment="Center">
+                        <TextBlock Text="길이" FontSize="11" Foreground="{StaticResource Text.Secondary}" Margin="0,0,5,0" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding FormattedDuration}" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" VerticalAlignment="Center"/>
                     </StackPanel>
 
-                    <Rectangle Width="1" Height="14" Fill="{StaticResource Border.Subtle}" Margin="0,0,20,0" VerticalAlignment="Center"/>
+                    <Rectangle Width="1" Height="14" Fill="{StaticResource Border.Subtle}" Margin="0,0,16,0" VerticalAlignment="Center"/>
 
-                    <StackPanel Orientation="Horizontal" Margin="0,0,20,0" VerticalAlignment="Center">
-                        <TextBlock Text="BPM" FontSize="11" Foreground="{StaticResource Text.Secondary}" Margin="0,0,6,0" VerticalAlignment="Center"/>
-                        <TextBlock Text="{Binding FormattedBpm}" FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" VerticalAlignment="Center"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,16,0" VerticalAlignment="Center">
+                        <TextBlock Text="BPM" FontSize="11" Foreground="{StaticResource Text.Secondary}" Margin="0,0,5,0" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding FormattedBpm}" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" VerticalAlignment="Center"/>
                     </StackPanel>
 
-                    <Rectangle Width="1" Height="14" Fill="{StaticResource Border.Subtle}" Margin="0,0,20,0" VerticalAlignment="Center"/>
+                    <Rectangle Width="1" Height="14" Fill="{StaticResource Border.Subtle}" Margin="0,0,16,0" VerticalAlignment="Center"/>
 
-                    <StackPanel Orientation="Horizontal" Margin="0,0,20,0" VerticalAlignment="Center">
-                        <TextBlock Text="음표" FontSize="11" Foreground="{StaticResource Text.Secondary}" Margin="0,0,6,0" VerticalAlignment="Center"/>
-                        <TextBlock Text="{Binding FormattedTotalNotes}" FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" VerticalAlignment="Center"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,16,0" VerticalAlignment="Center">
+                        <TextBlock Text="음표" FontSize="11" Foreground="{StaticResource Text.Secondary}" Margin="0,0,5,0" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding FormattedTotalNotes}" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" VerticalAlignment="Center"/>
                     </StackPanel>
 
-                    <Rectangle Width="1" Height="14" Fill="{StaticResource Border.Subtle}" Margin="0,0,20,0" VerticalAlignment="Center"/>
+                    <Rectangle Width="1" Height="14" Fill="{StaticResource Border.Subtle}" Margin="0,0,16,0" VerticalAlignment="Center"/>
 
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock Text="음역" FontSize="11" Foreground="{StaticResource Text.Secondary}" Margin="0,0,6,0" VerticalAlignment="Center"/>
-                        <TextBlock Text="{Binding PitchRangeText}" FontSize="12.5" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" VerticalAlignment="Center"/>
+                        <TextBlock Text="음역" FontSize="11" Foreground="{StaticResource Text.Secondary}" Margin="0,0,5,0" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding PitchRangeText}" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" VerticalAlignment="Center"/>
                     </StackPanel>
                 </StackPanel>
             </Grid>

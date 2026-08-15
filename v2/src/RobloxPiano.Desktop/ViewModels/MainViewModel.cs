@@ -1,6 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using RobloxPiano.Core.Library;
+using RobloxPiano.Playback.Windows.WindowsIntegration;
 
 namespace RobloxPiano.Desktop.ViewModels;
 
@@ -13,7 +14,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly LibraryViewModel _libraryViewModel;
     private readonly TranscribeViewModel _transcribeViewModel;
     private readonly SettingsViewModel _settingsViewModel;
+    private readonly IGlobalHotkeyService _hotkeyService;
     private readonly EventHandler<ScoreItem> _openScoreHandler;
+    private readonly EventHandler<HotkeyAction> _hotkeyHandler;
 
     private bool _disposed;
 
@@ -21,17 +24,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public LibraryViewModel LibraryViewModel => _libraryViewModel;
     public TranscribeViewModel TranscribeViewModel => _transcribeViewModel;
     public SettingsViewModel SettingsViewModel => _settingsViewModel;
+    public IGlobalHotkeyService HotkeyService => _hotkeyService;
 
     public MainViewModel(
         PlayerViewModel? playerViewModel = null,
         LibraryViewModel? libraryViewModel = null,
         TranscribeViewModel? transcribeViewModel = null,
-        SettingsViewModel? settingsViewModel = null)
+        SettingsViewModel? settingsViewModel = null,
+        IGlobalHotkeyService? hotkeyService = null)
     {
         _playerViewModel = playerViewModel ?? new PlayerViewModel();
         _libraryViewModel = libraryViewModel ?? new LibraryViewModel();
         _transcribeViewModel = transcribeViewModel ?? new TranscribeViewModel();
         _settingsViewModel = settingsViewModel ?? new SettingsViewModel();
+        _hotkeyService = hotkeyService ?? new GlobalHotkeyService();
 
         _openScoreHandler = async (_, score) =>
         {
@@ -39,7 +45,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
             CurrentView = _playerViewModel;
         };
 
+        _hotkeyHandler = async (_, action) =>
+        {
+            switch (action)
+            {
+                case HotkeyAction.Play:
+                    await _playerViewModel.HandleHotkeyPlayAsync();
+                    break;
+                case HotkeyAction.PauseResume:
+                    await _playerViewModel.HandleHotkeyPauseResumeAsync();
+                    break;
+                case HotkeyAction.Stop:
+                    _playerViewModel.HandleHotkeyStop();
+                    break;
+            }
+        };
+
         _libraryViewModel.OpenScoreRequested += _openScoreHandler;
+        _hotkeyService.HotkeyPressed += _hotkeyHandler;
         CurrentView = _playerViewModel;
     }
 
@@ -62,6 +85,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _disposed = true;
 
         _libraryViewModel.OpenScoreRequested -= _openScoreHandler;
+        _hotkeyService.HotkeyPressed -= _hotkeyHandler;
+        _hotkeyService.Dispose();
         _playerViewModel.Dispose();
     }
 }

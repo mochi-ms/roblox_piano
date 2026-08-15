@@ -2,6 +2,8 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
+using RobloxPiano.Desktop.ViewModels;
+using RobloxPiano.Desktop.Views;
 
 namespace RobloxPiano.Desktop;
 
@@ -14,6 +16,10 @@ public partial class MainWindow : Window
     private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
     private const int DWMWA_USE_IMMERSIVE_DARK_MODE_OLD = 19;
 
+    private HwndSource? _hwndSource;
+    private OverlayWindow? _overlayWindow;
+    private HwndSourceHook? _hwndHook;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -24,15 +30,28 @@ public partial class MainWindow : Window
 
     private void OnClosing(object? sender, CancelEventArgs e)
     {
-        // Immediately stop playback and release all keys as soon as shutdown begins
-        if (DataContext is IDisposable disposable)
-        {
-            disposable.Dispose();
-        }
+        Cleanup();
     }
 
     private void OnClosed(object? sender, EventArgs e)
     {
+        Cleanup();
+    }
+
+    private void Cleanup()
+    {
+        if (_overlayWindow != null)
+        {
+            try { _overlayWindow.Close(); } catch { }
+            _overlayWindow = null;
+        }
+
+        if (_hwndSource != null && _hwndHook != null)
+        {
+            try { _hwndSource.RemoveHook(_hwndHook); } catch { }
+            _hwndHook = null;
+        }
+
         if (DataContext is IDisposable disposable)
         {
             disposable.Dispose();
@@ -51,6 +70,19 @@ public partial class MainWindow : Window
                 if (DwmSetWindowAttribute(handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref useImmersiveDarkMode, sizeof(int)) != 0)
                 {
                     DwmSetWindowAttribute(handle, DWMWA_USE_IMMERSIVE_DARK_MODE_OLD, ref useImmersiveDarkMode, sizeof(int));
+                }
+
+                _hwndSource = HwndSource.FromHwnd(handle);
+                if (DataContext is MainViewModel mainVm)
+                {
+                    _hwndHook = (IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled) =>
+                    {
+                        return mainVm.HotkeyService.ProcessWindowMessage(hwnd, msg, wParam, lParam, ref handled);
+                    };
+                    _hwndSource?.AddHook(_hwndHook);
+                    mainVm.HotkeyService.RegisterHotkeys(handle);
+
+                    _overlayWindow = new OverlayWindow(mainVm.PlayerViewModel.OverlayViewModel);
                 }
             }
         }

@@ -9,6 +9,7 @@ using RobloxPiano.Core.Music;
 using RobloxPiano.Core.Piano;
 using RobloxPiano.Playback.Windows.Input;
 using RobloxPiano.Playback.Windows.Playback;
+using RobloxPiano.Playback.Windows.WindowsIntegration;
 
 namespace RobloxPiano.Desktop.ViewModels;
 
@@ -22,6 +23,9 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
     private readonly PedalController _pedal;
     private readonly RobloxPianoMapper _mapper;
     private readonly IPlaybackBackend _backend;
+    private readonly IRobloxTargetWindowService _targetService;
+    private readonly IPlaybackTargetGuard _targetGuard;
+    private readonly OverlayViewModel _overlayViewModel;
 
     private readonly Dictionary<int, PianoKeyViewModel> _keyLookup = new();
     private bool _isUpdatingProgressFromScheduler;
@@ -102,13 +106,32 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private ObservableCollection<PianoKeyViewModel> _pianoKeys = new();
 
+    [ObservableProperty]
+    private ObservableCollection<RobloxWindowInfo> _availableRobloxWindows = new();
+
+    [ObservableProperty]
+    private RobloxWindowInfo? _selectedRobloxWindow;
+
+    [ObservableProperty]
+    private bool _isRobloxConnected;
+
+    [ObservableProperty]
+    private string _targetStatusText = "Roblox 대기 중";
+
+    public bool IsRealInputBackend => _backend is WindowsSendInputBackend;
     public PlaybackScheduler Scheduler => _scheduler;
+    public IRobloxTargetWindowService TargetService => _targetService;
+    public IPlaybackTargetGuard TargetGuard => _targetGuard;
+    public OverlayViewModel OverlayViewModel => _overlayViewModel;
 
     public PlayerViewModel() : this(new WindowsSendInputBackend())
     {
     }
 
-    public PlayerViewModel(IPlaybackBackend backend)
+    public PlayerViewModel(
+        IPlaybackBackend backend,
+        IRobloxTargetWindowService? targetService = null,
+        IPlaybackTargetGuard? targetGuard = null)
     {
         _backend = backend;
         _keyState = new KeyStateManager(_backend, idleTimeoutSeconds: 2.0, enableWatchdog: true);
@@ -117,6 +140,10 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
         _pedal = new PedalController(_backend);
         _scheduler = new PlaybackScheduler(_chordEngine, _keyState, _pedal);
 
+        _targetService = targetService ?? new RobloxTargetWindowService();
+        _targetGuard = targetGuard ?? new PlaybackTargetGuard(_targetService);
+        _overlayViewModel = new OverlayViewModel(_scheduler);
+
         _scheduler.StateChanged += OnSchedulerStateChanged;
         _scheduler.ProgressChanged += OnSchedulerProgressChanged;
         _scheduler.CountdownTick += OnSchedulerCountdownTick;
@@ -124,7 +151,11 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
         _scheduler.ChordEnded += OnSchedulerChordEnded;
         _scheduler.PlaybackError += OnSchedulerPlaybackError;
 
+        _targetService.TargetChanged += OnTargetChanged;
+        _targetService.AvailableTargetsChanged += OnAvailableTargetsChanged;
+
         Initialize61Keys();
+        RefreshRobloxWindows();
     }
 
     private void Initialize61Keys()
@@ -308,6 +339,7 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
         HasScore = true;
         StatusText = "준비됨";
 
+        _overlayViewModel.UpdateScoreTitle(Title);
         _scheduler.SetTimeline(timeline);
     }
 
@@ -315,6 +347,7 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
     {
         if (_disposed) return;
         _scheduler.Speed = value;
+        _overlayViewModel.UpdateSpeed(value);
     }
 
     partial void OnSelectedTransposeChanged(int value)
@@ -336,25 +369,164 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    public void TogglePlayPause()
+    public void RefreshRobloxWindows()
     {
         ThrowIfDisposed();
-        if (!HasScore) return;
-        _scheduler.TogglePlayPause();
+        _targetService.Refresh();
     }
 
     [RelayCommand]
-    public void Play()
+    public void SelectRobloxWindow(RobloxWindowInfo? window)
+    {
+        ThrowIfDisposed();
+        if (window != null)
+        {
+            _targetService.SetTarget(window.Hwnd);
+        }
+        else
+        {
+            _targetService.ClearTarget();
+        }
+    }
+
+    private void OnTargetChanged(object? sender, EventArgs e)
+    {
+        PostToDispatcherOrDirect(() =>
+        {
+            SelectedRobloxWindow = _targetService.CurrentTarget;
+            IsRobloxConnected = _targetService.HasTarget;
+            UpdateTargetStatusText();
+        });
+    }
+
+    private void OnAvailableTargetsChanged(object? sender, EventArgs e)
+    {
+        PostToDispatcherOrDirect(() =>
+        {
+            AvailableRobloxWindows = new ObservableCollection<RobloxWindowInfo>(_targetService.AvailableTargets);
+            SelectedRobloxWindow = _targetService.CurrentTarget;
+            IsRobloxConnected = _targetService.HasTarget;
+            UpdateTargetStatusText();
+        });
+    }
+
+    private void UpdateTargetStatusText()
+    {
+        if (_targetService.CurrentTarget != null && _targetService.HasTarget)
+        {
+            TargetStatusText = $"● {_targetService.CurrentTarget.DisplayName}";
+        }
+        else if (_targetService.AvailableTargets.Count > 1)
+        {
+            TargetStatusText = $"○ Roblox 창 {_targetService.AvailableTargets.Count}개 발견 (선택 필요)";
+        }
+        else
+        {
+            TargetStatusText = "○ Roblox 창 없음";
+        }
+    }
+
+    [RelayCommand]
+    public async Task TogglePlayPauseAsync()
     {
         ThrowIfDisposed();
         if (!HasScore) return;
+
+        if (_scheduler.State == PlaybackState.Playing)
+        {
+            Pause();
+        }
+        else if (_scheduler.State == PlaybackState.Paused)
+        {
+            await ResumeOrPlayAsync();
+        }
+        else
+        {
+            await PlayAsync();
+        }
+    }
+
+    public void TogglePlayPause()
+    {
+        TogglePlayPauseAsync().GetAwaiter().GetResult();
+    }
+
+    [RelayCommand]
+    public async Task PlayAsync()
+    {
+        ThrowIfDisposed();
+        if (!HasScore) return;
+
+        if (IsRealInputBackend)
+        {
+            if (!_targetGuard.ValidateTarget())
+            {
+                StatusText = _targetService.AvailableTargets.Count > 1
+                    ? "Roblox 창이 여러 개 열려 있습니다. 대상을 선택하세요."
+                    : "Roblox 창을 찾을 수 없습니다.";
+                return;
+            }
+
+            bool activated = await _targetGuard.ActivateAndVerifyTargetAsync();
+            if (!activated)
+            {
+                StatusText = "Roblox 창으로 전환할 수 없습니다.";
+                return;
+            }
+
+            _targetGuard.StartMonitoring(() =>
+            {
+                PostToDispatcherOrDirect(() =>
+                {
+                    _scheduler.Stop();
+                    StatusText = "Roblox 창 포커스가 해제되어 재생을 중지했습니다.";
+                });
+            });
+        }
+
         _scheduler.Play();
+    }
+
+    public void Play()
+    {
+        PlayAsync().GetAwaiter().GetResult();
+    }
+
+    private async Task ResumeOrPlayAsync()
+    {
+        if (IsRealInputBackend)
+        {
+            if (!_targetGuard.ValidateTarget())
+            {
+                StatusText = "Roblox 창을 찾을 수 없습니다.";
+                return;
+            }
+
+            bool activated = await _targetGuard.ActivateAndVerifyTargetAsync();
+            if (!activated)
+            {
+                StatusText = "Roblox 창으로 전환할 수 없습니다.";
+                return;
+            }
+
+            _targetGuard.StartMonitoring(() =>
+            {
+                PostToDispatcherOrDirect(() =>
+                {
+                    _scheduler.Stop();
+                    StatusText = "Roblox 창 포커스가 해제되어 재생을 중지했습니다.";
+                });
+            });
+        }
+
+        _scheduler.Resume();
     }
 
     [RelayCommand]
     public void Pause()
     {
         ThrowIfDisposed();
+        _targetGuard.StopMonitoring();
         _scheduler.Pause();
     }
 
@@ -362,6 +534,7 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
     public void Stop()
     {
         ThrowIfDisposed();
+        _targetGuard.StopMonitoring();
         _scheduler.Stop();
     }
 
@@ -371,6 +544,51 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
         ThrowIfDisposed();
         _scheduler.Seek(targetSeconds);
         PlayheadCanvasLeft = targetSeconds * PixelsPerSecond;
+    }
+
+    public async Task HandleHotkeyPlayAsync()
+    {
+        if (_disposed) return;
+        if (!HasScore)
+        {
+            StatusText = "재생할 악보를 먼저 선택하세요.";
+            return;
+        }
+
+        if (_scheduler.State == PlaybackState.Playing)
+        {
+            return;
+        }
+
+        if (_scheduler.State == PlaybackState.Paused)
+        {
+            await ResumeOrPlayAsync();
+        }
+        else
+        {
+            await PlayAsync();
+        }
+    }
+
+    public async Task HandleHotkeyPauseResumeAsync()
+    {
+        if (_disposed) return;
+        if (!HasScore) return;
+
+        if (_scheduler.State == PlaybackState.Playing)
+        {
+            Pause();
+        }
+        else if (_scheduler.State == PlaybackState.Paused)
+        {
+            await ResumeOrPlayAsync();
+        }
+    }
+
+    public void HandleHotkeyStop()
+    {
+        if (_disposed) return;
+        Stop();
     }
 
     private static void PostToDispatcherOrDirect(Action action)
@@ -388,6 +606,11 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
 
     private void OnSchedulerStateChanged(object? sender, PlaybackState state)
     {
+        if (state is PlaybackState.Stopped or PlaybackState.Completed)
+        {
+            _targetGuard.StopMonitoring();
+        }
+
         PostToDispatcherOrDirect(() =>
         {
             IsPlaying = (state == PlaybackState.Playing);
@@ -479,6 +702,8 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
 
     private void OnSchedulerPlaybackError(object? sender, Exception ex)
     {
+        _targetGuard.StopMonitoring();
+
         PostToDispatcherOrDirect(() =>
         {
             StatusText = $"오류: {ex.Message}";
@@ -517,6 +742,11 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
         if (_disposed) return;
         _disposed = true;
 
+        _targetGuard.StopMonitoring();
+
+        _targetService.TargetChanged -= OnTargetChanged;
+        _targetService.AvailableTargetsChanged -= OnAvailableTargetsChanged;
+
         _scheduler.StateChanged -= OnSchedulerStateChanged;
         _scheduler.ProgressChanged -= OnSchedulerProgressChanged;
         _scheduler.CountdownTick -= OnSchedulerCountdownTick;
@@ -524,6 +754,8 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
         _scheduler.ChordEnded -= OnSchedulerChordEnded;
         _scheduler.PlaybackError -= OnSchedulerPlaybackError;
 
+        _targetGuard.Dispose();
+        _overlayViewModel.Dispose();
         _scheduler.Dispose();
         _backend.Dispose();
     }
