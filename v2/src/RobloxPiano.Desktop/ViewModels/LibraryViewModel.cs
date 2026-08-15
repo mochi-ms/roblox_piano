@@ -81,6 +81,21 @@ public partial class LibraryViewModel : ObservableObject
     [ObservableProperty]
     private bool _canGoUp = false;
 
+    [ObservableProperty]
+    private LibrarySortColumn _currentSortColumn = LibrarySortColumn.Title;
+
+    [ObservableProperty]
+    private bool _sortDescending = false;
+
+    public bool IsSortByTitle => CurrentSortColumn == LibrarySortColumn.Title;
+    public bool IsSortByType => CurrentSortColumn == LibrarySortColumn.FileExtension;
+    public bool IsSortByDuration => CurrentSortColumn == LibrarySortColumn.Duration;
+    public bool IsSortByBpm => CurrentSortColumn == LibrarySortColumn.Bpm;
+    public bool IsSortByNotes => CurrentSortColumn == LibrarySortColumn.TotalNotes;
+    public bool IsSortByModified => CurrentSortColumn == LibrarySortColumn.UpdatedAt;
+    public bool IsSortAscending => !SortDescending;
+    public bool IsSortDescending => SortDescending;
+
     public LibraryViewModel()
     {
         var dbPath = LibraryDatabasePathProvider.GetDefaultDatabasePath();
@@ -126,6 +141,22 @@ public partial class LibraryViewModel : ObservableObject
             IsLoading = false;
             UpdateEmptyState();
         }
+    }
+
+    partial void OnCurrentSortColumnChanged(LibrarySortColumn value)
+    {
+        OnPropertyChanged(nameof(IsSortByTitle));
+        OnPropertyChanged(nameof(IsSortByType));
+        OnPropertyChanged(nameof(IsSortByDuration));
+        OnPropertyChanged(nameof(IsSortByBpm));
+        OnPropertyChanged(nameof(IsSortByNotes));
+        OnPropertyChanged(nameof(IsSortByModified));
+    }
+
+    partial void OnSortDescendingChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsSortAscending));
+        OnPropertyChanged(nameof(IsSortDescending));
     }
 
     partial void OnSearchTextChanged(string value)
@@ -180,6 +211,8 @@ public partial class LibraryViewModel : ObservableObject
                 FolderId = CurrentFolderId,
                 SearchKeyword = SearchText,
                 FavoritesOnly = IsFavoritesView,
+                SortBy = CurrentSortColumn,
+                SortDescending = SortDescending,
                 PageIndex = 0,
                 PageSize = PageSize
             };
@@ -220,6 +253,8 @@ public partial class LibraryViewModel : ObservableObject
                 FolderId = CurrentFolderId,
                 SearchKeyword = SearchText,
                 FavoritesOnly = IsFavoritesView,
+                SortBy = CurrentSortColumn,
+                SortDescending = SortDescending,
                 PageIndex = nextPage,
                 PageSize = PageSize
             };
@@ -241,6 +276,40 @@ public partial class LibraryViewModel : ObservableObject
         {
             IsLoadingMore = false;
         }
+    }
+
+    [RelayCommand]
+    public async Task SetSortColumnAsync(string columnName)
+    {
+        if (Enum.TryParse<LibrarySortColumn>(columnName, true, out var col))
+        {
+            CurrentSortColumn = col;
+            await ReloadQueryAsync();
+        }
+    }
+
+    [RelayCommand]
+    public async Task SetSortDirectionAsync(object? param)
+    {
+        bool desc = false;
+        if (param is bool b)
+        {
+            desc = b;
+        }
+        else if (param is string s && bool.TryParse(s, out var parsed))
+        {
+            desc = parsed;
+        }
+
+        SortDescending = desc;
+        await ReloadQueryAsync();
+    }
+
+    [RelayCommand]
+    public async Task ToggleSortDirectionAsync()
+    {
+        SortDescending = !SortDescending;
+        await ReloadQueryAsync();
     }
 
     private void UpdateStatusText()
@@ -316,7 +385,7 @@ public partial class LibraryViewModel : ObservableObject
     private async Task NavigateForwardAsync()
     {
         if (_forwardStack.Count > 0)
-            {
+        {
             var next = _forwardStack.Pop();
             _backStack.Push(CurrentFolderId);
 

@@ -75,6 +75,37 @@ public class FolderServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RenameFolder_ScoreDiscoveryFailure_RollsPhysicalFolderBack()
+    {
+        await _repository.InitializeAsync();
+        var f1 = await _folderService.CreateFolderAsync("AnimeFolder");
+
+        var allFolders = (await _repository.GetAllFoldersAsync()).ToDictionary(f => f.Id);
+        var oldPath = _fileService.GetFolderPath(f1.Id, allFolders);
+        Assert.True(Directory.Exists(oldPath));
+
+        // Use failing test double that fails on score queries during recursion
+        var failingRepo = new FailingScoreDiscoveryRepository(_dbPath);
+        var failingFolderService = new FolderService(failingRepo, _fileService);
+
+        var targetNewPath = Path.Combine(_storageRoot, "AnimeRenamed");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await failingFolderService.RenameFolderAsync(f1.Id, "AnimeRenamed");
+        });
+
+        // Verify compensation: physical directory rolled back to oldPath, targetNewPath does not exist
+        Assert.True(Directory.Exists(oldPath));
+        Assert.False(Directory.Exists(targetNewPath));
+
+        // Verify DB unchanged
+        var folderInDb = await _repository.GetFolderAsync(f1.Id);
+        Assert.NotNull(folderInDb);
+        Assert.Equal("AnimeFolder", folderInDb.Name);
+    }
+
+    [Fact]
     public async Task MoveFolder_PreventsCycles()
     {
         await _repository.InitializeAsync();
@@ -97,6 +128,37 @@ public class FolderServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task MoveFolder_ScoreDiscoveryFailure_RollsPhysicalFolderBack()
+    {
+        await _repository.InitializeAsync();
+        var targetParent = await _folderService.CreateFolderAsync("TargetParent");
+        var child = await _folderService.CreateFolderAsync("ChildFolder");
+
+        var allFolders = (await _repository.GetAllFoldersAsync()).ToDictionary(f => f.Id);
+        var oldChildPath = _fileService.GetFolderPath(child.Id, allFolders);
+        Assert.True(Directory.Exists(oldChildPath));
+
+        var failingRepo = new FailingScoreDiscoveryRepository(_dbPath);
+        var failingFolderService = new FolderService(failingRepo, _fileService);
+
+        var targetNewPath = Path.Combine(_storageRoot, "TargetParent", "ChildFolder");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await failingFolderService.MoveFolderAsync(child.Id, targetParent.Id);
+        });
+
+        // Verify compensation: physical directory rolled back to oldChildPath, targetNewPath does not exist
+        Assert.True(Directory.Exists(oldChildPath));
+        Assert.False(Directory.Exists(targetNewPath));
+
+        // Verify DB unchanged
+        var childInDb = await _repository.GetFolderAsync(child.Id);
+        Assert.NotNull(childInDb);
+        Assert.Null(childInDb.ParentId);
+    }
+
+    [Fact]
     public async Task DeleteFolder_DeletesRecursively()
     {
         await _repository.InitializeAsync();
@@ -114,5 +176,19 @@ public class FolderServiceTests : IDisposable
 
         var scores = await _repository.GetAllScoresAsync();
         Assert.Empty(scores);
+    }
+
+    private class FailingScoreDiscoveryRepository : SqliteLibraryRepository
+    {
+        public FailingScoreDiscoveryRepository(string dbPath) : base(dbPath) { }
+
+        public override Task<LibraryPage> QueryScoresAsync(LibraryQuery query, CancellationToken ct = default)
+        {
+            if (!string.IsNullOrEmpty(query.FolderId))
+            {
+                throw new InvalidOperationException("Simulated score discovery failure after physical directory move.");
+            }
+            return base.QueryScoresAsync(query, ct);
+        }
     }
 }

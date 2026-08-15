@@ -156,7 +156,28 @@
                         
                         <Separator Background="{StaticResource Border.Subtle}" Margin="4,2,8,2"/>
                         
-                        <Button Margin="0,0,4,0" Padding="8,4" Background="Transparent" BorderThickness="0">
+                        <Button x:Name="SortButton" Margin="0,0,4,0" Padding="8,4" Background="Transparent" BorderThickness="0" Click="SortButton_Click">
+                            <Button.ContextMenu>
+                                <ContextMenu Background="{StaticResource Surface.Elevated}" Foreground="{StaticResource Text.Primary}" BorderBrush="{StaticResource Border.Subtle}">
+                                    <MenuItem Header="이름" Command="{Binding SetSortColumnCommand}" CommandParameter="Title"
+                                              IsChecked="{Binding IsSortByTitle}" IsCheckable="True"/>
+                                    <MenuItem Header="유형" Command="{Binding SetSortColumnCommand}" CommandParameter="FileExtension"
+                                              IsChecked="{Binding IsSortByType}" IsCheckable="True"/>
+                                    <MenuItem Header="길이" Command="{Binding SetSortColumnCommand}" CommandParameter="Duration"
+                                              IsChecked="{Binding IsSortByDuration}" IsCheckable="True"/>
+                                    <MenuItem Header="BPM" Command="{Binding SetSortColumnCommand}" CommandParameter="Bpm"
+                                              IsChecked="{Binding IsSortByBpm}" IsCheckable="True"/>
+                                    <MenuItem Header="음표 수" Command="{Binding SetSortColumnCommand}" CommandParameter="TotalNotes"
+                                              IsChecked="{Binding IsSortByNotes}" IsCheckable="True"/>
+                                    <MenuItem Header="수정한 날짜" Command="{Binding SetSortColumnCommand}" CommandParameter="UpdatedAt"
+                                              IsChecked="{Binding IsSortByModified}" IsCheckable="True"/>
+                                    <Separator Background="{StaticResource Border.Subtle}"/>
+                                    <MenuItem Header="오름차순" Command="{Binding SetSortDirectionCommand}" CommandParameter="False"
+                                              IsChecked="{Binding IsSortAscending}" IsCheckable="True"/>
+                                    <MenuItem Header="내림차순" Command="{Binding SetSortDirectionCommand}" CommandParameter="True"
+                                              IsChecked="{Binding IsSortDescending}" IsCheckable="True"/>
+                                </ContextMenu>
+                            </Button.ContextMenu>
                             <StackPanel Orientation="Horizontal">
                                 <Path Data="M3 18h6v-2H3v2zM3 6v2h18V6H3zm0 7h12v-2H3v2z" Fill="{StaticResource Text.Primary}" Width="13" Height="13" Stretch="Uniform" Margin="0,0,6,0"/>
                                 <TextBlock Text="정렬" FontSize="12"/>

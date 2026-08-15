@@ -10,6 +10,16 @@ namespace RobloxPiano.Desktop.Views
             InitializeComponent();
         }
 
+        private void SortButton_Click(object sender, System.Windows.RoutedEventArgs e)
+        {
+            if (sender is Button btn && btn.ContextMenu != null)
+            {
+                btn.ContextMenu.PlacementTarget = btn;
+                btn.ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+                btn.ContextMenu.IsOpen = true;
+            }
+        }
+
         private void DataGrid_ScrollChanged(object sender, ScrollChangedEventArgs e)
         {
             if (e.VerticalChange > 0 && DataContext is LibraryViewModel vm)

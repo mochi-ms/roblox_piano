@@ -92,7 +92,8 @@ public class FolderService
         bool movedDir = false;
         if (Directory.Exists(oldPath) && !string.Equals(Path.GetFullPath(oldPath), Path.GetFullPath(newPath), StringComparison.OrdinalIgnoreCase))
         {
-            if (!_fileService.IsPathUnderRoot(oldPath))
+            // Validate BOTH old and new destination paths are inside V2 managed storage root
+            if (!_fileService.IsPathUnderRoot(oldPath) || !_fileService.IsPathUnderRoot(newPath))
             {
                 throw new InvalidOperationException("관리형 스토리지 외부의 디렉터리는 이동할 수 없습니다.");
             }
@@ -100,21 +101,28 @@ public class FolderService
             movedDir = true;
         }
 
-        var affectedScores = await GetScoresToUpdatePathsRecursiveAsync(folderId, oldPath, newPath, ct);
-        folder.Name = cleanName;
-        folder.UpdatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
+        var origName = folder.Name;
+        var origUpdatedAt = folder.UpdatedAt;
 
         try
         {
+            // Discover affected scores and prepare update inside the compensation scope
+            var affectedScores = await GetScoresToUpdatePathsRecursiveAsync(folderId, oldPath, newPath, ct);
+            folder.Name = cleanName;
+            folder.UpdatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
+
             await _repository.UpdateFolderAndScorePathsAsync(folder, affectedScores, ct);
             return folder;
         }
         catch
         {
+            // Compensation: restore physical folder location and in-memory model
             if (movedDir && Directory.Exists(newPath) && _fileService.IsPathUnderRoot(newPath))
             {
                 try { Directory.Move(newPath, oldPath); } catch { }
             }
+            folder.Name = origName;
+            folder.UpdatedAt = origUpdatedAt;
             throw;
         }
     }
@@ -181,7 +189,8 @@ public class FolderService
         bool movedDir = false;
         if (Directory.Exists(oldPath) && !string.Equals(Path.GetFullPath(oldPath), Path.GetFullPath(newPath), StringComparison.OrdinalIgnoreCase))
         {
-            if (!_fileService.IsPathUnderRoot(oldPath))
+            // Validate BOTH old and new destination paths are inside V2 managed storage root
+            if (!_fileService.IsPathUnderRoot(oldPath) || !_fileService.IsPathUnderRoot(newPath))
             {
                 throw new InvalidOperationException("관리형 스토리지 외부의 디렉터리는 이동할 수 없습니다.");
             }
@@ -189,22 +198,31 @@ public class FolderService
             movedDir = true;
         }
 
-        var affectedScores = await GetScoresToUpdatePathsRecursiveAsync(folderId, oldPath, newPath, ct);
-        folder.Name = safeName;
-        folder.ParentId = newParentId;
-        folder.UpdatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
+        var origName = folder.Name;
+        var origParentId = folder.ParentId;
+        var origUpdatedAt = folder.UpdatedAt;
 
         try
         {
+            // Discover affected scores and prepare update inside the compensation scope
+            var affectedScores = await GetScoresToUpdatePathsRecursiveAsync(folderId, oldPath, newPath, ct);
+            folder.Name = safeName;
+            folder.ParentId = newParentId;
+            folder.UpdatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
+
             await _repository.UpdateFolderAndScorePathsAsync(folder, affectedScores, ct);
             return folder;
         }
         catch
         {
+            // Compensation: restore physical folder location and in-memory model
             if (movedDir && Directory.Exists(newPath) && _fileService.IsPathUnderRoot(newPath))
             {
                 try { Directory.Move(newPath, oldPath); } catch { }
             }
+            folder.Name = origName;
+            folder.ParentId = origParentId;
+            folder.UpdatedAt = origUpdatedAt;
             throw;
         }
     }
@@ -264,12 +282,16 @@ public class FolderService
         var page = await _repository.QueryScoresAsync(new LibraryQuery { FolderId = folderId, PageSize = 10000 }, ct);
         foreach (var s in page.Items)
         {
-            if (s.FilePath.StartsWith(oldBasePath, StringComparison.OrdinalIgnoreCase))
+            if (!string.IsNullOrEmpty(s.FilePath))
             {
-                var relPath = Path.GetRelativePath(oldBasePath, s.FilePath);
-                s.FilePath = Path.Combine(newBasePath, relPath);
-                s.UpdatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
-                list.Add(s);
+                var rel = Path.GetRelativePath(oldBasePath, s.FilePath);
+                // Robust descendant check (not starting with .. and not absolute)
+                if (!rel.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(rel))
+                {
+                    s.FilePath = Path.Combine(newBasePath, rel);
+                    s.UpdatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
+                    list.Add(s);
+                }
             }
         }
 

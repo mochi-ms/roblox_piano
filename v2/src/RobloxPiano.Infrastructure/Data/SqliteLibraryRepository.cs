@@ -218,7 +218,7 @@ public class SqliteLibraryRepository : ILibraryRepository
             selectCmd.CommandText = $"""
                 SELECT s.* FROM scores s 
                 {whereSql} 
-                ORDER BY {sortCol} {sortDir} 
+                ORDER BY {sortCol} {sortDir}, s.id ASC 
                 LIMIT @limit OFFSET @offset;
             """;
 

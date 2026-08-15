@@ -97,8 +97,34 @@ public class V1LibraryMigrationService
 
         // 3. Physical file copy into V2 managed storage with compensation tracking
         var createdV2Files = new List<string>();
+        var createdV2Dirs = new List<string>();
         var foldersMap = v1Folders.ToDictionary(f => f.Id);
         var migratedScores = new List<ScoreItem>();
+
+        void EnsureDirectoryTracked(string dirPath)
+        {
+            var current = Path.GetFullPath(dirPath);
+            var toCreate = new Stack<string>();
+
+            while (!string.IsNullOrEmpty(current) && !Directory.Exists(current) && _fileService.IsPathUnderRoot(current))
+            {
+                toCreate.Push(current);
+                var parent = Path.GetDirectoryName(current);
+                if (parent == null || string.Equals(parent, current, StringComparison.OrdinalIgnoreCase))
+                    break;
+                current = parent;
+            }
+
+            while (toCreate.Count > 0)
+            {
+                var dir = toCreate.Pop();
+                if (!Directory.Exists(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                    createdV2Dirs.Add(dir);
+                }
+            }
+        }
 
         try
         {
@@ -138,7 +164,7 @@ public class V1LibraryMigrationService
                     else
                     {
                         var targetDir = _fileService.GetFolderPath(s.FolderId, foldersMap);
-                        Directory.CreateDirectory(targetDir);
+                        EnsureDirectoryTracked(targetDir);
 
                         var origName = !string.IsNullOrEmpty(s.OriginalFilename) ? s.OriginalFilename : Path.GetFileName(v1SourcePath);
                         var destFilename = _fileService.GetSafeFilename(targetDir, origName);
@@ -173,7 +199,7 @@ public class V1LibraryMigrationService
         }
         catch (Exception ex)
         {
-            // Compensation: delete newly created V2 files
+            // Compensation: 1. Delete newly created V2 files
             foreach (var f in createdV2Files)
             {
                 try
@@ -181,6 +207,22 @@ public class V1LibraryMigrationService
                     if (File.Exists(f) && _fileService.IsPathUnderRoot(f))
                     {
                         File.Delete(f);
+                    }
+                }
+                catch { }
+            }
+
+            // Compensation: 2. Delete newly created empty V2 directories deepest-first
+            foreach (var d in createdV2Dirs.AsEnumerable().Reverse())
+            {
+                try
+                {
+                    if (Directory.Exists(d) && _fileService.IsPathUnderRoot(d))
+                    {
+                        if (!Directory.EnumerateFileSystemEntries(d).Any())
+                        {
+                            Directory.Delete(d, recursive: false);
+                        }
                     }
                 }
                 catch { }

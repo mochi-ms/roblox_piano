@@ -211,6 +211,48 @@ public class V1LibraryMigrationTests : IDisposable
     }
 
     [Fact]
+    public async Task MigrationFailure_RemovesNewlyCreatedEmptyDirectories()
+    {
+        await CreateSyntheticV1FixtureAsync();
+
+        var failingRepo = new FailingBulkImportRepository(_tempV2DbPath);
+        var migrationService = new V1LibraryMigrationService(failingRepo, _tempV1DbPath, _tempV2StorageRoot);
+
+        var result = await migrationService.MigrateAsync();
+        Assert.False(result.Success);
+
+        // Assert that newly created directories (Anime, Anime\Ghibli) were removed from V2 root
+        var v2Dirs = Directory.GetDirectories(_tempV2StorageRoot, "*", SearchOption.AllDirectories);
+        Assert.Empty(v2Dirs);
+    }
+
+    [Fact]
+    public async Task MigrationFailure_PreservesPreExistingDirectory()
+    {
+        await CreateSyntheticV1FixtureAsync();
+
+        // Pre-create Anime directory in V2 root before migration
+        var preExistingAnime = Path.Combine(_tempV2StorageRoot, "Anime");
+        Directory.CreateDirectory(preExistingAnime);
+
+        var failingRepo = new FailingBulkImportRepository(_tempV2DbPath);
+        var migrationService = new V1LibraryMigrationService(failingRepo, _tempV1DbPath, _tempV2StorageRoot);
+
+        var result = await migrationService.MigrateAsync();
+        Assert.False(result.Success);
+
+        // Pre-existing Anime directory must survive compensation
+        Assert.True(Directory.Exists(preExistingAnime));
+
+        // But newly created child Ghibli directory and files must be cleaned up
+        var ghibliDir = Path.Combine(preExistingAnime, "Ghibli");
+        Assert.False(Directory.Exists(ghibliDir));
+
+        var files = Directory.GetFiles(_tempV2StorageRoot, "*.*", SearchOption.AllDirectories);
+        Assert.Empty(files);
+    }
+
+    [Fact]
     public async Task MigrateAsync_Idempotency_RunningTwiceDoesNotDuplicateManagedFiles()
     {
         await CreateSyntheticV1FixtureAsync();

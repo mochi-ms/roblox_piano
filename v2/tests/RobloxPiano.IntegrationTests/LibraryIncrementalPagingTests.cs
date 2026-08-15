@@ -56,8 +56,8 @@ public class LibraryIncrementalPagingTests : IDisposable
                 filePath: Path.Combine(_storageRoot, $"track_{i:D5}.mid"),
                 originalFilename: $"track_{i:D5}.mid",
                 fileExtension: ".mid",
-                duration: 120.0,
-                bpm: 120.0,
+                duration: 120.0 + (i % 50), // Many equal duration values
+                bpm: 100.0 + (i % 20),      // Many equal BPM values
                 totalNotes: 300,
                 tags: i % 2 == 0 ? "anime,jpop" : "classical",
                 favorite: i % 3 == 0,
@@ -148,5 +148,96 @@ public class LibraryIncrementalPagingTests : IDisposable
             await vm.LoadNextPageAsync();
         }
         Assert.Equal(500, vm.DisplayedScores.Count);
+    }
+
+    [Fact]
+    public async Task StableSortPaging_1000Rows_NoDuplicateOrMissingIds()
+    {
+        await PopulateScoresAsync(1000);
+
+        var vm = new LibraryViewModel(_repository, _fileService, _folderService, _libraryService);
+        vm.PageSize = 100;
+        await vm.InitializeAsync();
+
+        // Set sort by Duration DESC (which has many equal values: 120..169 repeating)
+        await vm.SetSortColumnAsync("Duration");
+        await vm.SetSortDirectionAsync(true);
+
+        var loadedIds = new List<string>();
+        foreach (var item in vm.DisplayedScores)
+        {
+            loadedIds.Add(item.Id);
+        }
+
+        while (vm.HasMoreItems)
+        {
+            int prevCount = loadedIds.Count;
+            await vm.LoadNextPageAsync();
+            for (int i = prevCount; i < vm.DisplayedScores.Count; i++)
+            {
+                loadedIds.Add(vm.DisplayedScores[i].Id);
+            }
+        }
+
+        Assert.Equal(1000, loadedIds.Count);
+        Assert.Equal(1000, loadedIds.Distinct().Count()); // Zero duplicates and zero missing items
+    }
+
+    [Fact]
+    public async Task SortState_ChangesResetPageToZero()
+    {
+        await PopulateScoresAsync(1000);
+
+        var vm = new LibraryViewModel(_repository, _fileService, _folderService, _libraryService);
+        vm.PageSize = 100;
+        await vm.InitializeAsync();
+
+        // Load 300 items across 3 pages
+        await vm.LoadNextPageAsync();
+        await vm.LoadNextPageAsync();
+        Assert.Equal(300, vm.DisplayedScores.Count);
+        Assert.Equal(2, vm.CurrentPageIndex);
+
+        // Change sort column -> must reset to page 0 with 100 items
+        await vm.SetSortColumnAsync("Bpm");
+        Assert.Equal(0, vm.CurrentPageIndex);
+        Assert.Equal(100, vm.DisplayedScores.Count);
+        Assert.Equal(LibrarySortColumn.Bpm, vm.CurrentSortColumn);
+
+        // Load next page and toggle direction -> must reset to page 0 with 100 items
+        await vm.LoadNextPageAsync();
+        Assert.Equal(200, vm.DisplayedScores.Count);
+        await vm.ToggleSortDirectionAsync();
+        Assert.Equal(0, vm.CurrentPageIndex);
+        Assert.Equal(100, vm.DisplayedScores.Count);
+        Assert.True(vm.SortDescending);
+    }
+
+    [Fact]
+    public async Task SortPaging_LoadNextUsesSameSort()
+    {
+        await PopulateScoresAsync(1000);
+
+        var vm = new LibraryViewModel(_repository, _fileService, _folderService, _libraryService);
+        vm.PageSize = 100;
+        await vm.InitializeAsync();
+
+        // Set sort by Bpm DESC
+        await vm.SetSortColumnAsync("Bpm");
+        await vm.SetSortDirectionAsync(true);
+
+        double firstPageMaxBpm = vm.DisplayedScores.First().Model.Bpm;
+        double firstPageMinBpm = vm.DisplayedScores.Last().Model.Bpm;
+
+        // Load next page
+        await vm.LoadNextPageAsync();
+        Assert.Equal(200, vm.DisplayedScores.Count);
+
+        double secondPageFirstBpm = vm.DisplayedScores[100].Model.Bpm;
+        double secondPageLastBpm = vm.DisplayedScores.Last().Model.Bpm;
+
+        Assert.True(firstPageMaxBpm >= firstPageMinBpm);
+        Assert.True(firstPageMinBpm >= secondPageFirstBpm);
+        Assert.True(secondPageFirstBpm >= secondPageLastBpm);
     }
 }

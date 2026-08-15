@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using RobloxPiano.Core.Importers;
 using RobloxPiano.Core.Library;
 
@@ -37,31 +36,63 @@ public class LibraryService
 
         var ext = Path.GetExtension(sourceFilePath).ToLowerInvariant();
 
-        // 1. Format Validation BEFORE Copying
+        // 1. Strict Format Validation & Parsing Check BEFORE Copying
         if (ext is not (".mid" or ".midi" or ".mml" or ".txt"))
         {
             throw new InvalidOperationException($"지원되지 않는 파일 형식입니다: {ext}");
         }
 
-        if (ext == ".txt")
+        double duration = 0.0;
+        double bpm = 120.0;
+        int totalNotes = 0;
+        string status = "READY";
+        string errorMsg = "";
+        string title = Path.GetFileNameWithoutExtension(sourceFilePath);
+
+        if (ext is ".mml" or ".txt")
         {
-            if (!_mmlImporter.CanImport(sourceFilePath))
+            var textContent = await File.ReadAllTextAsync(sourceFilePath, ct);
+            if (string.IsNullOrWhiteSpace(textContent))
             {
-                throw new InvalidOperationException("지원되지 않는 형식이거나 유효하지 않은 텍스트 악보 파일입니다.");
+                throw new InvalidOperationException("빈 파일은 악보로 등록할 수 없습니다.");
             }
 
-            var textContent = await File.ReadAllTextAsync(sourceFilePath, ct);
-            var headSnippet = textContent.Trim().ToUpperInvariant();
-            if (!headSnippet.StartsWith("MML@") && !Regex.IsMatch(headSnippet, @"\b[1-7][+#-]?\b"))
+            try
             {
-                throw new InvalidOperationException("일반 텍스트 파일(README 등)은 악보로 등록할 수 없습니다.");
+                var meta = _mmlImporter.ExtractMetadata(textContent);
+                duration = Convert.ToDouble(meta["duration"]);
+                bpm = Convert.ToDouble(meta["bpm"]);
+                totalNotes = Convert.ToInt32(meta["notes"]);
+
+                if (totalNotes <= 0)
+                {
+                    throw new InvalidOperationException("유효한 음표 데이터가 없습니다.");
+                }
+
+                sourceType = "MML";
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"유효한 MML 악보 형식이 아니므로 등록할 수 없습니다: {ex.Message}", ex);
             }
         }
-        else if (ext == ".mml")
+        else if (ext is ".mid" or ".midi")
         {
-            if (!_mmlImporter.CanImport(sourceFilePath))
+            try
             {
-                throw new InvalidOperationException("유효한 MML 형식이 아닙니다.");
+                var timeline = _midiImporter.ImportScore(sourceFilePath);
+                duration = timeline.Duration;
+                bpm = timeline.InitialBpm;
+                totalNotes = timeline.TotalNotes;
+                if (!string.IsNullOrWhiteSpace(timeline.Title) && timeline.Title != "Untitled")
+                {
+                    title = timeline.Title;
+                }
+                sourceType = "MIDI";
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"유효한 MIDI 파일이 아니므로 등록할 수 없습니다: {ex.Message}", ex);
             }
         }
 
@@ -86,43 +117,6 @@ public class LibraryService
             destFilePath = Path.Combine(targetDir, destFilename);
             File.Copy(sourceFilePath, destFilePath, overwrite: false);
             copiedFile = true;
-        }
-
-        double duration = 0.0;
-        double bpm = 120.0;
-        int totalNotes = 0;
-        string status = "READY";
-        string errorMsg = "";
-        string title = Path.GetFileNameWithoutExtension(destFilename);
-
-        try
-        {
-            if (ext is ".mid" or ".midi")
-            {
-                var timeline = _midiImporter.ImportScore(destFilePath);
-                duration = timeline.Duration;
-                bpm = timeline.InitialBpm;
-                totalNotes = timeline.TotalNotes;
-                if (!string.IsNullOrWhiteSpace(timeline.Title) && timeline.Title != "Untitled")
-                {
-                    title = timeline.Title;
-                }
-                sourceType = "MIDI";
-            }
-            else if (ext is ".mml" or ".txt")
-            {
-                var mmlText = await File.ReadAllTextAsync(destFilePath, ct);
-                var meta = _mmlImporter.ExtractMetadata(mmlText);
-                duration = Convert.ToDouble(meta["duration"]);
-                bpm = Convert.ToDouble(meta["bpm"]);
-                totalNotes = Convert.ToInt32(meta["notes"]);
-                sourceType = "MML";
-            }
-        }
-        catch (Exception ex)
-        {
-            status = "ANALYSIS_FAILED";
-            errorMsg = ex.Message;
         }
 
         var score = new ScoreItem(
@@ -220,6 +214,11 @@ public class LibraryService
         var item = await _repository.GetScoreAsync(scoreId, ct)
             ?? throw new ArgumentException($"Score {scoreId} not found");
 
+        if (string.IsNullOrEmpty(item.FilePath) || !_fileService.IsPathUnderRoot(item.FilePath))
+        {
+            throw new InvalidOperationException("관리형 스토리지 외부의 파일은 라이브러리 내부 복사를 수행할 수 없습니다.");
+        }
+
         var allFolders = (await _repository.GetAllFoldersAsync(ct)).ToDictionary(f => f.Id);
         var targetDir = _fileService.GetFolderPath(targetFolderId, allFolders);
         Directory.CreateDirectory(targetDir);
@@ -229,7 +228,7 @@ public class LibraryService
         var destFilePath = Path.Combine(targetDir, destFilename);
 
         bool copiedPhysical = false;
-        if (!string.IsNullOrEmpty(item.FilePath) && File.Exists(item.FilePath))
+        if (File.Exists(item.FilePath))
         {
             File.Copy(item.FilePath, destFilePath);
             copiedPhysical = true;
@@ -328,18 +327,39 @@ public class LibraryService
         var item = await _repository.GetScoreAsync(scoreId, ct);
         if (item != null)
         {
-            if (!string.IsNullOrEmpty(item.FilePath) && File.Exists(item.FilePath))
+            string? tempTrash = null;
+            bool movedToTemp = false;
+
+            try
             {
-                if (_fileService.IsPathUnderRoot(item.FilePath))
+                if (!string.IsNullOrEmpty(item.FilePath) && File.Exists(item.FilePath))
                 {
-                    File.Delete(item.FilePath);
+                    if (!_fileService.IsPathUnderRoot(item.FilePath))
+                    {
+                        throw new InvalidOperationException("관리형 스토리지 외부의 파일은 삭제할 수 없습니다.");
+                    }
+
+                    tempTrash = $"{item.FilePath}.tmp_del_{Guid.NewGuid():N}";
+                    File.Move(item.FilePath, tempTrash);
+                    movedToTemp = true;
                 }
-                else
+
+                await _repository.DeleteScoreAsync(scoreId, ct);
+
+                if (movedToTemp && !string.IsNullOrEmpty(tempTrash) && File.Exists(tempTrash))
                 {
-                    throw new InvalidOperationException("관리형 스토리지 외부의 파일은 삭제할 수 없습니다.");
+                    try { File.Delete(tempTrash); } catch { }
                 }
             }
-            await _repository.DeleteScoreAsync(scoreId, ct);
+            catch
+            {
+                // Compensation: restore file if DB deletion failed
+                if (movedToTemp && !string.IsNullOrEmpty(tempTrash) && File.Exists(tempTrash))
+                {
+                    try { File.Move(tempTrash, item.FilePath); } catch { }
+                }
+                throw;
+            }
         }
     }
 
@@ -440,11 +460,14 @@ public class LibraryService
             {
                 try
                 {
-                    using var reader = new StreamReader(filePath);
-                    char[] buf = new char[100];
-                    int r = reader.Read(buf, 0, 100);
-                    var snippet = new string(buf, 0, r).Trim().ToUpperInvariant();
-                    if (!snippet.StartsWith("MML@"))
+                    var txt = await File.ReadAllTextAsync(filePath, ct);
+                    if (string.IsNullOrWhiteSpace(txt) || !_mmlImporter.CanImport(filePath))
+                    {
+                        skippedCount++;
+                        continue;
+                    }
+                    var meta = _mmlImporter.ExtractMetadata(txt);
+                    if (Convert.ToInt32(meta["notes"]) <= 0)
                     {
                         skippedCount++;
                         continue;

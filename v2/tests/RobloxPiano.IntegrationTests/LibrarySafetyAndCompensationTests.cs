@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using RobloxPiano.Core.Library;
 using RobloxPiano.Core.Services;
 using RobloxPiano.Infrastructure.Data;
@@ -37,6 +38,13 @@ public class LibrarySafetyAndCompensationTests : IDisposable
         catch { }
     }
 
+    private static string ComputeFileSha256(string filePath)
+    {
+        using var sha = SHA256.Create();
+        using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        return Convert.ToHexString(sha.ComputeHash(stream));
+    }
+
     [Fact]
     public void IsPathUnderRoot_BoundaryValidation_AccuratelyDistinguishesPrefix()
     {
@@ -68,20 +76,30 @@ public class LibrarySafetyAndCompensationTests : IDisposable
         Assert.Equal("SongName", fileService.SanitizeName("Song:Name"));
     }
 
-    [Fact]
-    public async Task Import_NonMmlTxtFile_RejectedBeforeCopy()
+    [Theory]
+    [InlineData("README")]
+    [InlineData("Step 1")]
+    [InlineData("Chapter 2")]
+    [InlineData("Version 3")]
+    [InlineData("1")]
+    [InlineData("1 2 3 4 5")]
+    [InlineData("C# programming guide")]
+    [InlineData("Roblox Piano Player v2")]
+    [InlineData("")]
+    [InlineData("   \t\r\n  ")]
+    public async Task TxtImport_OrdinaryNumberedText_IsRejectedBeforeCopy(string plainContent)
     {
         var repo = new SqliteLibraryRepository(_dbPath);
         var fileService = new LibraryFileService(_storageRoot);
         var folderService = new FolderService(repo, fileService);
         var libService = new LibraryService(repo, fileService, folderService);
 
-        string readmeFile = Path.Combine(_externalDir, "README.txt");
-        await File.WriteAllTextAsync(readmeFile, "This is an ordinary readme documentation file without any notes.");
+        string txtFile = Path.Combine(_externalDir, $"test_{Guid.NewGuid():N}.txt");
+        await File.WriteAllTextAsync(txtFile, plainContent);
 
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
-            await libService.ImportExternalFileAsync(readmeFile);
+            await libService.ImportExternalFileAsync(txtFile);
         });
 
         // Verify no file was copied into managed storage root
@@ -90,20 +108,44 @@ public class LibrarySafetyAndCompensationTests : IDisposable
     }
 
     [Fact]
-    public async Task Import_MalformedMml_SetsAnalysisFailedStatus()
+    public async Task TxtImport_ValidMml_IsAccepted()
     {
         var repo = new SqliteLibraryRepository(_dbPath);
         var fileService = new LibraryFileService(_storageRoot);
         var folderService = new FolderService(repo, fileService);
         var libService = new LibraryService(repo, fileService, folderService);
 
-        string malformedMml = Path.Combine(_externalDir, "broken.mml");
-        await File.WriteAllTextAsync(malformedMml, "MML@t999999999l4c;"); // Out of bounds tempo
+        string validMmlTxt = Path.Combine(_externalDir, "valid_song.txt");
+        await File.WriteAllTextAsync(validMmlTxt, "MML@t120l4cdefgab>c;");
 
-        var score = await libService.ImportExternalFileAsync(malformedMml);
+        var score = await libService.ImportExternalFileAsync(validMmlTxt);
 
-        Assert.Equal("ANALYSIS_FAILED", score.AnalysisStatus);
-        Assert.False(string.IsNullOrEmpty(score.AnalysisError));
+        Assert.NotNull(score);
+        Assert.Equal("MML", score.SourceType);
+        Assert.Equal(8, score.TotalNotes);
+        Assert.True(File.Exists(score.FilePath));
+        Assert.True(fileService.IsPathUnderRoot(score.FilePath));
+    }
+
+    [Fact]
+    public async Task MmlImport_InvalidSyntax_IsRejectedBeforeCopy()
+    {
+        var repo = new SqliteLibraryRepository(_dbPath);
+        var fileService = new LibraryFileService(_storageRoot);
+        var folderService = new FolderService(repo, fileService);
+        var libService = new LibraryService(repo, fileService, folderService);
+
+        string brokenMml = Path.Combine(_externalDir, "broken.mml");
+        await File.WriteAllTextAsync(brokenMml, "THIS IS INVALID MML WITHOUT NOTES");
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await libService.ImportExternalFileAsync(brokenMml);
+        });
+
+        // Verify no file was copied into managed storage root
+        var filesInStorage = Directory.GetFiles(_storageRoot, "*.*", SearchOption.AllDirectories);
+        Assert.Empty(filesInStorage);
     }
 
     [Fact]
@@ -126,6 +168,65 @@ public class LibrarySafetyAndCompensationTests : IDisposable
         var filesInStorage = Directory.GetFiles(_storageRoot, "*.*", SearchOption.AllDirectories);
         Assert.Empty(filesInStorage);
         Assert.True(File.Exists(validMml)); // Source untouched
+    }
+
+    [Fact]
+    public async Task CopyScore_DbFailure_DeletesCopiedFileAndPreservesSource()
+    {
+        var repo = new SqliteLibraryRepository(_dbPath);
+        var fileService = new LibraryFileService(_storageRoot);
+        var folderService = new FolderService(repo, fileService);
+        var libService = new LibraryService(repo, fileService, folderService);
+
+        // 1. Create valid managed source score
+        string validMml = Path.Combine(_externalDir, "original.mml");
+        await File.WriteAllTextAsync(validMml, "MML@t120l4cdefgab;");
+        var sourceScore = await libService.ImportExternalFileAsync(validMml);
+
+        string sourcePath = sourceScore.FilePath;
+        string sourceHashBefore = ComputeFileSha256(sourcePath);
+        var subFolder = await folderService.CreateFolderAsync("SubDir");
+
+        // 2. Use failing repo for copy insert
+        var failingRepo = new FailingCopyRepository(_dbPath);
+        var failingLibService = new LibraryService(failingRepo, fileService, folderService);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await failingLibService.CopyScoreAsync(sourceScore.Id, subFolder.Id);
+        });
+
+        // 3. Verify compensation: copied file deleted, source file and record preserved
+        var subFiles = Directory.GetFiles(Path.Combine(_storageRoot, "SubDir"), "*.*", SearchOption.AllDirectories);
+        Assert.Empty(subFiles);
+
+        Assert.True(File.Exists(sourcePath));
+        Assert.Equal(sourceHashBefore, ComputeFileSha256(sourcePath));
+        Assert.NotNull(await repo.GetScoreAsync(sourceScore.Id));
+    }
+
+    [Fact]
+    public async Task CopyScore_ExternalSourcePath_IsRejected()
+    {
+        var repo = new SqliteLibraryRepository(_dbPath);
+        var fileService = new LibraryFileService(_storageRoot);
+        var folderService = new FolderService(repo, fileService);
+        var libService = new LibraryService(repo, fileService, folderService);
+
+        // Manually insert score pointing outside V2 managed storage
+        string outsideFile = Path.Combine(_externalDir, "outside_source.mid");
+        await File.WriteAllTextAsync(outsideFile, "RAW_MIDI_BYTES");
+        var scoreOutside = new ScoreItem("s-ext-copy", "OutsideCopy", "MIDI", "", outsideFile);
+        await repo.InsertScoreAsync(scoreOutside);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await libService.CopyScoreAsync(scoreOutside.Id, null);
+        });
+
+        // No copy made inside V2 storage
+        var filesInStorage = Directory.GetFiles(_storageRoot, "*.*", SearchOption.AllDirectories);
+        Assert.Empty(filesInStorage);
     }
 
     [Fact]
@@ -181,6 +282,33 @@ public class LibrarySafetyAndCompensationTests : IDisposable
         });
 
         // Compensation check: file must be restored to original path
+        Assert.True(File.Exists(originalPath));
+    }
+
+    [Fact]
+    public async Task DeleteScore_DbFailure_RestoresManagedFile()
+    {
+        var repo = new SqliteLibraryRepository(_dbPath);
+        var fileService = new LibraryFileService(_storageRoot);
+        var folderService = new FolderService(repo, fileService);
+        var libService = new LibraryService(repo, fileService, folderService);
+
+        string validMml = Path.Combine(_externalDir, "to_delete.mml");
+        await File.WriteAllTextAsync(validMml, "MML@t120l4cdef;");
+        var score = await libService.ImportExternalFileAsync(validMml);
+
+        string originalPath = score.FilePath;
+        Assert.True(File.Exists(originalPath));
+
+        var failingRepo = new FailingDeleteRepository(_dbPath);
+        var failingLibService = new LibraryService(failingRepo, fileService, folderService);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await failingLibService.DeleteScoreAsync(score.Id);
+        });
+
+        // Compensation check: physical file must be restored
         Assert.True(File.Exists(originalPath));
     }
 
@@ -253,6 +381,26 @@ public class LibrarySafetyAndCompensationTests : IDisposable
         public override Task InsertFolderAsync(FolderItem folder, CancellationToken ct = default)
         {
             throw new InvalidOperationException("Simulated InsertFolder DB error.");
+        }
+    }
+
+    private class FailingCopyRepository : SqliteLibraryRepository
+    {
+        public FailingCopyRepository(string dbPath) : base(dbPath) { }
+
+        public override Task InsertScoreAsync(ScoreItem score, CancellationToken ct = default)
+        {
+            throw new InvalidOperationException("Simulated Copy InsertScore DB error.");
+        }
+    }
+
+    private class FailingDeleteRepository : SqliteLibraryRepository
+    {
+        public FailingDeleteRepository(string dbPath) : base(dbPath) { }
+
+        public override Task DeleteScoreAsync(string scoreId, CancellationToken ct = default)
+        {
+            throw new InvalidOperationException("Simulated DeleteScore DB error.");
         }
     }
 }
