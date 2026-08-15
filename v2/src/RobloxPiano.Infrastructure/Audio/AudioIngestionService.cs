@@ -36,6 +36,12 @@ public class AudioIngestionService : IAudioIngestionService
             return AudioIngestResult.Failed(request.FilePath ?? string.Empty, AudioError.FileNotFound, "FILE_NOT_FOUND", request.JobId);
         }
 
+        // Validate Job ID safety before proceeding
+        if (!AudioWorkspaceService.IsValidJobId(request.JobId))
+        {
+            return AudioIngestResult.Failed(request.FilePath, "유효하지 않거나 안전하지 않은 작업 ID입니다.", "INVALID_JOB_ID", request.JobId);
+        }
+
         string fullPath;
         try
         {
@@ -97,37 +103,40 @@ public class AudioIngestionService : IAudioIngestionService
 
         ct.ThrowIfCancellationRequested();
 
-        // 5. Prepare workspace
+        // 5. Prepare workspace with scoped lifecycle
         var workspace = !string.IsNullOrWhiteSpace(request.CustomWorkspaceDir)
             ? new AudioWorkspaceService(request.CustomWorkspaceDir)
             : _workspaceService;
 
         string tempOutputPath = workspace.GetTempNormalizedPath(request.JobId);
-
-        // Remove any existing temp file before conversion
-        if (File.Exists(tempOutputPath))
-        {
-            try { File.Delete(tempOutputPath); } catch { }
-        }
-
-        // 6. FFmpeg conversion to Canonical WAV (mono, 22050 Hz, PCM 16-bit)
-        var ffmpegArgs = new[]
-        {
-            "-y",
-            "-v", "error",
-            "-progress", "pipe:1",
-            "-i", fullPath,
-            "-map", "0:a:0",
-            "-ac", "1",
-            "-ar", "22050",
-            "-c:a", "pcm_s16le",
-            tempOutputPath
-        };
-
-        var progressParser = new FfmpegProgressParser(metadata.DurationSeconds);
+        bool committedSuccess = false;
 
         try
         {
+            // Remove any existing temp file before conversion
+            if (File.Exists(tempOutputPath))
+            {
+                try { File.Delete(tempOutputPath); } catch { }
+            }
+
+            ct.ThrowIfCancellationRequested();
+
+            // 6. FFmpeg conversion to Canonical WAV (mono, 22050 Hz, PCM 16-bit)
+            var ffmpegArgs = new[]
+            {
+                "-y",
+                "-v", "error",
+                "-progress", "pipe:1",
+                "-i", fullPath,
+                "-map", "0:a:0",
+                "-ac", "1",
+                "-ar", "22050",
+                "-c:a", "pcm_s16le",
+                tempOutputPath
+            };
+
+            var progressParser = new FfmpegProgressParser(metadata.DurationSeconds);
+
             var conversionResult = await _processRunner.RunProcessAsync(
                 tools.FfmpegPath!,
                 ffmpegArgs,
@@ -140,18 +149,53 @@ public class AudioIngestionService : IAudioIngestionService
 
             if (conversionResult.IsCancelled || ct.IsCancellationRequested)
             {
-                workspace.CleanJob(request.JobId);
-                return AudioIngestResult.Failed(fullPath, AudioError.Cancelled, "CANCELLED", request.JobId, metadata);
+                throw new OperationCanceledException(ct);
             }
 
             if (!conversionResult.IsSuccess || !File.Exists(tempOutputPath))
             {
-                workspace.CleanJob(request.JobId);
                 string err = !string.IsNullOrWhiteSpace(conversionResult.StandardError)
-                    ? $"{AudioError.ConversionFailed}: {conversionResult.StandardError.Trim()}"
+                    ? $"{AudioError.ConversionFailed}: {TruncateDiagnostic(conversionResult.StandardError)}"
                     : AudioError.ConversionFailed;
                 return AudioIngestResult.Failed(fullPath, err, "CONVERSION_FAILED", request.JobId, metadata);
             }
+
+            ct.ThrowIfCancellationRequested();
+
+            // 7. Atomic rename temp -> final normalized artifact
+            string finalNormalizedPath;
+            try
+            {
+                finalNormalizedPath = workspace.CommitNormalizedFile(request.JobId);
+            }
+            catch (Exception ex)
+            {
+                return AudioIngestResult.Failed(fullPath, $"파일 저장 실패: {ex.Message}", "FILE_SAVE_ERROR", request.JobId, metadata);
+            }
+
+            ct.ThrowIfCancellationRequested();
+
+            // 8. Post-conversion validation of normalized output
+            var outputProbe = await _metadataReader.ProbeFileAsync(tools.FfprobePath!, finalNormalizedPath, ct);
+            if (!outputProbe.IsValid || outputProbe.Metadata == null ||
+                outputProbe.Metadata.Channels != 1 ||
+                outputProbe.Metadata.SampleRate != 22050 ||
+                !outputProbe.Metadata.CodecName.StartsWith("pcm_s16", StringComparison.OrdinalIgnoreCase) ||
+                outputProbe.Metadata.FileSizeBytes <= 0)
+            {
+                return AudioIngestResult.Failed(fullPath, AudioError.OutputValidationFailed, "OUTPUT_VALIDATION_FAILED", request.JobId, metadata);
+            }
+
+            ct.ThrowIfCancellationRequested();
+
+            progress?.Report(1.0);
+            committedSuccess = true;
+
+            return AudioIngestResult.Successful(
+                request.JobId,
+                fullPath,
+                finalNormalizedPath,
+                metadata);
         }
         catch (OperationCanceledException)
         {
@@ -161,44 +205,15 @@ public class AudioIngestionService : IAudioIngestionService
         catch (Exception ex)
         {
             workspace.CleanJob(request.JobId);
-            return AudioIngestResult.Failed(fullPath, $"{AudioError.ConversionFailed}: {ex.Message}", "CONVERSION_FAILED", request.JobId, metadata);
+            return AudioIngestResult.Failed(fullPath, $"{AudioError.ConversionFailed}: {TruncateDiagnostic(ex.Message)}", "CONVERSION_FAILED", request.JobId, metadata);
         }
-
-        ct.ThrowIfCancellationRequested();
-
-        // 7. Atomic rename temp -> final normalized artifact
-        string finalNormalizedPath;
-        try
+        finally
         {
-            finalNormalizedPath = workspace.CommitNormalizedFile(request.JobId);
+            if (!committedSuccess)
+            {
+                workspace.CleanJob(request.JobId);
+            }
         }
-        catch (Exception ex)
-        {
-            workspace.CleanJob(request.JobId);
-            return AudioIngestResult.Failed(fullPath, $"파일 저장 실패: {ex.Message}", "FILE_SAVE_ERROR", request.JobId, metadata);
-        }
-
-        ct.ThrowIfCancellationRequested();
-
-        // 8. Post-conversion validation of normalized output
-        var outputProbe = await _metadataReader.ProbeFileAsync(tools.FfprobePath!, finalNormalizedPath, ct);
-        if (!outputProbe.IsValid || outputProbe.Metadata == null ||
-            outputProbe.Metadata.Channels != 1 ||
-            outputProbe.Metadata.SampleRate != 22050 ||
-            !outputProbe.Metadata.CodecName.StartsWith("pcm_s16", StringComparison.OrdinalIgnoreCase) ||
-            outputProbe.Metadata.FileSizeBytes <= 0)
-        {
-            workspace.CleanJob(request.JobId);
-            return AudioIngestResult.Failed(fullPath, AudioError.OutputValidationFailed, "OUTPUT_VALIDATION_FAILED", request.JobId, metadata);
-        }
-
-        progress?.Report(1.0);
-
-        return AudioIngestResult.Successful(
-            request.JobId,
-            fullPath,
-            finalNormalizedPath,
-            metadata);
     }
 
     public async Task<IReadOnlyList<AudioIngestResult>> IngestBatchAsync(
@@ -250,5 +265,12 @@ public class AudioIngestionService : IAudioIngestionService
         }
 
         return results;
+    }
+
+    private static string TruncateDiagnostic(string? text, int maxLength = 2048)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+        text = text.Trim();
+        return text.Length <= maxLength ? text : text[..maxLength] + "... [진단 로그 일부 생략]";
     }
 }

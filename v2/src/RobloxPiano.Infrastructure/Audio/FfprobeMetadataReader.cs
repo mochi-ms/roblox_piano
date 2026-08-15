@@ -46,6 +46,11 @@ public class FfprobeMetadataReader
             timeout: TimeSpan.FromSeconds(15),
             ct: ct);
 
+        if (result.IsCancelled || ct.IsCancellationRequested)
+        {
+            throw new OperationCanceledException(ct);
+        }
+
         if (!result.IsSuccess || string.IsNullOrWhiteSpace(result.StandardOutput))
         {
             string err = !string.IsNullOrWhiteSpace(result.StandardError)

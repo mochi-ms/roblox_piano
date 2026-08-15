@@ -149,6 +149,36 @@ public class TranscribeViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task AudioViewModel_CancelledDomainResult_DoesNotMarkCurrentFailed()
+    {
+        var f1 = CreateFakeAudio("song_cancel_domain.mp3");
+        var f2 = CreateFakeAudio("song_pending.mp3");
+
+        var fakeService = new MockAudioService(
+            onIngest: req => AudioIngestResult.Failed(
+                req.FilePath,
+                AudioError.Cancelled,
+                "CANCELLED",
+                req.JobId)
+        );
+
+        var vm = new TranscribeViewModel(fakeService);
+        vm.AddFiles(new[] { f1, f2 });
+
+        await vm.StartIngestAsync();
+
+        // Current item must be Cancelled, NOT Failed
+        Assert.Equal(AudioItemStatus.Cancelled, vm.QueueItems[0].Status);
+        Assert.Equal("취소됨", vm.QueueItems[0].StatusText);
+        Assert.False(vm.QueueItems[0].IsFailed);
+
+        // Remaining item must also be Cancelled
+        Assert.Equal(AudioItemStatus.Cancelled, vm.QueueItems[1].Status);
+        Assert.False(vm.IsProcessing);
+        Assert.Equal("취소됨", vm.ProgressStatusText);
+    }
+
+    [Fact]
     public async Task AudioViewModel_MissingFfmpeg_ShowsFriendlyStatus()
     {
         var mockLocator = new MockFfmpegLocator(isAvailable: false);

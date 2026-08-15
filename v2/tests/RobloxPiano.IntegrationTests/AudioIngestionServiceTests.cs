@@ -108,6 +108,49 @@ public class AudioIngestionServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task AudioIngest_Success_RetainsNormalizedArtifact()
+    {
+        string sourceWav = CreateFakeAudioFile("piano.wav");
+
+        var fakeRunner = new MockAudioProcessRunner(
+            sourceProbeJson: @"{
+                ""streams"": [{ ""codec_type"": ""audio"", ""codec_name"": ""pcm_s16le"", ""channels"": 2, ""sample_rate"": ""44100"" }],
+                ""format"": { ""format_name"": ""wav"", ""duration"": ""45.0"", ""size"": ""3000000"" }
+            }",
+            outputProbeJson: @"{
+                ""streams"": [{ ""codec_type"": ""audio"", ""codec_name"": ""pcm_s16le"", ""channels"": 1, ""sample_rate"": ""22050"" }],
+                ""format"": { ""format_name"": ""wav"", ""duration"": ""45.0"", ""size"": ""1984500"" }
+            }"
+        );
+
+        var toolLocator = new MockToolLocator(_fakeFfmpeg, _fakeFfprobe);
+        var metadataReader = new FfprobeMetadataReader(fakeRunner);
+        var workspaceService = new AudioWorkspaceService(_workspaceDir);
+        var service = new AudioIngestionService(toolLocator, fakeRunner, metadataReader, workspaceService);
+
+        var req = new AudioIngestRequest(sourceWav, "job_success_retention");
+        var result = await service.IngestAudioAsync(req);
+
+        Assert.True(result.Success);
+        string finalWav = Path.Combine(_workspaceDir, "job_success_retention", "normalized.wav");
+        Assert.True(File.Exists(finalWav));
+        Assert.True(File.Exists(sourceWav)); // Original source untouched
+    }
+
+    [Fact]
+    public async Task AudioIngest_InvalidJobId_FailsFast()
+    {
+        string sourceWav = CreateFakeAudioFile("test.wav");
+        var service = new AudioIngestionService();
+
+        var req = new AudioIngestRequest(sourceWav, "../../outside_job");
+        var result = await service.IngestAudioAsync(req);
+
+        Assert.False(result.Success);
+        Assert.Equal("INVALID_JOB_ID", result.ErrorCode);
+    }
+
+    [Fact]
     public async Task AudioIngest_ConversionFailure_CleansTempOutput()
     {
         string sourceWav = CreateFakeAudioFile("bad.wav");
@@ -131,6 +174,7 @@ public class AudioIngestionServiceTests : IDisposable
         Assert.False(result.Success);
         Assert.Contains(AudioError.ConversionFailed, result.ErrorMessage);
         Assert.False(Directory.Exists(Path.Combine(_workspaceDir, "job_fail")));
+        Assert.True(File.Exists(sourceWav));
     }
 
     [Fact]
@@ -161,12 +205,13 @@ public class AudioIngestionServiceTests : IDisposable
         Assert.False(result.Success);
         Assert.Equal(AudioError.OutputValidationFailed, result.ErrorMessage);
         Assert.False(Directory.Exists(Path.Combine(_workspaceDir, "job_invalid_out")));
+        Assert.True(File.Exists(sourceWav));
     }
 
     [Fact]
-    public async Task AudioIngest_Cancelled_CleansPartialWorkspace()
+    public async Task AudioIngest_RunnerReturnsCancelled_CleansWorkspaceAndSurfacesCancellation()
     {
-        string sourceWav = CreateFakeAudioFile("cancel_me.wav");
+        string sourceWav = CreateFakeAudioFile("cancel_runner.wav");
 
         var fakeRunner = new MockAudioProcessRunner(
             sourceProbeJson: @"{
@@ -181,17 +226,85 @@ public class AudioIngestionServiceTests : IDisposable
         var workspaceService = new AudioWorkspaceService(_workspaceDir);
         var service = new AudioIngestionService(toolLocator, fakeRunner, metadataReader, workspaceService);
 
-        var req = new AudioIngestRequest(sourceWav, "job_cancel");
+        var req = new AudioIngestRequest(sourceWav, "job_cancel_runner");
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            await service.IngestAudioAsync(req);
+        });
+
+        Assert.False(Directory.Exists(Path.Combine(_workspaceDir, "job_cancel_runner")));
+        Assert.True(File.Exists(sourceWav)); // Source untouched
+    }
+
+    [Fact]
+    public async Task AudioIngest_CancellationAfterConversion_CleansTempOutput()
+    {
+        string sourceWav = CreateFakeAudioFile("cancel_after_conv.wav");
 
         using var cts = new CancellationTokenSource();
-        cts.Cancel();
+
+        var fakeRunner = new MockAudioProcessRunner(
+            sourceProbeJson: @"{
+                ""streams"": [{ ""codec_type"": ""audio"", ""codec_name"": ""pcm_s16le"", ""channels"": 1, ""sample_rate"": ""44100"" }],
+                ""format"": { ""format_name"": ""wav"", ""duration"": ""30.0"", ""size"": ""1000000"" }
+            }",
+            onConversionSuccess: () =>
+            {
+                // Trigger cancellation right after conversion completes
+                cts.Cancel();
+            }
+        );
+
+        var toolLocator = new MockToolLocator(_fakeFfmpeg, _fakeFfprobe);
+        var metadataReader = new FfprobeMetadataReader(fakeRunner);
+        var workspaceService = new AudioWorkspaceService(_workspaceDir);
+        var service = new AudioIngestionService(toolLocator, fakeRunner, metadataReader, workspaceService);
+
+        var req = new AudioIngestRequest(sourceWav, "job_cancel_after_conv");
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
         {
             await service.IngestAudioAsync(req, ct: cts.Token);
         });
 
-        Assert.False(Directory.Exists(Path.Combine(_workspaceDir, "job_cancel")));
+        Assert.False(Directory.Exists(Path.Combine(_workspaceDir, "job_cancel_after_conv")));
+        Assert.True(File.Exists(sourceWav));
+    }
+
+    [Fact]
+    public async Task AudioIngest_CancellationAfterCommit_CleansNormalizedArtifact()
+    {
+        string sourceWav = CreateFakeAudioFile("cancel_after_commit.wav");
+
+        using var cts = new CancellationTokenSource();
+
+        var fakeRunner = new MockAudioProcessRunner(
+            sourceProbeJson: @"{
+                ""streams"": [{ ""codec_type"": ""audio"", ""codec_name"": ""pcm_s16le"", ""channels"": 1, ""sample_rate"": ""44100"" }],
+                ""format"": { ""format_name"": ""wav"", ""duration"": ""30.0"", ""size"": ""1000000"" }
+            }",
+            outputProbeJson: @"{
+                ""streams"": [{ ""codec_type"": ""audio"", ""codec_name"": ""pcm_s16le"", ""channels"": 1, ""sample_rate"": ""22050"" }],
+                ""format"": { ""format_name"": ""wav"", ""duration"": ""30.0"", ""size"": ""1000000"" }
+            }",
+            cancelDuringOutputProbe: true
+        );
+
+        var toolLocator = new MockToolLocator(_fakeFfmpeg, _fakeFfprobe);
+        var metadataReader = new FfprobeMetadataReader(fakeRunner);
+        var workspaceService = new AudioWorkspaceService(_workspaceDir);
+        var service = new AudioIngestionService(toolLocator, fakeRunner, metadataReader, workspaceService);
+
+        var req = new AudioIngestRequest(sourceWav, "job_cancel_after_commit");
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            await service.IngestAudioAsync(req, ct: cts.Token);
+        });
+
+        Assert.False(Directory.Exists(Path.Combine(_workspaceDir, "job_cancel_after_commit")));
+        Assert.True(File.Exists(sourceWav));
     }
 
     [Fact]
@@ -284,17 +397,23 @@ public class AudioIngestionServiceTests : IDisposable
         private readonly string? _outputProbeJson;
         private readonly bool _conversionFails;
         private readonly bool _cancelDuringConversion;
+        private readonly bool _cancelDuringOutputProbe;
+        private readonly Action? _onConversionSuccess;
 
         public MockAudioProcessRunner(
             string sourceProbeJson,
             string? outputProbeJson = null,
             bool conversionFails = false,
-            bool cancelDuringConversion = false)
+            bool cancelDuringConversion = false,
+            bool cancelDuringOutputProbe = false,
+            Action? onConversionSuccess = null)
         {
             _sourceProbeJson = sourceProbeJson;
             _outputProbeJson = outputProbeJson ?? sourceProbeJson;
             _conversionFails = conversionFails;
             _cancelDuringConversion = cancelDuringConversion;
+            _cancelDuringOutputProbe = cancelDuringOutputProbe;
+            _onConversionSuccess = onConversionSuccess;
         }
 
         public Task<ProcessExecutionResult> RunProcessAsync(
@@ -305,7 +424,7 @@ public class AudioIngestionServiceTests : IDisposable
             TimeSpan? timeout = null,
             CancellationToken ct = default)
         {
-            if (ct.IsCancellationRequested || _cancelDuringConversion)
+            if (ct.IsCancellationRequested)
             {
                 return Task.FromResult(ProcessExecutionResult.Cancelled());
             }
@@ -316,12 +435,21 @@ public class AudioIngestionServiceTests : IDisposable
                 string target = arguments[^1];
                 if (target.EndsWith("normalized.wav") && _outputProbeJson != null)
                 {
+                    if (_cancelDuringOutputProbe)
+                    {
+                        return Task.FromResult(ProcessExecutionResult.Cancelled());
+                    }
                     return Task.FromResult(ProcessExecutionResult.Success(_outputProbeJson));
                 }
                 return Task.FromResult(ProcessExecutionResult.Success(_sourceProbeJson));
             }
 
             // If it's ffmpeg conversion
+            if (_cancelDuringConversion)
+            {
+                return Task.FromResult(ProcessExecutionResult.Cancelled());
+            }
+
             if (_conversionFails)
             {
                 return Task.FromResult(ProcessExecutionResult.Failure(1, "Simulated ffmpeg conversion error"));
@@ -335,6 +463,8 @@ public class AudioIngestionServiceTests : IDisposable
 
             onStdOutLine?.Invoke("out_time_us=30000000");
             onStdOutLine?.Invoke("progress=end");
+
+            _onConversionSuccess?.Invoke();
 
             return Task.FromResult(ProcessExecutionResult.Success(string.Empty));
         }

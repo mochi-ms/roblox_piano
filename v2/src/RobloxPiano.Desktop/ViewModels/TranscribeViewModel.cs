@@ -188,6 +188,20 @@ public partial class TranscribeViewModel : ObservableObject, IDisposable
                     item.SetPrepared(result);
                     success++;
                 }
+                else if (string.Equals(result.ErrorCode, "CANCELLED", StringComparison.OrdinalIgnoreCase) || ct.IsCancellationRequested)
+                {
+                    item.SetCancelled();
+                    for (int j = i + 1; j < total; j++)
+                    {
+                        if (QueueItems[j].Status == AudioItemStatus.Pending || QueueItems[j].Status == AudioItemStatus.Probing || QueueItems[j].Status == AudioItemStatus.Converting)
+                        {
+                            QueueItems[j].SetCancelled();
+                        }
+                    }
+                    SummaryText = $"오디오 준비가 취소되었습니다. ({success}개 완료 · {failed}개 실패)";
+                    ProgressStatusText = "취소됨";
+                    return;
+                }
                 else
                 {
                     item.SetFailed(result.ErrorMessage ?? AudioError.InvalidMedia);

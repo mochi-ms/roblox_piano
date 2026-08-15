@@ -10,29 +10,71 @@ public class AudioWorkspaceService
     public AudioWorkspaceService(string? workspaceRoot = null)
     {
         WorkspaceRoot = !string.IsNullOrWhiteSpace(workspaceRoot)
-            ? workspaceRoot
-            : LibraryDatabasePathProvider.GetDefaultAudioWorkspaceRoot();
+            ? Path.GetFullPath(workspaceRoot)
+            : Path.GetFullPath(LibraryDatabasePathProvider.GetDefaultAudioWorkspaceRoot());
+    }
+
+    public static bool IsValidJobId(string? jobId)
+    {
+        if (string.IsNullOrWhiteSpace(jobId) || jobId.Length > 128)
+        {
+            return false;
+        }
+
+        // Strict whitelist: letters, digits, underscores, hyphens only
+        foreach (char c in jobId)
+        {
+            if (!char.IsAsciiLetterOrDigit(c) && c != '_' && c != '-')
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    public string GetSafeJobDirectoryPath(string jobId, bool createDirectory = false)
+    {
+        if (!IsValidJobId(jobId))
+        {
+            throw new ArgumentException($"유효하지 않거나 안전하지 않은 작업 ID입니다: '{jobId}'", nameof(jobId));
+        }
+
+        string fullRoot = Path.GetFullPath(WorkspaceRoot);
+        string combined = Path.GetFullPath(Path.Combine(fullRoot, jobId));
+
+        // Defense-in-depth: verify separator-aware containment
+        string normalizedRoot = fullRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        string normalizedCombined = combined.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+
+        if (!normalizedCombined.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(normalizedRoot, normalizedCombined, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"작업 경로가 워크스페이스 루트를 벗어났습니다: '{jobId}'");
+        }
+
+        if (createDirectory && !Directory.Exists(combined))
+        {
+            Directory.CreateDirectory(combined);
+        }
+
+        return combined;
     }
 
     public string GetJobDirectory(string jobId)
     {
-        string jobDir = Path.Combine(WorkspaceRoot, jobId);
-        if (!Directory.Exists(jobDir))
-        {
-            Directory.CreateDirectory(jobDir);
-        }
-        return jobDir;
+        return GetSafeJobDirectoryPath(jobId, createDirectory: true);
     }
 
     public string GetTempNormalizedPath(string jobId)
     {
-        string jobDir = GetJobDirectory(jobId);
+        string jobDir = GetSafeJobDirectoryPath(jobId, createDirectory: true);
         return Path.Combine(jobDir, "normalized.tmp.wav");
     }
 
     public string GetFinalNormalizedPath(string jobId)
     {
-        string jobDir = GetJobDirectory(jobId);
+        string jobDir = GetSafeJobDirectoryPath(jobId, createDirectory: true);
         return Path.Combine(jobDir, "normalized.wav");
     }
 
@@ -55,14 +97,31 @@ public class AudioWorkspaceService
         return finalPath;
     }
 
-    public void CleanJob(string jobId)
+    public void CleanJob(string? jobId)
     {
+        if (!IsValidJobId(jobId))
+        {
+            return; // Safe no-op for invalid/malformed ID to prevent unintended deletion
+        }
+
         try
         {
-            string jobDir = Path.Combine(WorkspaceRoot, jobId);
-            if (Directory.Exists(jobDir))
+            string fullRoot = Path.GetFullPath(WorkspaceRoot);
+            string combined = Path.GetFullPath(Path.Combine(fullRoot, jobId!));
+
+            string normalizedRoot = fullRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            string normalizedCombined = combined.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+
+            // Safety guard: never delete outside root or the root directory itself
+            if (!normalizedCombined.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(normalizedRoot, normalizedCombined, StringComparison.OrdinalIgnoreCase))
             {
-                Directory.Delete(jobDir, true);
+                return;
+            }
+
+            if (Directory.Exists(combined))
+            {
+                Directory.Delete(combined, recursive: true);
             }
         }
         catch
