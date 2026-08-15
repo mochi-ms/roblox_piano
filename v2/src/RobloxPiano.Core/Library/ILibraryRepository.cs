@@ -22,4 +22,5 @@ public interface ILibraryRepository
 
     Task BulkImportAsync(IReadOnlyList<FolderItem> folders, IReadOnlyList<ScoreItem> scores, CancellationToken ct = default);
     Task UpdateFolderAndScorePathsAsync(FolderItem folder, IReadOnlyList<ScoreItem> updatedScores, CancellationToken ct = default);
+    Task DeleteFolderTreeAsync(IReadOnlyList<string> scoreIds, IReadOnlyList<string> folderIds, CancellationToken ct = default);
 }

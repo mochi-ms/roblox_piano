@@ -230,29 +230,128 @@ public class FolderService
     public async Task DeleteFolderAsync(string folderId, CancellationToken ct = default)
     {
         var allFolders = (await _repository.GetAllFoldersAsync(ct)).ToDictionary(f => f.Id);
-        var childFolders = await _repository.GetChildFoldersAsync(folderId, ct);
-        foreach (var child in childFolders)
+        if (!allFolders.TryGetValue(folderId, out var targetFolder))
         {
-            await DeleteFolderAsync(child.Id, ct);
+            return;
         }
 
-        var page = await _repository.QueryScoresAsync(new LibraryQuery { FolderId = folderId, PageSize = 10000 }, ct);
-        foreach (var score in page.Items)
+        // 1. Preflight: Discover entire folder subtree (deepest-first for clean folder deletion order)
+        var foldersToDelete = new List<FolderItem>();
+        void CollectFoldersDeepestFirst(string currentId)
         {
-            if (!string.IsNullOrEmpty(score.FilePath) && File.Exists(score.FilePath) && _fileService.IsPathUnderRoot(score.FilePath))
+            var children = allFolders.Values.Where(f => f.ParentId == currentId).ToList();
+            foreach (var child in children)
             {
-                File.Delete(score.FilePath);
+                CollectFoldersDeepestFirst(child.Id);
             }
-            await _repository.DeleteScoreAsync(score.Id, ct);
+            if (allFolders.TryGetValue(currentId, out var item))
+            {
+                foldersToDelete.Add(item);
+            }
         }
+        CollectFoldersDeepestFirst(folderId);
 
-        var physicalPath = _fileService.GetFolderPath(folderId, allFolders);
-        if (Directory.Exists(physicalPath) && _fileService.IsPathUnderRoot(physicalPath))
+        // 2. Preflight: Discover all scores in the entire subtree
+        var scoresToDelete = new List<ScoreItem>();
+        foreach (var folder in foldersToDelete)
         {
-            Directory.Delete(physicalPath, recursive: true);
+            var page = await _repository.QueryScoresAsync(new LibraryQuery { FolderId = folder.Id, PageSize = 10000 }, ct);
+            scoresToDelete.AddRange(page.Items);
         }
 
-        await _repository.DeleteFolderAsync(folderId, ct);
+        // 3. Preflight: Validate paths and ownership
+        var rootPhysicalPath = _fileService.GetFolderPath(folderId, allFolders);
+
+        // Storage root guard
+        if (string.Equals(Path.GetFullPath(rootPhysicalPath), Path.GetFullPath(_fileService.StorageRoot), StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("라이브러리 루트 디렉터리는 삭제할 수 없습니다.");
+        }
+
+        if (!_fileService.IsPathUnderRoot(rootPhysicalPath))
+        {
+            throw new InvalidOperationException("관리형 스토리지 외부의 디렉터리는 삭제할 수 없습니다.");
+        }
+
+        // Validate all existing physical files in the subtree
+        foreach (var s in scoresToDelete)
+        {
+            if (!string.IsNullOrEmpty(s.FilePath) && File.Exists(s.FilePath))
+            {
+                if (!_fileService.IsPathUnderRoot(s.FilePath))
+                {
+                    throw new InvalidOperationException($"관리형 스토리지 외부의 악보 파일이 포함되어 있어 삭제를 중단합니다: {s.FilePath}");
+                }
+
+                var rel = Path.GetRelativePath(rootPhysicalPath, s.FilePath);
+                if (rel.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(rel))
+                {
+                    throw new InvalidOperationException($"대상 폴더 트리 외부의 악보 파일이 연결되어 있어 삭제를 중단합니다: {s.FilePath}");
+                }
+            }
+        }
+
+        // 4. Physical Staging (Move rootPhysicalPath to temporary staging folder inside V2 root)
+        bool staged = false;
+        string? stagedPath = null;
+        string? stagingBase = null;
+
+        if (Directory.Exists(rootPhysicalPath))
+        {
+            stagingBase = Path.Combine(_fileService.StorageRoot, ".delete-staging");
+            Directory.CreateDirectory(stagingBase);
+            stagedPath = Path.Combine(stagingBase, $"{Guid.NewGuid():N}");
+            Directory.Move(rootPhysicalPath, stagedPath);
+            staged = true;
+        }
+
+        // 5. Transactional DB Subtree Delete
+        try
+        {
+            var scoreIds = scoresToDelete.Select(s => s.Id).ToList();
+            var folderIds = foldersToDelete.Select(f => f.Id).ToList();
+
+            await _repository.DeleteFolderTreeAsync(scoreIds, folderIds, ct);
+        }
+        catch
+        {
+            // Compensation on DB failure / cancellation: restore physical subtree from staging
+            if (staged && !string.IsNullOrEmpty(stagedPath) && Directory.Exists(stagedPath) && _fileService.IsPathUnderRoot(stagedPath))
+            {
+                try { Directory.Move(stagedPath, rootPhysicalPath); } catch { }
+                try
+                {
+                    if (stagingBase != null && Directory.Exists(stagingBase) && !Directory.EnumerateFileSystemEntries(stagingBase).Any())
+                    {
+                        Directory.Delete(stagingBase);
+                    }
+                }
+                catch { }
+            }
+            throw;
+        }
+
+        // 6. Finalize Staged Cleanup (After successful DB commit)
+        if (staged && !string.IsNullOrEmpty(stagedPath) && Directory.Exists(stagedPath))
+        {
+            try
+            {
+                Directory.Delete(stagedPath, recursive: true);
+            }
+            catch
+            {
+                // Final cleanup policy: If locked by external process/antivirus, leave safely quarantined under .delete-staging
+            }
+
+            try
+            {
+                if (stagingBase != null && Directory.Exists(stagingBase) && !Directory.EnumerateFileSystemEntries(stagingBase).Any())
+                {
+                    Directory.Delete(stagingBase);
+                }
+            }
+            catch { }
+        }
     }
 
     public async Task<int> CleanSpuriousEmptyFoldersAsync(CancellationToken ct = default)

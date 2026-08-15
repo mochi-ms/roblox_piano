@@ -529,6 +529,53 @@ public class SqliteLibraryRepository : ILibraryRepository
         }
     }
 
+    public virtual async Task DeleteFolderTreeAsync(IReadOnlyList<string> scoreIds, IReadOnlyList<string> folderIds, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        await using var conn = await _factory.OpenConnectionAsync(readOnly: false, ct);
+        await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
+
+        try
+        {
+            // 1. Delete scores in subtree first (FTS triggers will keep FTS5 synchronized)
+            if (scoreIds.Count > 0)
+            {
+                await using var sCmd = conn.CreateCommand();
+                sCmd.Transaction = tx;
+                sCmd.CommandText = "DELETE FROM scores WHERE id = @id;";
+                var pId = sCmd.Parameters.Add("@id", SqliteType.Text);
+
+                foreach (var sId in scoreIds)
+                {
+                    pId.Value = sId;
+                    await sCmd.ExecuteNonQueryAsync(ct);
+                }
+            }
+
+            // 2. Delete folders in deepest-first order
+            if (folderIds.Count > 0)
+            {
+                await using var fCmd = conn.CreateCommand();
+                fCmd.Transaction = tx;
+                fCmd.CommandText = "DELETE FROM folders WHERE id = @id;";
+                var pId = fCmd.Parameters.Add("@id", SqliteType.Text);
+
+                foreach (var fId in folderIds)
+                {
+                    pId.Value = fId;
+                    await fCmd.ExecuteNonQueryAsync(ct);
+                }
+            }
+
+            await tx.CommitAsync(ct);
+        }
+        catch
+        {
+            await tx.RollbackAsync(ct);
+            throw;
+        }
+    }
+
     private static ScoreItem ReadScore(SqliteDataReader r)
     {
         return new ScoreItem(

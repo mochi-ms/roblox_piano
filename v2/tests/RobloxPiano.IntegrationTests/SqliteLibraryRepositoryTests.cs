@@ -249,4 +249,32 @@ public class SqliteLibraryRepositoryTests : IDisposable
         var childrenAfter = await _repository.GetChildFoldersAsync("f-root");
         Assert.Empty(childrenAfter);
     }
+
+    [Fact]
+    public async Task DeleteFolderTreeAsync_DeletesScoresAndFoldersAtomically()
+    {
+        await _repository.InitializeAsync();
+
+        var rootFolder = new FolderItem("f-root", null, "Rock");
+        var childFolder = new FolderItem("f-child", "f-root", "Classic Rock");
+        await _repository.InsertFolderAsync(rootFolder);
+        await _repository.InsertFolderAsync(childFolder);
+
+        var scoreRoot = new ScoreItem("s-r", "Rock Anthem", "MIDI", "", "r.mid", folderId: "f-root");
+        var scoreChild = new ScoreItem("s-c", "Bohemian", "MIDI", "", "c.mid", folderId: "f-child");
+        await _repository.InsertScoreAsync(scoreRoot);
+        await _repository.InsertScoreAsync(scoreChild);
+
+        // Execute atomic deletion of subtree
+        await _repository.DeleteFolderTreeAsync(
+            scoreIds: new[] { "s-c", "s-r" },
+            folderIds: new[] { "f-child", "f-root" }
+        );
+
+        // Verify all rows removed
+        Assert.Null(await _repository.GetFolderAsync("f-root"));
+        Assert.Null(await _repository.GetFolderAsync("f-child"));
+        Assert.Null(await _repository.GetScoreAsync("s-r"));
+        Assert.Null(await _repository.GetScoreAsync("s-c"));
+    }
 }
