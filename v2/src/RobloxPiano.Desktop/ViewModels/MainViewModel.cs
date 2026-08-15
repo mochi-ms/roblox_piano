@@ -15,6 +15,11 @@ public partial class MainViewModel : ObservableObject
 
     public MainViewModel()
     {
+        _libraryViewModel.OpenScoreRequested += async (_, score) =>
+        {
+            await _playerViewModel.LoadScoreAsync(score);
+            CurrentView = _playerViewModel;
+        };
         CurrentView = _playerViewModel;
     }
 

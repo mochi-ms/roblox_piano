@@ -38,5 +38,13 @@ namespace RobloxPiano.Desktop.Views
                 }
             }
         }
+
+        private void DataGrid_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            if (DataContext is LibraryViewModel vm && vm.SelectedScore != null)
+            {
+                vm.OpenSelectedScore();
+            }
+        }
     }
 }

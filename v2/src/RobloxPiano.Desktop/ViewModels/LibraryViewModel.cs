@@ -566,4 +566,15 @@ public partial class LibraryViewModel : ObservableObject
         UpdateStatusText();
         UpdateEmptyState();
     }
+
+    public event EventHandler<ScoreItem>? OpenScoreRequested;
+
+    [RelayCommand]
+    public void OpenSelectedScore()
+    {
+        if (SelectedScore != null)
+        {
+            OpenScoreRequested?.Invoke(this, SelectedScore.Model);
+        }
+    }
 }

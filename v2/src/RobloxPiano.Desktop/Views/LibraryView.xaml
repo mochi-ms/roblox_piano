@@ -216,7 +216,8 @@
                           VirtualizingPanel.IsVirtualizing="True"
                           VirtualizingPanel.VirtualizationMode="Recycling"
                           ScrollViewer.CanContentScroll="True"
-                          ScrollViewer.ScrollChanged="DataGrid_ScrollChanged">
+                          ScrollViewer.ScrollChanged="DataGrid_ScrollChanged"
+                          MouseDoubleClick="DataGrid_MouseDoubleClick">
                     
                     <DataGrid.Columns>
                         <DataGridTemplateColumn Header="이름" Width="300">

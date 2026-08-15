@@ -7,4 +7,8 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\RobloxPiano.Core\RobloxPiano.Core.csproj" />
+  </ItemGroup>
+
 </Project>
