@@ -12,16 +12,20 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private readonly PlayerViewModel _playerViewModel;
     private readonly LibraryViewModel _libraryViewModel;
+    private readonly ImportViewModel _importViewModel;
     private readonly TranscribeViewModel _transcribeViewModel;
     private readonly SettingsViewModel _settingsViewModel;
     private readonly IGlobalHotkeyService _hotkeyService;
     private readonly EventHandler<ScoreItem> _openScoreHandler;
+    private readonly EventHandler _viewLibraryHandler;
+    private readonly EventHandler _scoreImportedHandler;
     private readonly EventHandler<HotkeyAction> _hotkeyHandler;
 
     private bool _disposed;
 
     public PlayerViewModel PlayerViewModel => _playerViewModel;
     public LibraryViewModel LibraryViewModel => _libraryViewModel;
+    public ImportViewModel ImportViewModel => _importViewModel;
     public TranscribeViewModel TranscribeViewModel => _transcribeViewModel;
     public SettingsViewModel SettingsViewModel => _settingsViewModel;
     public IGlobalHotkeyService HotkeyService => _hotkeyService;
@@ -31,10 +35,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         LibraryViewModel? libraryViewModel = null,
         TranscribeViewModel? transcribeViewModel = null,
         SettingsViewModel? settingsViewModel = null,
-        IGlobalHotkeyService? hotkeyService = null)
+        IGlobalHotkeyService? hotkeyService = null,
+        ImportViewModel? importViewModel = null)
     {
         _playerViewModel = playerViewModel ?? new PlayerViewModel();
         _libraryViewModel = libraryViewModel ?? new LibraryViewModel();
+        _importViewModel = importViewModel ?? new ImportViewModel();
         _transcribeViewModel = transcribeViewModel ?? new TranscribeViewModel();
         _settingsViewModel = settingsViewModel ?? new SettingsViewModel();
         _hotkeyService = hotkeyService ?? new GlobalHotkeyService();
@@ -54,6 +60,21 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 _playerViewModel.StatusText = $"악보 불러오기 실패: {ex.Message}";
             }
+        };
+
+        _viewLibraryHandler = (_, _) =>
+        {
+            CurrentView = _libraryViewModel;
+        };
+
+        _scoreImportedHandler = async (_, _) =>
+        {
+            try
+            {
+                await _libraryViewModel.ReloadQueryAsync();
+            }
+            catch (ObjectDisposedException) { }
+            catch { }
         };
 
         _hotkeyHandler = async (_, action) =>
@@ -84,6 +105,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         };
 
         _libraryViewModel.OpenScoreRequested += _openScoreHandler;
+        _importViewModel.OpenScoreRequested += _openScoreHandler;
+        _importViewModel.ViewLibraryRequested += _viewLibraryHandler;
+        _importViewModel.ScoreImported += _scoreImportedHandler;
         _hotkeyService.HotkeyPressed += _hotkeyHandler;
         CurrentView = _playerViewModel;
     }
@@ -95,6 +119,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             "Player" or "플레이어" => _playerViewModel,
             "Library" or "라이브러리" => _libraryViewModel,
+            "Import" or "가져오기" or "악보 가져오기" => _importViewModel,
             "Transcribe" or "오디오 변환" => _transcribeViewModel,
             "Settings" or "설정" => _settingsViewModel,
             _ => _playerViewModel
@@ -107,8 +132,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _disposed = true;
 
         _libraryViewModel.OpenScoreRequested -= _openScoreHandler;
+        _importViewModel.OpenScoreRequested -= _openScoreHandler;
+        _importViewModel.ViewLibraryRequested -= _viewLibraryHandler;
+        _importViewModel.ScoreImported -= _scoreImportedHandler;
         _hotkeyService.HotkeyPressed -= _hotkeyHandler;
         _hotkeyService.Dispose();
+        _importViewModel.Dispose();
         _playerViewModel.Dispose();
     }
 }

@@ -39,6 +39,7 @@
                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                     <RadioButton Content="플레이어" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="플레이어" IsChecked="True"/>
                     <RadioButton Content="라이브러리" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="라이브러리" />
+                    <RadioButton Content="악보 가져오기" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="악보 가져오기" />
                     <RadioButton Content="오디오 변환" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="오디오 변환" />
                     <RadioButton Content="설정" Style="{StaticResource NavButtonStyle}" Command="{Binding NavigateCommand}" CommandParameter="설정" />
                 </StackPanel>
