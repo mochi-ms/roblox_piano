@@ -26,6 +26,8 @@ public class ImportPipeline : IImportPipeline
 
     public async Task<ImportResult> ImportFileAsync(ImportRequest request, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
+
         if (string.IsNullOrWhiteSpace(request.FilePath))
         {
             return ImportResult.Failed(request.FilePath ?? string.Empty, ImportError.FileNotFound);
@@ -41,12 +43,16 @@ public class ImportPipeline : IImportPipeline
             return ImportResult.Failed(request.FilePath, $"{ImportError.FileNotFound}: {ex.Message}");
         }
 
+        ct.ThrowIfCancellationRequested();
+
         // 1. Detection & Size Guard
         var (sourceType, detectError) = ImportFileDetector.Detect(normalizedPath);
         if (sourceType == ImportSourceType.Unknown || detectError != null)
         {
             return ImportResult.Failed(normalizedPath, detectError ?? ImportError.UnsupportedFormat, sourceType: sourceType);
         }
+
+        ct.ThrowIfCancellationRequested();
 
         // 2. Parse using existing Phase 2 Importers
         MusicTimeline timeline;
@@ -65,6 +71,10 @@ public class ImportPipeline : IImportPipeline
                 return ImportResult.Failed(normalizedPath, ImportError.UnsupportedFormat, sourceType: sourceType);
             }
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (MmlParseException ex)
         {
             return ImportResult.Failed(normalizedPath, $"{ImportError.InvalidMml}: {ex.Message}", errorCode: "MML_SYNTAX", sourceType: sourceType);
@@ -75,48 +85,22 @@ public class ImportPipeline : IImportPipeline
             return ImportResult.Failed(normalizedPath, $"{err} ({ex.Message})", errorCode: "PARSE_ERROR", sourceType: sourceType);
         }
 
-        // 3. Timeline Validation
-        if (timeline == null)
+        ct.ThrowIfCancellationRequested();
+
+        // 3. Centralized Timeline Validation (strict BPM, timing, and note validation)
+        var validation = ImportTimelineValidator.Validate(timeline);
+        if (!validation.IsValid)
         {
-            return ImportResult.Failed(normalizedPath, "타임라인을 생성할 수 없습니다.", sourceType: sourceType);
+            return ImportResult.Failed(normalizedPath, validation.ErrorMessage ?? ImportError.CorruptTiming, errorCode: "TIMELINE_INVALID", sourceType: sourceType);
         }
 
-        if (timeline.Notes.Count == 0)
-        {
-            return ImportResult.Failed(normalizedPath, ImportError.NoPlayableNotes, errorCode: "NO_NOTES", sourceType: sourceType);
-        }
-
-        // Structural note validation (finite, non-negative, valid pitches)
-        foreach (var note in timeline.Notes)
-        {
-            if (double.IsNaN(note.StartTime) || double.IsInfinity(note.StartTime) || note.StartTime < 0 ||
-                double.IsNaN(note.EndTime) || double.IsInfinity(note.EndTime) || note.EndTime <= note.StartTime ||
-                note.Pitch < 0 || note.Pitch > 127)
-            {
-                return ImportResult.Failed(normalizedPath, ImportError.CorruptTiming, errorCode: "CORRUPT_TIMING", sourceType: sourceType);
-            }
-        }
-
-        if (double.IsNaN(timeline.Duration) || double.IsInfinity(timeline.Duration) || timeline.Duration < 0)
-        {
-            return ImportResult.Failed(normalizedPath, ImportError.CorruptTiming, errorCode: "CORRUPT_TIMING", sourceType: sourceType);
-        }
-
-        if (double.IsNaN(timeline.InitialBpm) || double.IsInfinity(timeline.InitialBpm) || timeline.InitialBpm <= 0)
-        {
-            timeline.InitialBpm = 120.0;
-        }
-
-        // 4. Roblox 61-Key Diagnostics (Range: 36..96)
-        int playableNotes = timeline.Notes.Count(n => n.Pitch >= 36 && n.Pitch <= 96);
-        int outOfRangeNotes = timeline.Notes.Count(n => n.Pitch < 36 || n.Pitch > 96);
-        var (minPitch, maxPitch) = timeline.PitchRange;
-
-        // 5. Title Normalization
+        // 4. Title Normalization
         string normalizedTitle = NormalizeTitle(timeline.Title, request.PreferredTitle, normalizedPath);
         timeline.Title = normalizedTitle;
 
-        // 6. Optional Library Persistence
+        ct.ThrowIfCancellationRequested();
+
+        // 5. Optional Library Persistence
         ScoreItem? createdScore = null;
         if (request.AddToLibrary && _libraryService != null)
         {
@@ -136,11 +120,17 @@ public class ImportPipeline : IImportPipeline
                     }
                 }
 
+                ct.ThrowIfCancellationRequested();
+
                 createdScore = await _libraryService.ImportExternalFileAsync(
                     normalizedPath,
                     request.TargetFolderId,
                     sourceType: sourceType == ImportSourceType.Midi ? "MIDI" : "MML",
                     ct: ct);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
@@ -148,15 +138,17 @@ public class ImportPipeline : IImportPipeline
             }
         }
 
+        ct.ThrowIfCancellationRequested();
+
         return ImportResult.Successful(
             normalizedPath,
             sourceType,
             normalizedTitle,
             timeline,
-            playableNotes,
-            outOfRangeNotes,
-            minPitch,
-            maxPitch,
+            validation.PlayableNotes,
+            validation.OutOfRangeNotes,
+            validation.MinPitch,
+            validation.MaxPitch,
             createdScore);
     }
 
@@ -175,7 +167,6 @@ public class ImportPipeline : IImportPipeline
 
             if (ct.IsCancellationRequested)
             {
-                // Mark current and remaining requests as cancelled
                 for (int j = i; j < total; j++)
                 {
                     results.Add(ImportResult.Failed(requests[j].FilePath, ImportError.Cancelled, errorCode: "CANCELLED"));

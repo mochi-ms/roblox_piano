@@ -178,4 +178,27 @@ public class ImportLibraryIntegrationTests : IDisposable
         Assert.Contains(allScores, s => s.Title == "good" && s.SourceType == "MIDI");
         Assert.Contains(allScores, s => s.Title == "good" && s.SourceType == "MML");
     }
+
+    [Fact]
+    public async Task ImportToLibrary_CancelledImport_CreatesNoRowAndNoManagedCopy()
+    {
+        await _repository.InitializeAsync();
+        string midiPath = CreateMidi("cancel_test.mid", 60);
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var req = new ImportRequest(midiPath, addToLibrary: true);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            await _pipeline.ImportFileAsync(req, cts.Token);
+        });
+
+        var allScores = await _repository.GetAllScoresAsync();
+        Assert.Empty(allScores);
+
+        var storageFiles = Directory.GetFiles(_storageRoot, "*.*", SearchOption.AllDirectories);
+        Assert.Empty(storageFiles);
+    }
 }

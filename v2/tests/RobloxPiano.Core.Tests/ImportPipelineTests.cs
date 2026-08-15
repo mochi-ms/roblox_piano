@@ -134,7 +134,6 @@ public class ImportPipelineTests : IDisposable
     [Fact]
     public async Task ImportPipeline_OutOf61KeyRange_RemainsSuccessfulWithDiagnostics()
     {
-        // Add note with pitch 21 (A0, below 36) and note with pitch 108 (C8, above 96) and pitch 60 (C4, within 36..96)
         string wideRangeMidi = Path.Combine(_tempDir, "wide_range.mid");
         var midiFile = new MidiFile(new TrackChunk(
             new NoteOnEvent((SevenBitNumber)21, (SevenBitNumber)64) { DeltaTime = 0 },
@@ -154,8 +153,8 @@ public class ImportPipelineTests : IDisposable
 
         Assert.True(result.Success);
         Assert.Equal(3, result.NoteCount);
-        Assert.Equal(1, result.PlayableNoteCount); // pitch 60
-        Assert.Equal(2, result.OutOfRangeNoteCount); // pitch 21, 108
+        Assert.Equal(1, result.PlayableNoteCount);
+        Assert.Equal(2, result.OutOfRangeNoteCount);
         Assert.Equal(21, result.MinPitch);
         Assert.Equal(108, result.MaxPitch);
     }
@@ -177,8 +176,6 @@ public class ImportPipelineTests : IDisposable
     [Fact]
     public async Task ImportPipeline_MmlCanonicalRegression_T150L16N58L8GG()
     {
-        // Canonical MML: MML@T150L16N58L8GG;
-        // Expected: N58 = 120 ticks, first G = 240 ticks, second G = 240 ticks, total = 600 ticks
         string mmlFile = Path.Combine(_tempDir, "canonical.mml");
         await File.WriteAllTextAsync(mmlFile, "MML@T150L16N58L8GG;");
 
@@ -189,13 +186,10 @@ public class ImportPipelineTests : IDisposable
         Assert.NotNull(result.Timeline);
         Assert.Equal(3, result.Timeline.Notes.Count);
 
-        var note0 = result.Timeline.Notes[0]; // N58
-        var note1 = result.Timeline.Notes[1]; // first G
-        var note2 = result.Timeline.Notes[2]; // second G
+        var note0 = result.Timeline.Notes[0];
+        var note1 = result.Timeline.Notes[1];
+        var note2 = result.Timeline.Notes[2];
 
-        // At T150: 1 quarter (480 ticks) = 0.40s => 1 tick = 0.40 / 480 = 1/1200 s
-        // N58 duration = 120 ticks => 0.10s
-        // G duration = 240 ticks => 0.20s
         Assert.Equal(58, note0.Pitch);
         Assert.Equal(0.0, note0.StartTime, precision: 3);
         Assert.Equal(0.10, note0.Duration, precision: 3);
@@ -206,6 +200,76 @@ public class ImportPipelineTests : IDisposable
         Assert.Equal(0.30, note2.StartTime, precision: 3);
         Assert.Equal(0.20, note2.Duration, precision: 3);
 
-        Assert.Equal(0.50, result.Timeline.Duration, precision: 3); // 600 ticks = 0.50s at T150
+        Assert.Equal(0.50, result.Timeline.Duration, precision: 3);
+    }
+
+    [Fact]
+    public void ImportValidation_NaNBpm_IsRejected()
+    {
+        var timeline = new MusicTimeline("Corrupted BPM");
+        timeline.AddNote(new RobloxPiano.Core.Music.NoteEvent(60, 0.0, 0.5));
+        timeline.InitialBpm = double.NaN;
+
+        var validation = ImportTimelineValidator.Validate(timeline);
+
+        Assert.False(validation.IsValid);
+        Assert.Equal(ImportError.CorruptTiming, validation.ErrorMessage);
+    }
+
+    [Fact]
+    public void ImportValidation_InfiniteBpm_IsRejected()
+    {
+        var timeline = new MusicTimeline("Infinite BPM");
+        timeline.AddNote(new RobloxPiano.Core.Music.NoteEvent(60, 0.0, 0.5));
+        timeline.InitialBpm = double.PositiveInfinity;
+
+        var validation = ImportTimelineValidator.Validate(timeline);
+
+        Assert.False(validation.IsValid);
+        Assert.Equal(ImportError.CorruptTiming, validation.ErrorMessage);
+    }
+
+    [Fact]
+    public void ImportValidation_ZeroOrNegativeBpm_IsRejected()
+    {
+        var timelineZero = new MusicTimeline("Zero BPM");
+        timelineZero.AddNote(new RobloxPiano.Core.Music.NoteEvent(60, 0.0, 0.5));
+        timelineZero.InitialBpm = 0.0;
+
+        var valZero = ImportTimelineValidator.Validate(timelineZero);
+        Assert.False(valZero.IsValid);
+        Assert.Equal(ImportError.CorruptTiming, valZero.ErrorMessage);
+
+        var timelineNeg = new MusicTimeline("Neg BPM");
+        timelineNeg.AddNote(new RobloxPiano.Core.Music.NoteEvent(60, 0.0, 0.5));
+        timelineNeg.InitialBpm = -120.0;
+
+        var valNeg = ImportTimelineValidator.Validate(timelineNeg);
+        Assert.False(valNeg.IsValid);
+        Assert.Equal(ImportError.CorruptTiming, valNeg.ErrorMessage);
+    }
+
+    [Fact]
+    public void ImportValidation_NaNNoteTiming_IsRejected()
+    {
+        var timeline = new MusicTimeline("NaN Note Timing");
+        timeline.AddNote(new RobloxPiano.Core.Music.NoteEvent(60, double.NaN, 0.5));
+
+        var validation = ImportTimelineValidator.Validate(timeline);
+
+        Assert.False(validation.IsValid);
+        Assert.Equal(ImportError.CorruptTiming, validation.ErrorMessage);
+    }
+
+    [Fact]
+    public void ImportValidation_InfiniteNoteTiming_IsRejected()
+    {
+        var timeline = new MusicTimeline("Infinite Note Timing");
+        timeline.AddNote(new RobloxPiano.Core.Music.NoteEvent(60, 0.0, double.PositiveInfinity));
+
+        var validation = ImportTimelineValidator.Validate(timeline);
+
+        Assert.False(validation.IsValid);
+        Assert.Equal(ImportError.CorruptTiming, validation.ErrorMessage);
     }
 }

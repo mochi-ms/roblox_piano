@@ -182,6 +182,15 @@ public class PlayerViewModelPlaybackTests : IDisposable
         bool was72Active = false;
         bool was60Active = false;
 
+        vm.Scheduler.ChordStarted += (_, notes) =>
+        {
+            if (notes.Any(n => n.Pitch == 60))
+            {
+                was72Active = key72.IsActive;
+                was60Active = key60.IsActive;
+            }
+        };
+
         vm.Play();
 
         for (int i = 0; i < 30; i++)

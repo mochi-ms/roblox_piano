@@ -98,6 +98,9 @@ public partial class ImportViewModel : ObservableObject, IDisposable
         if (IsImporting || QueueItems.Count == 0) return;
 
         IsImporting = true;
+
+        // Clean up previous CTS and create a new one
+        _cts?.Dispose();
         _cts = new CancellationTokenSource();
         var ct = _cts.Token;
 
@@ -125,7 +128,36 @@ public partial class ImportViewModel : ObservableObject, IDisposable
                 ProgressStatusText = $"{i + 1} / {total} 가져오는 중: {item.FileName}";
 
                 var req = new ImportRequest(item.FilePath, addToLibrary: true);
-                var result = await _pipeline.ImportFileAsync(req, ct);
+
+                ImportResult result;
+                try
+                {
+                    // Offload detection and synchronous parser work from UI dispatcher thread
+                    result = await Task.Run(() => _pipeline.ImportFileAsync(req, ct), ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    item.SetCancelled();
+                    // Mark all remaining pending items as cancelled
+                    for (int j = i + 1; j < total; j++)
+                    {
+                        if (QueueItems[j].Status == ImportItemStatus.Pending || QueueItems[j].Status == ImportItemStatus.Importing)
+                        {
+                            QueueItems[j].SetCancelled();
+                        }
+                    }
+                    SummaryText = $"가져오기가 취소되었습니다. ({success}개 완료 · {failed}개 실패)";
+                    ProgressStatusText = "취소됨";
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    item.SetFailed($"오류: {ex.Message}");
+                    failed++;
+                    completed++;
+                    ProgressPercent = (double)completed / total * 100.0;
+                    continue;
+                }
 
                 if (result.Success)
                 {
@@ -156,6 +188,14 @@ public partial class ImportViewModel : ObservableObject, IDisposable
         }
         catch (OperationCanceledException)
         {
+            // Outer catch if cancellation happened before loop entry
+            for (int i = 0; i < total; i++)
+            {
+                if (QueueItems[i].Status == ImportItemStatus.Pending || QueueItems[i].Status == ImportItemStatus.Importing)
+                {
+                    QueueItems[i].SetCancelled();
+                }
+            }
             SummaryText = "가져오기가 취소되었습니다.";
             ProgressStatusText = "취소됨";
         }

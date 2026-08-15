@@ -161,4 +161,47 @@ public class ImportBatchTests : IDisposable
         Assert.True(batchResult.IsCancelled);
         Assert.All(batchResult.Results, r => Assert.Equal(ImportError.Cancelled, r.ErrorMessage));
     }
+
+    [Fact]
+    public async Task ImportBatch_CancellationDuringBatch_StopsRemainingFilesCleanly()
+    {
+        var f1 = CreateMidi("file1.mid", 60);
+        var f2 = CreateMidi("file2.mid", 62);
+        var f3 = CreateMidi("file3.mid", 64);
+
+        using var cts = new CancellationTokenSource();
+
+        var requests = new[]
+        {
+            new ImportRequest(f1, addToLibrary: false),
+            new ImportRequest(f2, addToLibrary: false),
+            new ImportRequest(f3, addToLibrary: false)
+        };
+
+        // Custom synchronizing progress that triggers cancellation when file 2 starts
+        var syncProgress = new SynchronousProgress<(int Current, int Total, string FileName)>(report =>
+        {
+            if (report.Current >= 2)
+            {
+                cts.Cancel();
+            }
+        });
+
+        var batchResult = await _pipeline.ImportBatchAsync(requests, progress: syncProgress, ct: cts.Token);
+
+        Assert.Equal(3, batchResult.TotalCount);
+        Assert.True(batchResult.IsCancelled);
+        Assert.True(batchResult.Results[0].Success);
+        Assert.False(batchResult.Results[1].Success);
+        Assert.Equal(ImportError.Cancelled, batchResult.Results[1].ErrorMessage);
+        Assert.False(batchResult.Results[2].Success);
+        Assert.Equal(ImportError.Cancelled, batchResult.Results[2].ErrorMessage);
+    }
+
+    private class SynchronousProgress<T> : IProgress<T>
+    {
+        private readonly Action<T> _handler;
+        public SynchronousProgress(Action<T> handler) => _handler = handler;
+        public void Report(T value) => _handler(value);
+    }
 }
