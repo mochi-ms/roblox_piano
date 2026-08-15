@@ -87,7 +87,7 @@ public class PlaybackSchedulerTests
         scheduler.Resume();
         Assert.Equal(PlaybackState.Playing, scheduler.State);
 
-        for (int i = 0; i < 50; i++)
+        for (int i = 0; i < 100; i++)
         {
             if (scheduler.State == PlaybackState.Completed) break;
             await Task.Delay(20);

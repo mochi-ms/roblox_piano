@@ -170,10 +170,19 @@ public class ImportPipeline : IImportPipeline
 
         ct.ThrowIfCancellationRequested();
 
+        var smartResult = SmartMmlPreprocessor.Process(mmlText);
+        if (!smartResult.Success)
+        {
+            return ImportResult.Failed("text://pasted-mml", smartResult.ErrorMessage ?? "MML 전처리에 실패했습니다.", errorCode: "SMART_MML_ERROR", sourceType: ImportSourceType.Mml);
+        }
+
+        string cleanMml = smartResult.ProcessedMml;
+        string? effectiveTitle = preferredTitle ?? smartResult.ExtractedTitle;
+
         MusicTimeline timeline;
         try
         {
-            timeline = _mmlImporter.ImportScore(mmlText);
+            timeline = _mmlImporter.ImportScore(cleanMml);
         }
         catch (OperationCanceledException)
         {
@@ -196,7 +205,7 @@ public class ImportPipeline : IImportPipeline
             return ImportResult.Failed("text://pasted-mml", validation.ErrorMessage ?? ImportError.CorruptTiming, errorCode: "TIMELINE_INVALID", sourceType: ImportSourceType.Mml);
         }
 
-        string normalizedTitle = NormalizeTitle(timeline.Title, preferredTitle, "붙여넣은 MML.mml");
+        string normalizedTitle = NormalizeTitle(timeline.Title, effectiveTitle, "붙여넣은 MML.mml");
         timeline.Title = normalizedTitle;
 
         ct.ThrowIfCancellationRequested();
@@ -207,7 +216,7 @@ public class ImportPipeline : IImportPipeline
             try
             {
                 createdScore = await _libraryService.CreateScoreFromTextAsync(
-                    mmlText,
+                    cleanMml,
                     normalizedTitle,
                     targetFolderId,
                     ct);
