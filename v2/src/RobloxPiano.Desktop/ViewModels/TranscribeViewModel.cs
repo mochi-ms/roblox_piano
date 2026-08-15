@@ -8,8 +8,10 @@ using RobloxPiano.Core.Importing;
 using RobloxPiano.Core.Music;
 using RobloxPiano.Core.Piano;
 using RobloxPiano.Core.Transcription;
+using RobloxPiano.Core.YouTube;
 using RobloxPiano.Infrastructure.Audio;
 using RobloxPiano.Infrastructure.Transcription;
+using RobloxPiano.Infrastructure.YouTube;
 
 namespace RobloxPiano.Desktop.ViewModels;
 
@@ -20,6 +22,7 @@ public partial class TranscribeViewModel : ObservableObject, IDisposable
     private readonly ITranscriptionEngine _transcriptionEngine;
     private readonly IImportPipeline _importPipeline;
     private readonly PianoProfileContext _profileContext;
+    private readonly IYouTubeIngestionService _youtubeService;
 
     private CancellationTokenSource? _audioCts;
     private CancellationTokenSource? _aiCts;
@@ -32,6 +35,9 @@ public partial class TranscribeViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     private ObservableCollection<AudioQueueItemViewModel> _queueItems = new();
+
+    [ObservableProperty]
+    private string _youTubeUrlInput = string.Empty;
 
     [ObservableProperty]
     private bool _isProcessing;
@@ -61,6 +67,12 @@ public partial class TranscribeViewModel : ObservableObject, IDisposable
     private string _ffmpegStatusText = "FFmpeg 확인 중...";
 
     [ObservableProperty]
+    private bool _isYtDlpReady;
+
+    [ObservableProperty]
+    private string _ytDlpStatusText = "yt-dlp 확인 중...";
+
+    [ObservableProperty]
     private bool _isAiEngineReady;
 
     [ObservableProperty]
@@ -71,13 +83,15 @@ public partial class TranscribeViewModel : ObservableObject, IDisposable
         IFfmpegToolLocator? toolLocator = null,
         ITranscriptionEngine? transcriptionEngine = null,
         IImportPipeline? importPipeline = null,
-        PianoProfileContext? profileContext = null)
+        PianoProfileContext? profileContext = null,
+        IYouTubeIngestionService? youtubeService = null)
     {
         _toolLocator = toolLocator ?? new FfmpegToolLocator();
         _ingestionService = ingestionService ?? new AudioIngestionService(_toolLocator);
         _transcriptionEngine = transcriptionEngine ?? new PythonBasicPitchTranscriptionEngine();
         _importPipeline = importPipeline ?? new ImportPipeline();
         _profileContext = profileContext ?? new PianoProfileContext();
+        _youtubeService = youtubeService ?? new YouTubeIngestionService(audioIngestionService: _ingestionService, ffmpegLocator: _toolLocator);
 
         _profileContext.ProfileChanged += OnProfileChanged;
 
@@ -124,7 +138,20 @@ public partial class TranscribeViewModel : ObservableObject, IDisposable
             FfmpegStatusText = "▲ FFmpeg 확인 실패";
         }
 
-        // 2. Check AI Engine
+        // 2. Check yt-dlp
+        try
+        {
+            var ytStatus = await _youtubeService.CheckToolStatusAsync();
+            IsYtDlpReady = ytStatus.IsAvailable;
+            YtDlpStatusText = ytStatus.StatusMessage;
+        }
+        catch
+        {
+            IsYtDlpReady = false;
+            YtDlpStatusText = "▲ yt-dlp 상태 확인 실패";
+        }
+
+        // 3. Check AI Engine
         try
         {
             var aiStatus = await _transcriptionEngine.CheckAvailabilityAsync();
@@ -155,7 +182,51 @@ public partial class TranscribeViewModel : ObservableObject, IDisposable
         if (addedAny)
         {
             UpdateItemStates();
-            SummaryText = $"{QueueItems.Count}개 오디오 파일 대기 중";
+            SummaryText = $"{QueueItems.Count}개 항목 대기 중";
+        }
+    }
+
+    [RelayCommand]
+    public void AddYouTubeUrl()
+    {
+        if (string.IsNullOrWhiteSpace(YouTubeUrlInput)) return;
+
+        var lines = YouTubeUrlInput.Split(new[] { '\r', '\n', ';' }, StringSplitOptions.RemoveEmptyEntries);
+        bool addedAny = false;
+        string? lastError = null;
+
+        foreach (var rawLine in lines)
+        {
+            string line = rawLine.Trim();
+            if (string.IsNullOrEmpty(line)) continue;
+
+            var val = YouTubeUrlValidator.Validate(line);
+            if (!val.IsValid)
+            {
+                lastError = val.IsPlaylistOnly ? YouTubeError.PlaylistUnsupported : (val.ErrorMessage ?? YouTubeError.InvalidUrl);
+                continue;
+            }
+
+            // Duplicate VideoId check within queue
+            if (QueueItems.Any(q => q.SourceKind == AudioSourceKind.YouTube && string.Equals(q.VideoId, val.VideoId, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            var item = AudioQueueItemViewModel.ForYouTube(val.VideoId!, val.OriginalUrl!, val.CanonicalUrl!);
+            QueueItems.Add(item);
+            addedAny = true;
+        }
+
+        if (addedAny)
+        {
+            YouTubeUrlInput = string.Empty;
+            UpdateItemStates();
+            SummaryText = $"{QueueItems.Count}개 항목 대기 중";
+        }
+        else if (lastError != null)
+        {
+            SummaryText = lastError;
         }
     }
 
@@ -213,66 +284,112 @@ public partial class TranscribeViewModel : ObservableObject, IDisposable
                 }
 
                 item.SetProbing();
-                ProgressStatusText = $"{i + 1} / {total} 변환 중: {item.FileName}";
 
-                var req = new AudioIngestRequest(item.FilePath, item.JobId);
+                if (item.SourceKind == AudioSourceKind.YouTube)
+                {
+                    // YouTube Download & Ingest
+                    ProgressStatusText = $"{i + 1} / {total} YouTube 오디오 가져오는 중: {item.FileName}";
 
-                var itemProgress = new Progress<double>(p =>
-                {
-                    item.SetConverting(p);
-                });
-
-                AudioIngestResult result;
-                try
-                {
-                    result = await Task.Run(() => _ingestionService.IngestAudioAsync(req, itemProgress, ct), ct);
-                }
-                catch (OperationCanceledException)
-                {
-                    item.SetCancelled();
-                    for (int j = i + 1; j < total; j++)
+                    var ytReq = new YouTubeIngestRequest(item.JobId, item.CanonicalUrl ?? item.FilePath);
+                    var ytProgress = new Progress<YouTubeDownloadProgress>(p =>
                     {
-                        if (QueueItems[j].Status == AudioItemStatus.Pending || QueueItems[j].Status == AudioItemStatus.Probing || QueueItems[j].Status == AudioItemStatus.Converting)
-                        {
-                            QueueItems[j].SetCancelled();
-                        }
-                    }
-                    SummaryText = $"오디오 준비가 취소되었습니다. ({success}개 완료 · {failed}개 실패)";
-                    ProgressStatusText = "취소됨";
-                    return;
-                }
-                catch (Exception ex)
-                {
-                    item.SetFailed($"오류: {ex.Message}");
-                    failed++;
-                    completed++;
-                    ProgressPercent = (double)completed / total * 100.0;
-                    continue;
-                }
+                        item.SetYouTubeDownloading(p.Message, p.Percent);
+                        ProgressStatusText = $"{i + 1} / {total} {item.FileName}: {p.Message}";
+                    });
 
-                if (result.Success)
-                {
-                    item.SetPrepared(result);
-                    success++;
-                }
-                else if (string.Equals(result.ErrorCode, "CANCELLED", StringComparison.OrdinalIgnoreCase) || ct.IsCancellationRequested)
-                {
-                    item.SetCancelled();
-                    for (int j = i + 1; j < total; j++)
+                    YouTubeIngestResult ytResult;
+                    try
                     {
-                        if (QueueItems[j].Status == AudioItemStatus.Pending || QueueItems[j].Status == AudioItemStatus.Probing || QueueItems[j].Status == AudioItemStatus.Converting)
-                        {
-                            QueueItems[j].SetCancelled();
-                        }
+                        ytResult = await Task.Run(() => _youtubeService.IngestYouTubeAsync(ytReq, ytProgress, ct), ct);
                     }
-                    SummaryText = $"오디오 준비가 취소되었습니다. ({success}개 완료 · {failed}개 실패)";
-                    ProgressStatusText = "취소됨";
-                    return;
+                    catch (OperationCanceledException)
+                    {
+                        item.SetCancelled();
+                        CancelRemaining(i + 1, total);
+                        SummaryText = $"YouTube 가져오기가 취소되었습니다. ({success}개 완료 · {failed}개 실패)";
+                        ProgressStatusText = "취소됨";
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        item.SetFailed($"오류: {ex.Message}");
+                        failed++;
+                        completed++;
+                        ProgressPercent = (double)completed / total * 100.0;
+                        continue;
+                    }
+
+                    if (ytResult.Success)
+                    {
+                        item.SetYouTubePrepared(ytResult);
+                        success++;
+                    }
+                    else if (string.Equals(ytResult.ErrorCode, "CANCELLED", StringComparison.OrdinalIgnoreCase) || ct.IsCancellationRequested)
+                    {
+                        item.SetCancelled();
+                        CancelRemaining(i + 1, total);
+                        SummaryText = $"오디오 준비가 취소되었습니다. ({success}개 완료 · {failed}개 실패)";
+                        ProgressStatusText = "취소됨";
+                        return;
+                    }
+                    else
+                    {
+                        item.SetFailed(ytResult.ErrorMessage ?? YouTubeError.DownloadFailed);
+                        failed++;
+                    }
                 }
                 else
                 {
-                    item.SetFailed(result.ErrorMessage ?? AudioError.InvalidMedia);
-                    failed++;
+                    // Local Audio File Normalization
+                    ProgressStatusText = $"{i + 1} / {total} 변환 중: {item.FileName}";
+
+                    var req = new AudioIngestRequest(item.FilePath, item.JobId);
+
+                    var itemProgress = new Progress<double>(p =>
+                    {
+                        item.SetConverting(p);
+                    });
+
+                    AudioIngestResult result;
+                    try
+                    {
+                        result = await Task.Run(() => _ingestionService.IngestAudioAsync(req, itemProgress, ct), ct);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        item.SetCancelled();
+                        CancelRemaining(i + 1, total);
+                        SummaryText = $"오디오 준비가 취소되었습니다. ({success}개 완료 · {failed}개 실패)";
+                        ProgressStatusText = "취소됨";
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        item.SetFailed($"오류: {ex.Message}");
+                        failed++;
+                        completed++;
+                        ProgressPercent = (double)completed / total * 100.0;
+                        continue;
+                    }
+
+                    if (result.Success)
+                    {
+                        item.SetPrepared(result);
+                        success++;
+                    }
+                    else if (string.Equals(result.ErrorCode, "CANCELLED", StringComparison.OrdinalIgnoreCase) || ct.IsCancellationRequested)
+                    {
+                        item.SetCancelled();
+                        CancelRemaining(i + 1, total);
+                        SummaryText = $"오디오 준비가 취소되었습니다. ({success}개 완료 · {failed}개 실패)";
+                        ProgressStatusText = "취소됨";
+                        return;
+                    }
+                    else
+                    {
+                        item.SetFailed(result.ErrorMessage ?? AudioError.InvalidMedia);
+                        failed++;
+                    }
                 }
 
                 completed++;
@@ -292,13 +409,7 @@ public partial class TranscribeViewModel : ObservableObject, IDisposable
         }
         catch (OperationCanceledException)
         {
-            for (int i = 0; i < total; i++)
-            {
-                if (QueueItems[i].Status == AudioItemStatus.Pending || QueueItems[i].Status == AudioItemStatus.Probing || QueueItems[i].Status == AudioItemStatus.Converting)
-                {
-                    QueueItems[i].SetCancelled();
-                }
-            }
+            CancelRemaining(0, total);
             SummaryText = "오디오 준비가 취소되었습니다.";
             ProgressStatusText = "취소됨";
         }
@@ -306,6 +417,19 @@ public partial class TranscribeViewModel : ObservableObject, IDisposable
         {
             IsProcessing = false;
             UpdateItemStates();
+        }
+    }
+
+    private void CancelRemaining(int startIndex, int total)
+    {
+        for (int j = startIndex; j < total; j++)
+        {
+            if (QueueItems[j].Status == AudioItemStatus.Pending ||
+                QueueItems[j].Status == AudioItemStatus.Probing ||
+                QueueItems[j].Status == AudioItemStatus.Converting)
+            {
+                QueueItems[j].SetCancelled();
+            }
         }
     }
 
@@ -332,10 +456,12 @@ public partial class TranscribeViewModel : ObservableObject, IDisposable
 
         try
         {
+            string title = item.YouTubeTitle ?? item.Result?.Metadata?.Title ?? Path.GetFileNameWithoutExtension(item.FilePath);
+
             var req = new TranscriptionRequest(
                 item.JobId,
                 item.NormalizedAudioPath!,
-                SourceTitle: item.Result?.Metadata?.Title ?? Path.GetFileNameWithoutExtension(item.FilePath),
+                SourceTitle: title,
                 TargetPianoProfile: _profileContext.CurrentProfile
             );
 
@@ -418,10 +544,12 @@ public partial class TranscribeViewModel : ObservableObject, IDisposable
                 item.SetAiStarting();
                 ProgressStatusText = $"[{i + 1}/{total}] AI 분석 중: {item.FileName}";
 
+                string title = item.YouTubeTitle ?? item.Result?.Metadata?.Title ?? Path.GetFileNameWithoutExtension(item.FilePath);
+
                 var req = new TranscriptionRequest(
                     item.JobId,
                     item.NormalizedAudioPath!,
-                    SourceTitle: item.Result?.Metadata?.Title ?? Path.GetFileNameWithoutExtension(item.FilePath),
+                    SourceTitle: title,
                     TargetPianoProfile: _profileContext.CurrentProfile
                 );
 
@@ -516,14 +644,14 @@ public partial class TranscribeViewModel : ObservableObject, IDisposable
     {
         if (item?.GeneratedMidiPath == null || !File.Exists(item.GeneratedMidiPath)) return;
 
-        string? title = item.Result?.Metadata?.Title;
+        string? title = item.YouTubeTitle ?? item.Result?.Metadata?.Title;
         if (string.IsNullOrWhiteSpace(title))
         {
             title = Path.GetFileNameWithoutExtension(item.FilePath);
         }
         if (string.IsNullOrWhiteSpace(title))
         {
-            title = "AI 변환 악보";
+            title = "YouTube AI 변환 악보";
         }
 
         try

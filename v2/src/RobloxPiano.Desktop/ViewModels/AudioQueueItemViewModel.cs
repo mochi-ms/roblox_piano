@@ -2,6 +2,7 @@ using System.IO;
 using CommunityToolkit.Mvvm.ComponentModel;
 using RobloxPiano.Core.Audio;
 using RobloxPiano.Core.Transcription;
+using RobloxPiano.Core.YouTube;
 
 namespace RobloxPiano.Desktop.ViewModels;
 
@@ -17,11 +18,23 @@ public enum AudioItemStatus
     Cancelled
 }
 
+public enum AudioSourceKind
+{
+    LocalFile,
+    YouTube
+}
+
 public partial class AudioQueueItemViewModel : ObservableObject
 {
+    public AudioSourceKind SourceKind { get; }
     public string FilePath { get; }
-    public string FileName { get; }
+    public string FileName { get; private set; }
     public string JobId { get; }
+
+    public string? VideoId { get; private set; }
+    public string? CanonicalUrl { get; private set; }
+    public string? ChannelName { get; private set; }
+    public string? YouTubeTitle { get; private set; }
 
     [ObservableProperty]
     private string _sourceType = "-";
@@ -73,6 +86,7 @@ public partial class AudioQueueItemViewModel : ObservableObject
 
     public AudioQueueItemViewModel(string filePath, string? jobId = null)
     {
+        SourceKind = AudioSourceKind.LocalFile;
         FilePath = filePath;
         FileName = Path.GetFileName(filePath);
         JobId = jobId ?? Guid.NewGuid().ToString("N");
@@ -80,10 +94,27 @@ public partial class AudioQueueItemViewModel : ObservableObject
         SourceType = extType.ToFriendlyString();
     }
 
+    public static AudioQueueItemViewModel ForYouTube(string videoId, string originalUrl, string canonicalUrl, string? jobId = null)
+    {
+        return new AudioQueueItemViewModel(videoId, originalUrl, canonicalUrl, jobId);
+    }
+
+    private AudioQueueItemViewModel(string videoId, string originalUrl, string canonicalUrl, string? jobId)
+    {
+        SourceKind = AudioSourceKind.YouTube;
+        VideoId = videoId;
+        FilePath = originalUrl;
+        CanonicalUrl = canonicalUrl;
+        FileName = $"YouTube ({videoId})";
+        JobId = jobId ?? Guid.NewGuid().ToString("N");
+        SourceType = "YOUTUBE";
+        StatusText = "대기";
+    }
+
     public void SetProbing()
     {
         Status = AudioItemStatus.Probing;
-        StatusText = "검사 중";
+        StatusText = SourceKind == AudioSourceKind.YouTube ? "영상 정보 확인 중" : "검사 중";
         IsProcessing = true;
         IsPrepared = false;
         IsFailed = false;
@@ -102,6 +133,17 @@ public partial class AudioQueueItemViewModel : ObservableObject
         OnPropertyChanged(nameof(CanStartAi));
     }
 
+    public void SetYouTubeDownloading(string message, double? percent)
+    {
+        Status = AudioItemStatus.Converting;
+        StatusText = message;
+        IsProcessing = true;
+        IsPrepared = false;
+        IsFailed = false;
+        ProgressPercent = percent.HasValue ? Math.Clamp(percent.Value * 100.0, 0.0, 100.0) : 0;
+        OnPropertyChanged(nameof(CanStartAi));
+    }
+
     public void SetPrepared(AudioIngestResult result)
     {
         Result = result;
@@ -116,9 +158,47 @@ public partial class AudioQueueItemViewModel : ObservableObject
         {
             var ts = TimeSpan.FromSeconds(result.Metadata.DurationSeconds);
             DurationText = $"{(int)ts.TotalMinutes:D2}:{ts.Seconds:D2}";
-            SourceType = result.Metadata.CodecName.ToUpperInvariant();
+            if (SourceKind == AudioSourceKind.LocalFile)
+            {
+                SourceType = result.Metadata.CodecName.ToUpperInvariant();
+            }
         }
         OnPropertyChanged(nameof(CanStartAi));
+    }
+
+    public void SetYouTubePrepared(YouTubeIngestResult ytResult)
+    {
+        YouTubeTitle = ytResult.Title;
+        ChannelName = ytResult.ChannelName;
+
+        if (!string.IsNullOrWhiteSpace(ytResult.Title))
+        {
+            FileName = !string.IsNullOrWhiteSpace(ytResult.ChannelName)
+                ? $"{ytResult.ChannelName} - {ytResult.Title}"
+                : ytResult.Title;
+            OnPropertyChanged(nameof(FileName));
+        }
+
+        if (ytResult.DurationSeconds > 0)
+        {
+            var ts = TimeSpan.FromSeconds(ytResult.DurationSeconds);
+            DurationText = $"{(int)ts.TotalMinutes:D2}:{ts.Seconds:D2}";
+        }
+
+        if (ytResult.AudioIngestResult != null)
+        {
+            SetPrepared(ytResult.AudioIngestResult);
+        }
+        else
+        {
+            Status = AudioItemStatus.Prepared;
+            StatusText = "준비 완료";
+            IsProcessing = false;
+            IsPrepared = true;
+            IsFailed = false;
+            ProgressPercent = 100.0;
+            OnPropertyChanged(nameof(CanStartAi));
+        }
     }
 
     public void SetAiStarting(string msg = "AI 엔진 시작 중...")

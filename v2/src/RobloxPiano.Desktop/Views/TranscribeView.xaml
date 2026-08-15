@@ -6,7 +6,7 @@
              xmlns:vm="clr-namespace:RobloxPiano.Desktop.ViewModels"
              mc:Ignorable="d" 
              Background="{StaticResource Background.Root}"
-             d:DesignHeight="750" d:DesignWidth="1150">
+             d:DesignHeight="800" d:DesignWidth="1150">
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
     </UserControl.Resources>
@@ -20,7 +20,7 @@
         </Grid.RowDefinitions>
 
         <!-- 1. Header Area -->
-        <Grid Grid.Row="0" Margin="0,0,0,20">
+        <Grid Grid.Row="0" Margin="0,0,0,16">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
@@ -28,12 +28,15 @@
 
             <StackPanel Grid.Column="0">
                 <TextBlock Text="오디오에서 악보 만들기 (AI Transcription)" FontSize="20" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" Margin="0,0,0,4" />
-                <TextBlock Text="로컬 오디오를 불러와 Spotify Basic Pitch AI로 피아노 악보(MIDI)를 생성합니다." FontSize="13" Foreground="{StaticResource Text.Secondary}" />
+                <TextBlock Text="로컬 오디오 또는 YouTube 링크를 불러와 Spotify Basic Pitch AI로 피아노 악보(MIDI)를 생성합니다." FontSize="13" Foreground="{StaticResource Text.Secondary}" />
             </StackPanel>
 
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                 <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="10,6" Margin="0,0,8,0">
                     <TextBlock Text="{Binding FfmpegStatusText}" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                </Border>
+                <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="10,6" Margin="0,0,8,0">
+                    <TextBlock Text="{Binding YtDlpStatusText}" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
                 </Border>
                 <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="10,6">
                     <TextBlock Text="{Binding AiEngineStatusText}" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
@@ -41,34 +44,84 @@
             </StackPanel>
         </Grid>
 
-        <!-- 2. Drop Zone Area -->
-        <Border Grid.Row="1"
-                Background="{StaticResource Surface.Elevated}"
-                BorderBrush="{StaticResource Border.Subtle}"
-                BorderThickness="1"
-                CornerRadius="8"
-                Padding="24,24"
-                Margin="0,0,0,20"
-                AllowDrop="True"
-                DragEnter="DropZone_DragEnter"
-                DragOver="DropZone_DragOver"
-                Drop="DropZone_Drop">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
+        <!-- 2. Source Input Area (Local Drop Zone + YouTube Link Input) -->
+        <Grid Grid.Row="1" Margin="0,0,0,16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="1.1*" />
+                <ColumnDefinition Width="12" />
+                <ColumnDefinition Width="0.9*" />
+            </Grid.ColumnDefinitions>
 
-                <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                    <TextBlock Text="오디오 파일을 여기에 놓으세요" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" Margin="0,0,0,6" />
-                    <TextBlock Text="지원 포맷: MP3 · WAV · M4A · FLAC · AAC · OGG (최대 500MB, 30분)" FontSize="12" Foreground="{StaticResource Text.Secondary}" />
-                </StackPanel>
+            <!-- 2-A. Local Audio Drop Zone -->
+            <Border Grid.Column="0"
+                    Background="{StaticResource Surface.Elevated}"
+                    BorderBrush="{StaticResource Border.Subtle}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="20,16"
+                    AllowDrop="True"
+                    DragEnter="DropZone_DragEnter"
+                    DragOver="DropZone_DragOver"
+                    Drop="DropZone_Drop">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
 
-                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button Content="파일 선택" Command="{Binding BrowseFilesCommand}" Style="{StaticResource AccentButtonStyle}" Padding="18,8" />
-                </StackPanel>
-            </Grid>
-        </Border>
+                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                        <TextBlock Text="로컬 오디오 파일 불러오기" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" Margin="0,0,0,4" />
+                        <TextBlock Text="MP3 · WAV · M4A · FLAC · AAC · OGG (최대 500MB, 30분)" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                    </StackPanel>
+
+                    <Button Grid.Column="1" Content="파일 선택" Command="{Binding BrowseFilesCommand}" Style="{StaticResource AccentButtonStyle}" Padding="16,7" VerticalAlignment="Center" />
+                </Grid>
+            </Border>
+
+            <!-- 2-B. YouTube Link Input -->
+            <Border Grid.Column="2"
+                    Background="{StaticResource Surface.Elevated}"
+                    BorderBrush="{StaticResource Border.Subtle}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Padding="20,16">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Grid.Row="0" Margin="0,0,0,8">
+                        <TextBlock Text="YouTube에서 가져오기" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" Margin="0,0,0,2" />
+                        <TextBlock Text="일반 영상, Shorts, youtu.be 링크 (단일 영상 전용)" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                    </StackPanel>
+
+                    <Grid Grid.Row="1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="8" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <TextBox Grid.Column="0"
+                                 Text="{Binding YouTubeUrlInput, UpdateSourceTrigger=PropertyChanged}"
+                                 Padding="10,6"
+                                 FontSize="12"
+                                 Background="{StaticResource Surface.Card}"
+                                 Foreground="{StaticResource Text.Primary}"
+                                 BorderBrush="{StaticResource Border.Subtle}"
+                                 BorderThickness="1"
+                                 VerticalContentAlignment="Center" />
+
+                        <Button Grid.Column="2"
+                                Content="링크 추가"
+                                Command="{Binding AddYouTubeUrlCommand}"
+                                Style="{StaticResource AccentButtonStyle}"
+                                Padding="14,6" />
+                    </Grid>
+                </Grid>
+            </Border>
+        </Grid>
 
         <!-- 3. Queue List Area -->
         <Border Grid.Row="2" Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="8" Margin="0,0,0,16">
@@ -83,15 +136,15 @@
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="2.5*" />
-                            <ColumnDefinition Width="70" />
+                            <ColumnDefinition Width="75" />
                             <ColumnDefinition Width="80" />
                             <ColumnDefinition Width="100" />
-                            <ColumnDefinition Width="130" />
-                            <ColumnDefinition Width="160" />
+                            <ColumnDefinition Width="140" />
+                            <ColumnDefinition Width="150" />
                             <ColumnDefinition Width="200" />
                         </Grid.ColumnDefinitions>
 
-                        <TextBlock Grid.Column="0" Text="파일명" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource Text.Secondary}" />
+                        <TextBlock Grid.Column="0" Text="파일명 / YouTube 제목" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource Text.Secondary}" />
                         <TextBlock Grid.Column="1" Text="형식" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource Text.Secondary}" />
                         <TextBlock Grid.Column="2" Text="길이" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource Text.Secondary}" />
                         <TextBlock Grid.Column="3" Text="상태" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource Text.Secondary}" />
@@ -104,8 +157,8 @@
                 <!-- Empty State -->
                 <StackPanel Grid.Row="1" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="20"
                             Visibility="{Binding HasItems, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}">
-                    <TextBlock Text="대기 중인 오디오 파일이 없습니다." FontSize="13" Foreground="{StaticResource Text.Tertiary}" HorizontalAlignment="Center" Margin="0,0,0,4" />
-                    <TextBlock Text="오디오 파일을 드래그하여 놓거나 [파일 선택]을 클릭하세요." FontSize="11.5" Foreground="{StaticResource Text.Tertiary}" HorizontalAlignment="Center" />
+                    <TextBlock Text="대기 중인 오디오 파일 또는 YouTube 링크가 없습니다." FontSize="13" Foreground="{StaticResource Text.Tertiary}" HorizontalAlignment="Center" Margin="0,0,0,4" />
+                    <TextBlock Text="오디오 파일을 드래그하여 놓거나 YouTube 영상 링크를 추가하세요." FontSize="11.5" Foreground="{StaticResource Text.Tertiary}" HorizontalAlignment="Center" />
                 </StackPanel>
 
                 <!-- Items List -->
@@ -117,13 +170,13 @@
                                 <Border BorderBrush="{StaticResource Border.Subtle}" BorderThickness="0,0,0,1" Padding="16,12">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="2.5*" />
-                                            <ColumnDefinition Width="70" />
-                                            <ColumnDefinition Width="80" />
-                                            <ColumnDefinition Width="100" />
-                                            <ColumnDefinition Width="130" />
-                                            <ColumnDefinition Width="160" />
-                                            <ColumnDefinition Width="200" />
+                                             <ColumnDefinition Width="2.5*" />
+                                             <ColumnDefinition Width="75" />
+                                             <ColumnDefinition Width="80" />
+                                             <ColumnDefinition Width="100" />
+                                             <ColumnDefinition Width="140" />
+                                             <ColumnDefinition Width="150" />
+                                             <ColumnDefinition Width="200" />
                                         </Grid.ColumnDefinitions>
 
                                         <!-- Filename + Error Tooltip -->
