@@ -14,21 +14,24 @@ public class PythonBasicPitchTranscriptionEngine : ITranscriptionEngine
     private readonly TranscriptionWorkspaceService _workspaceService;
     private readonly string? _explicitPythonPath;
     private readonly string? _explicitWorkerScriptPath;
+    private readonly TimeSpan _startupHandshakeTimeout;
 
     private readonly SemaphoreSlim _lock = new(1, 1);
+    private readonly StringBuilder _rollingStderr = new();
+
     private IPythonProcessSession? _session;
     private TaskCompletionSource<JsonElement>? _handshakeTcs;
     private TaskCompletionSource<JsonElement>? _currentRequestTcs;
-    private string? _activeRequestId;
-    private string? _activeJobId;
-    private IProgress<TranscriptionProgress>? _activeProgress;
-    private readonly StringBuilder _rollingStderr = new();
-    private bool _disposed;
 
     private string? _detectedPythonVersion;
     private string? _detectedBasicPitchVersion;
     private bool _engineAvailable;
     private string? _detectedStatusMessage;
+
+    private string? _activeRequestId;
+    private string? _activeJobId;
+    private IProgress<TranscriptionProgress>? _activeProgress;
+    private bool _disposed;
 
     public PythonBasicPitchTranscriptionEngine(
         IPythonLocator? pythonLocator = null,
@@ -36,7 +39,8 @@ public class PythonBasicPitchTranscriptionEngine : ITranscriptionEngine
         IImportPipeline? importPipeline = null,
         TranscriptionWorkspaceService? workspaceService = null,
         string? explicitPythonPath = null,
-        string? explicitWorkerScriptPath = null)
+        string? explicitWorkerScriptPath = null,
+        TimeSpan? startupHandshakeTimeout = null)
     {
         _processRunner = processRunner ?? new PythonProcessRunner();
         _pythonLocator = pythonLocator ?? new PythonLocator(_processRunner);
@@ -44,6 +48,7 @@ public class PythonBasicPitchTranscriptionEngine : ITranscriptionEngine
         _workspaceService = workspaceService ?? new TranscriptionWorkspaceService();
         _explicitPythonPath = explicitPythonPath;
         _explicitWorkerScriptPath = explicitWorkerScriptPath;
+        _startupHandshakeTimeout = startupHandshakeTimeout ?? TimeSpan.FromSeconds(30);
     }
 
     public async Task<TranscriptionEngineStatus> CheckAvailabilityAsync(CancellationToken ct = default)
@@ -363,20 +368,28 @@ public class PythonBasicPitchTranscriptionEngine : ITranscriptionEngine
             workingDir: workingDir
         );
 
-        using var ctsTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using var ctsTimeout = new CancellationTokenSource(_startupHandshakeTimeout);
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, ctsTimeout.Token);
 
         var handshakeTask = _handshakeTcs.Task;
         var exitTask = _session.Completion;
+        var handshakeWithTimeout = handshakeTask.WaitAsync(linkedCts.Token);
 
-        var firstCompleted = await Task.WhenAny(handshakeTask, exitTask);
-        if (linkedCts.Token.IsCancellationRequested)
-        {
-            linkedCts.Token.ThrowIfCancellationRequested();
-        }
+        var firstCompleted = await Task.WhenAny(handshakeWithTimeout, exitTask);
 
-        if (firstCompleted == exitTask)
+        if (firstCompleted == exitTask && !handshakeTask.IsCompletedSuccessfully)
         {
+            if (ctsTimeout.IsCancellationRequested && !ct.IsCancellationRequested)
+            {
+                KillSession();
+                throw new TimeoutException($"AI 워커 초기화 시간이 {_startupHandshakeTimeout.TotalSeconds:0}초를 초과했습니다.");
+            }
+            if (ct.IsCancellationRequested)
+            {
+                KillSession();
+                ct.ThrowIfCancellationRequested();
+            }
+
             int exitCode = await exitTask;
             KillSession();
             string stderr = TruncateDiagnostic(_rollingStderr.ToString(), 1024);
@@ -385,7 +398,7 @@ public class PythonBasicPitchTranscriptionEngine : ITranscriptionEngine
 
         try
         {
-            var helloJson = await handshakeTask.WaitAsync(linkedCts.Token);
+            var helloJson = await handshakeWithTimeout;
             if (helloJson.TryGetProperty("basic_pitch_version", out var bpProp))
             {
                 _detectedBasicPitchVersion = bpProp.GetString();
@@ -412,11 +425,11 @@ public class PythonBasicPitchTranscriptionEngine : ITranscriptionEngine
             KillSession();
             if (ctsTimeout.IsCancellationRequested && !ct.IsCancellationRequested)
             {
-                throw new TimeoutException("AI 워커 프로세스 초기화 핸드셰이크(Hello) 시간이 초과되었습니다.");
+                throw new TimeoutException($"AI 워커 초기화 시간이 {_startupHandshakeTimeout.TotalSeconds:0}초를 초과했습니다.");
             }
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not TimeoutException && ex is not OperationCanceledException)
         {
             KillSession();
             throw new InvalidOperationException($"AI 워커 프로세스 시작 실패: {ex.Message}", ex);

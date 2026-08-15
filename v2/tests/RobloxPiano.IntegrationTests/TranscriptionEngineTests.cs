@@ -84,7 +84,8 @@ public class TranscriptionEngineTests : IDisposable
             Func<string, (string Type, string ResponseJson)>? responder = null,
             string? customHelloJson = null,
             bool exitImmediately = false,
-            int exitCode = 0)
+            int exitCode = 0,
+            bool suppressHello = false)
         {
             _onStdOut = onStdOut;
             _responder = responder;
@@ -93,6 +94,11 @@ public class TranscriptionEngineTests : IDisposable
             {
                 IsRunning = false;
                 _completionTcs.TrySetResult(exitCode);
+                return;
+            }
+
+            if (suppressHello)
+            {
                 return;
             }
 
@@ -139,19 +145,22 @@ public class TranscriptionEngineTests : IDisposable
         private readonly bool _exitImmediately;
         private readonly int _exitCode;
         private readonly Queue<Func<Action<string>?, MockPythonSession>>? _sessionFactoryQueue;
+        private readonly bool _suppressHello;
 
         public MockProcessRunner(
             Func<string, (string Type, string ResponseJson)>? responder = null,
             string? customHelloJson = null,
             bool exitImmediately = false,
             int exitCode = 0,
-            Queue<Func<Action<string>?, MockPythonSession>>? sessionFactoryQueue = null)
+            Queue<Func<Action<string>?, MockPythonSession>>? sessionFactoryQueue = null,
+            bool suppressHello = false)
         {
             _responder = responder;
             _customHelloJson = customHelloJson;
             _exitImmediately = exitImmediately;
             _exitCode = exitCode;
             _sessionFactoryQueue = sessionFactoryQueue;
+            _suppressHello = suppressHello;
         }
 
         public Task<ProcessExecutionResult> RunProcessAsync(string executablePath, IReadOnlyList<string> arguments, Action<string>? onStdOutLine = null, Action<string>? onStdErrLine = null, TimeSpan? timeout = null, CancellationToken ct = default)
@@ -168,7 +177,7 @@ public class TranscriptionEngineTests : IDisposable
                 return CurrentSession;
             }
 
-            CurrentSession = new MockPythonSession(onStdOutLine, _responder, _customHelloJson, _exitImmediately, _exitCode);
+            CurrentSession = new MockPythonSession(onStdOutLine, _responder, _customHelloJson, _exitImmediately, _exitCode, _suppressHello);
             return CurrentSession;
         }
     }
@@ -840,5 +849,184 @@ public class TranscriptionEngineTests : IDisposable
 
         Assert.False(result.Success);
         Assert.Contains("파싱 오류", result.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task Startup_AliveWorkerWithoutHello_TimesOut()
+    {
+        string workerScript = Path.Combine(_tempRoot, "mock_worker.py");
+        File.WriteAllText(workerScript, "# mock");
+
+        var runner = new MockProcessRunner(suppressHello: true);
+
+        using var engine = new PythonBasicPitchTranscriptionEngine(
+            pythonLocator: new MockPythonLocator(true),
+            processRunner: runner,
+            workspaceService: _workspace,
+            explicitWorkerScriptPath: workerScript,
+            startupHandshakeTimeout: TimeSpan.FromMilliseconds(100)
+        );
+
+        string inputAudio = Path.Combine(_tempRoot, "audio.wav");
+        File.WriteAllBytes(inputAudio, new byte[] { 1, 2, 3 });
+        var req = new TranscriptionRequest("job_startup_timeout", inputAudio);
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var result = await engine.TranscribeAsync(req);
+        sw.Stop();
+
+        Assert.False(result.Success);
+        Assert.Contains("초과", result.ErrorMessage);
+        Assert.True(sw.ElapsedMilliseconds < 5000, "Should timeout fast without waiting 30 seconds");
+    }
+
+    [Fact]
+    public async Task Startup_UserCancellationBeforeHello_CancelsImmediately()
+    {
+        string workerScript = Path.Combine(_tempRoot, "mock_worker.py");
+        File.WriteAllText(workerScript, "# mock");
+
+        var runner = new MockProcessRunner(suppressHello: true);
+
+        using var engine = new PythonBasicPitchTranscriptionEngine(
+            pythonLocator: new MockPythonLocator(true),
+            processRunner: runner,
+            workspaceService: _workspace,
+            explicitWorkerScriptPath: workerScript,
+            startupHandshakeTimeout: TimeSpan.FromSeconds(30)
+        );
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(60));
+
+        string inputAudio = Path.Combine(_tempRoot, "audio.wav");
+        File.WriteAllBytes(inputAudio, new byte[] { 1, 2, 3 });
+        var req = new TranscriptionRequest("job_user_cancel", inputAudio);
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            await engine.TranscribeAsync(req, ct: cts.Token);
+        });
+        sw.Stop();
+
+        Assert.True(runner.CurrentSession?.KillCalled);
+        Assert.False(runner.CurrentSession?.IsRunning);
+        Assert.True(sw.ElapsedMilliseconds < 5000, "Should cancel immediately without waiting 30 seconds");
+    }
+
+    [Fact]
+    public async Task Startup_WorkerExitBeforeHello_FailsBeforeTimeout()
+    {
+        string workerScript = Path.Combine(_tempRoot, "mock_worker.py");
+        File.WriteAllText(workerScript, "# mock");
+
+        var runner = new MockProcessRunner(exitImmediately: true, exitCode: 137);
+
+        using var engine = new PythonBasicPitchTranscriptionEngine(
+            pythonLocator: new MockPythonLocator(true),
+            processRunner: runner,
+            workspaceService: _workspace,
+            explicitWorkerScriptPath: workerScript,
+            startupHandshakeTimeout: TimeSpan.FromSeconds(30)
+        );
+
+        string inputAudio = Path.Combine(_tempRoot, "audio.wav");
+        File.WriteAllBytes(inputAudio, new byte[] { 1, 2, 3 });
+        var req = new TranscriptionRequest("job_exit_before_timeout", inputAudio);
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var result = await engine.TranscribeAsync(req);
+        sw.Stop();
+
+        Assert.False(result.Success);
+        Assert.Contains("AI 워커가 초기화 중 종료되었습니다", result.ErrorMessage);
+        Assert.True(sw.ElapsedMilliseconds < 5000, "Worker exit should immediately terminate without waiting for timeout");
+    }
+
+    [Fact]
+    public async Task Startup_ValidHelloBeforeTimeout_Succeeds()
+    {
+        string workerScript = Path.Combine(_tempRoot, "mock_worker.py");
+        File.WriteAllText(workerScript, "# mock");
+
+        var runner = new MockProcessRunner();
+
+        using var engine = new PythonBasicPitchTranscriptionEngine(
+            pythonLocator: new MockPythonLocator(true),
+            processRunner: runner,
+            explicitWorkerScriptPath: workerScript,
+            startupHandshakeTimeout: TimeSpan.FromMilliseconds(500)
+        );
+
+        var status = await engine.CheckAvailabilityAsync();
+        Assert.True(status.IsAvailable);
+        Assert.Equal("0.4.0", status.BasicPitchVersion);
+    }
+
+    [Fact]
+    public async Task Startup_Timeout_KillsOwnedWorker()
+    {
+        string workerScript = Path.Combine(_tempRoot, "mock_worker.py");
+        File.WriteAllText(workerScript, "# mock");
+
+        var runner = new MockProcessRunner(suppressHello: true);
+
+        using var engine = new PythonBasicPitchTranscriptionEngine(
+            pythonLocator: new MockPythonLocator(true),
+            processRunner: runner,
+            explicitWorkerScriptPath: workerScript,
+            startupHandshakeTimeout: TimeSpan.FromMilliseconds(80)
+        );
+
+        var status = await engine.CheckAvailabilityAsync();
+        Assert.False(status.IsAvailable);
+        Assert.True(runner.CurrentSession?.KillCalled);
+        Assert.False(runner.CurrentSession?.IsRunning);
+    }
+
+    [Fact]
+    public async Task Startup_Timeout_DoesNotLeaveSessionRunning()
+    {
+        string workerScript = Path.Combine(_tempRoot, "mock_worker.py");
+        File.WriteAllText(workerScript, "# mock");
+
+        var runner = new MockProcessRunner(suppressHello: true);
+
+        using var engine = new PythonBasicPitchTranscriptionEngine(
+            pythonLocator: new MockPythonLocator(true),
+            processRunner: runner,
+            workspaceService: _workspace,
+            explicitWorkerScriptPath: workerScript,
+            startupHandshakeTimeout: TimeSpan.FromMilliseconds(80)
+        );
+
+        string inputAudio = Path.Combine(_tempRoot, "audio.wav");
+        File.WriteAllBytes(inputAudio, new byte[] { 1, 2, 3 });
+        var req = new TranscriptionRequest("job_no_orphan", inputAudio);
+
+        var result = await engine.TranscribeAsync(req);
+        Assert.False(result.Success);
+        Assert.True(runner.CurrentSession?.KillCalled);
+        Assert.False(runner.CurrentSession?.IsRunning);
+    }
+
+    [Fact]
+    public async Task CheckAvailability_HandshakeTimeout_ReturnsUnavailable()
+    {
+        string workerScript = Path.Combine(_tempRoot, "mock_worker.py");
+        File.WriteAllText(workerScript, "# mock");
+
+        var runner = new MockProcessRunner(suppressHello: true);
+
+        using var engine = new PythonBasicPitchTranscriptionEngine(
+            pythonLocator: new MockPythonLocator(true),
+            processRunner: runner,
+            explicitWorkerScriptPath: workerScript,
+            startupHandshakeTimeout: TimeSpan.FromMilliseconds(80)
+        );
+
+        var status = await engine.CheckAvailabilityAsync();
+        Assert.False(status.IsAvailable);
+        Assert.Contains("초과", status.StatusMessage);
     }
 }
