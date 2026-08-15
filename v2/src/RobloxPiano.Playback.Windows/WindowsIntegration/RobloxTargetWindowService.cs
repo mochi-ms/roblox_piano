@@ -5,7 +5,6 @@ public class RobloxTargetWindowService : IRobloxTargetWindowService
     private static readonly HashSet<string> AllowedProcessNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "RobloxPlayerBeta",
-        "RobloxPlayerLauncher",
         "RobloxPlayer"
     };
 

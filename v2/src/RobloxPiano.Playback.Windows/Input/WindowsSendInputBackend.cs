@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace RobloxPiano.Playback.Windows.Input;
 
-public class WindowsSendInputBackend : IPlaybackBackend
+public class WindowsSendInputBackend : IPlaybackBackend, ITargetedPlaybackBackend
 {
     private readonly HashSet<ushort> _pressedScancodes = new();
     private readonly object _lock = new();

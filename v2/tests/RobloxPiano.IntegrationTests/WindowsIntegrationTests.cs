@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using RobloxPiano.Core.Music;
 using RobloxPiano.Core.Piano;
 using RobloxPiano.Desktop.ViewModels;
@@ -77,6 +78,20 @@ public class WindowsIntegrationTests
         service.Refresh();
 
         Assert.False(service.HasTarget);
+        Assert.Empty(service.AvailableTargets);
+    }
+
+    [Fact]
+    public void RobloxTargetWindow_RejectsRobloxPlayerLauncher()
+    {
+        var fakeApi = new FakeWindowApi();
+        fakeApi.AddWindow(1001, 5001, "RobloxPlayerLauncher", "Roblox");
+
+        var service = new RobloxTargetWindowService(fakeApi);
+        service.Refresh();
+
+        Assert.False(service.HasTarget);
+        Assert.Null(service.CurrentTarget);
         Assert.Empty(service.AvailableTargets);
     }
 
@@ -282,7 +297,7 @@ public class WindowsIntegrationTests
     }
 
     // ==========================================
-    // 4. Global Hotkey Tests
+    // 4. Global Hotkey Tests & Target-Required Playback Tests
     // ==========================================
 
     [Fact]
@@ -461,13 +476,13 @@ public class WindowsIntegrationTests
         targetService.Refresh();
         var targetGuard = new PlaybackTargetGuard(targetService, fakeApi);
 
-        // Real backend
-        using var backend = new WindowsSendInputBackend();
+        // Target-required fake backend (guarantees ZERO SendInput / Win32 keyup during tests)
+        using var backend = new TargetRequiredFakePlaybackBackend();
         using var playerVm = new PlayerViewModel(backend, targetService, targetGuard);
         using var hotkeyService = new GlobalHotkeyService(fakeApi);
         using var mainVm = new MainViewModel(playerVm, null, null, null, hotkeyService);
 
-        var timeline = new MusicTimeline("Real Backend Hotkey Test");
+        var timeline = new MusicTimeline("Target-Required Backend Hotkey Test");
         timeline.AddNote(new NoteEvent(60, 0.0, 1.0));
         playerVm.LoadTimeline(timeline);
         playerVm.Scheduler.CountdownSeconds = 0;
@@ -482,6 +497,42 @@ public class WindowsIntegrationTests
         Assert.False(playerVm.IsPlaying);
         Assert.Equal(PlaybackState.Idle, playerVm.Scheduler.State);
         Assert.Contains("Roblox", playerVm.StatusText);
+        Assert.Empty(backend.Events);
+        Assert.Empty(backend.PressedKeys);
+    }
+
+    [Fact]
+    public async Task Playback_TargetRequiredFakeBackend_ValidForeground_AllowsPlayback()
+    {
+        var fakeApi = new FakeWindowApi();
+        fakeApi.AddWindow(1001, 5001, "RobloxPlayerBeta", "Roblox");
+        fakeApi.ForegroundWindow = 1001;
+
+        var targetService = new RobloxTargetWindowService(fakeApi);
+        targetService.Refresh();
+        var targetGuard = new PlaybackTargetGuard(targetService, fakeApi);
+
+        using var backend = new TargetRequiredFakePlaybackBackend();
+        using var playerVm = new PlayerViewModel(backend, targetService, targetGuard);
+
+        var timeline = new MusicTimeline("Positive Target-Required Test");
+        timeline.AddNote(new NoteEvent(60, 0.0, 0.2));
+        playerVm.LoadTimeline(timeline);
+        playerVm.Scheduler.CountdownSeconds = 0;
+
+        await playerVm.PlayAsync();
+
+        // Allow chord event to process
+        for (int i = 0; i < 20; i++)
+        {
+            if (backend.Events.Count > 0) break;
+            await Task.Delay(15);
+        }
+
+        Assert.True(targetService.HasTarget);
+        Assert.NotEmpty(backend.Events);
+        Assert.Contains(backend.Events, e => e.Action == BackendAction.KeyDown && e.Key == "t"); // C4 -> 't' on 61-key mapper
+        playerVm.Stop();
     }
 
     [Fact]
@@ -496,6 +547,24 @@ public class WindowsIntegrationTests
         Assert.False(hotkeyService.RegistrationStatus[HotkeyAction.Play]);
         Assert.False(hotkeyService.RegistrationStatus[HotkeyAction.PauseResume]);
         Assert.False(hotkeyService.RegistrationStatus[HotkeyAction.Stop]);
+    }
+
+    [Fact]
+    public void Hotkey_CommandFailure_DoesNotCrashMessageDispatch()
+    {
+        var fakeApi = new FakeWindowApi();
+        using var hotkeyService = new GlobalHotkeyService(fakeApi);
+        using var playerVm = new PlayerViewModel();
+        using var mainVm = new MainViewModel(playerVm, null, null, null, hotkeyService);
+
+        // Dispose playerVm early to simulate exception on hotkey handling
+        playerVm.Dispose();
+
+        bool handled = false;
+        // Dispatching hotkey message must not throw unhandled exception
+        hotkeyService.ProcessWindowMessage(100, GlobalHotkeyService.WM_HOTKEY, (nint)GlobalHotkeyService.HOTKEY_ID_F6, nint.Zero, ref handled);
+
+        Assert.True(handled);
     }
 
     // ==========================================
@@ -614,8 +683,60 @@ public class WindowsIntegrationTests
     }
 
     // ==========================================
-    // Fake Window API implementation
+    // Fake Window API & Target-Required Fake Backend
     // ==========================================
+
+    public class TargetRequiredFakePlaybackBackend : IPlaybackBackend, ITargetedPlaybackBackend
+    {
+        private readonly List<PlaybackBackendEvent> _events = new();
+        private readonly HashSet<string> _pressedKeys = new();
+        private readonly object _lock = new();
+
+        public IReadOnlyList<PlaybackBackendEvent> Events
+        {
+            get { lock (_lock) return _events.ToList(); }
+        }
+
+        public IReadOnlyCollection<string> PressedKeys
+        {
+            get { lock (_lock) return _pressedKeys.ToList(); }
+        }
+
+        public void KeyDown(string key)
+        {
+            lock (_lock)
+            {
+                _events.Add(new PlaybackBackendEvent(Stopwatch.GetTimestamp(), BackendAction.KeyDown, key));
+                _pressedKeys.Add(key);
+            }
+        }
+
+        public void KeyUp(string key)
+        {
+            lock (_lock)
+            {
+                _events.Add(new PlaybackBackendEvent(Stopwatch.GetTimestamp(), BackendAction.KeyUp, key));
+                _pressedKeys.Remove(key);
+            }
+        }
+
+        public void ReleaseAll()
+        {
+            lock (_lock)
+            {
+                foreach (var k in _pressedKeys.ToList())
+                {
+                    _events.Add(new PlaybackBackendEvent(Stopwatch.GetTimestamp(), BackendAction.KeyUp, k));
+                }
+                _pressedKeys.Clear();
+            }
+        }
+
+        public void Dispose()
+        {
+            ReleaseAll();
+        }
+    }
 
     public class FakeWindowApi : IWindowApi
     {

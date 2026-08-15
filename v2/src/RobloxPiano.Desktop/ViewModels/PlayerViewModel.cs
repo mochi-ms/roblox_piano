@@ -118,7 +118,7 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _targetStatusText = "Roblox 대기 중";
 
-    public bool IsRealInputBackend => _backend is WindowsSendInputBackend;
+    public bool IsRealInputBackend => _backend is ITargetedPlaybackBackend;
     public PlaybackScheduler Scheduler => _scheduler;
     public IRobloxTargetWindowService TargetService => _targetService;
     public IPlaybackTargetGuard TargetGuard => _targetGuard;

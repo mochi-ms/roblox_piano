@@ -41,23 +41,45 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         _openScoreHandler = async (_, score) =>
         {
-            await _playerViewModel.LoadScoreAsync(score);
-            CurrentView = _playerViewModel;
+            try
+            {
+                await _playerViewModel.LoadScoreAsync(score);
+                CurrentView = _playerViewModel;
+            }
+            catch (ObjectDisposedException)
+            {
+                // Shutdown race: safely ignore
+            }
+            catch (Exception ex)
+            {
+                _playerViewModel.StatusText = $"악보 불러오기 실패: {ex.Message}";
+            }
         };
 
         _hotkeyHandler = async (_, action) =>
         {
-            switch (action)
+            try
             {
-                case HotkeyAction.Play:
-                    await _playerViewModel.HandleHotkeyPlayAsync();
-                    break;
-                case HotkeyAction.PauseResume:
-                    await _playerViewModel.HandleHotkeyPauseResumeAsync();
-                    break;
-                case HotkeyAction.Stop:
-                    _playerViewModel.HandleHotkeyStop();
-                    break;
+                switch (action)
+                {
+                    case HotkeyAction.Play:
+                        await _playerViewModel.HandleHotkeyPlayAsync();
+                        break;
+                    case HotkeyAction.PauseResume:
+                        await _playerViewModel.HandleHotkeyPauseResumeAsync();
+                        break;
+                    case HotkeyAction.Stop:
+                        _playerViewModel.HandleHotkeyStop();
+                        break;
+                }
+            }
+            catch (ObjectDisposedException)
+            {
+                // Shutdown race: safely ignore
+            }
+            catch (Exception ex)
+            {
+                _playerViewModel.StatusText = $"단축키 처리 오류: {ex.Message}";
             }
         };
 
