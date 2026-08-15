@@ -35,7 +35,12 @@ public class FolderService
             counter++;
         }
 
-        Directory.CreateDirectory(candidatePath);
+        bool createdDir = false;
+        if (!Directory.Exists(candidatePath))
+        {
+            Directory.CreateDirectory(candidatePath);
+            createdDir = true;
+        }
 
         var folder = new FolderItem(
             id: Guid.NewGuid().ToString(),
@@ -43,8 +48,19 @@ public class FolderService
             name: safeName
         );
 
-        await _repository.InsertFolderAsync(folder, ct);
-        return folder;
+        try
+        {
+            await _repository.InsertFolderAsync(folder, ct);
+            return folder;
+        }
+        catch
+        {
+            if (createdDir && Directory.Exists(candidatePath) && _fileService.IsPathUnderRoot(candidatePath))
+            {
+                try { Directory.Delete(candidatePath); } catch { }
+            }
+            throw;
+        }
     }
 
     public async Task<FolderItem> RenameFolderAsync(string folderId, string newName, CancellationToken ct = default)
@@ -73,17 +89,34 @@ public class FolderService
             counter++;
         }
 
+        bool movedDir = false;
         if (Directory.Exists(oldPath) && !string.Equals(Path.GetFullPath(oldPath), Path.GetFullPath(newPath), StringComparison.OrdinalIgnoreCase))
         {
+            if (!_fileService.IsPathUnderRoot(oldPath))
+            {
+                throw new InvalidOperationException("관리형 스토리지 외부의 디렉터리는 이동할 수 없습니다.");
+            }
             Directory.Move(oldPath, newPath);
-            await UpdateScorePathsRecursiveAsync(folderId, oldPath, newPath, ct);
+            movedDir = true;
         }
 
+        var affectedScores = await GetScoresToUpdatePathsRecursiveAsync(folderId, oldPath, newPath, ct);
         folder.Name = cleanName;
         folder.UpdatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
-        await _repository.UpdateFolderAsync(folder, ct);
 
-        return folder;
+        try
+        {
+            await _repository.UpdateFolderAndScorePathsAsync(folder, affectedScores, ct);
+            return folder;
+        }
+        catch
+        {
+            if (movedDir && Directory.Exists(newPath) && _fileService.IsPathUnderRoot(newPath))
+            {
+                try { Directory.Move(newPath, oldPath); } catch { }
+            }
+            throw;
+        }
     }
 
     public bool IsDescendant(string parentFolderId, string? candidateChildId, IReadOnlyDictionary<string, FolderItem> allFolders)
@@ -145,18 +178,35 @@ public class FolderService
             counter++;
         }
 
+        bool movedDir = false;
         if (Directory.Exists(oldPath) && !string.Equals(Path.GetFullPath(oldPath), Path.GetFullPath(newPath), StringComparison.OrdinalIgnoreCase))
         {
+            if (!_fileService.IsPathUnderRoot(oldPath))
+            {
+                throw new InvalidOperationException("관리형 스토리지 외부의 디렉터리는 이동할 수 없습니다.");
+            }
             Directory.Move(oldPath, newPath);
-            await UpdateScorePathsRecursiveAsync(folderId, oldPath, newPath, ct);
+            movedDir = true;
         }
 
+        var affectedScores = await GetScoresToUpdatePathsRecursiveAsync(folderId, oldPath, newPath, ct);
         folder.Name = safeName;
         folder.ParentId = newParentId;
         folder.UpdatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
-        await _repository.UpdateFolderAsync(folder, ct);
 
-        return folder;
+        try
+        {
+            await _repository.UpdateFolderAndScorePathsAsync(folder, affectedScores, ct);
+            return folder;
+        }
+        catch
+        {
+            if (movedDir && Directory.Exists(newPath) && _fileService.IsPathUnderRoot(newPath))
+            {
+                try { Directory.Move(newPath, oldPath); } catch { }
+            }
+            throw;
+        }
     }
 
     public async Task DeleteFolderAsync(string folderId, CancellationToken ct = default)
@@ -171,7 +221,7 @@ public class FolderService
         var page = await _repository.QueryScoresAsync(new LibraryQuery { FolderId = folderId, PageSize = 10000 }, ct);
         foreach (var score in page.Items)
         {
-            if (File.Exists(score.FilePath) && _fileService.IsPathUnderRoot(score.FilePath))
+            if (!string.IsNullOrEmpty(score.FilePath) && File.Exists(score.FilePath) && _fileService.IsPathUnderRoot(score.FilePath))
             {
                 File.Delete(score.FilePath);
             }
@@ -208,8 +258,9 @@ public class FolderService
         return cleanedCount;
     }
 
-    private async Task UpdateScorePathsRecursiveAsync(string folderId, string oldBasePath, string newBasePath, CancellationToken ct)
+    private async Task<List<ScoreItem>> GetScoresToUpdatePathsRecursiveAsync(string folderId, string oldBasePath, string newBasePath, CancellationToken ct)
     {
+        var list = new List<ScoreItem>();
         var page = await _repository.QueryScoresAsync(new LibraryQuery { FolderId = folderId, PageSize = 10000 }, ct);
         foreach (var s in page.Items)
         {
@@ -217,14 +268,18 @@ public class FolderService
             {
                 var relPath = Path.GetRelativePath(oldBasePath, s.FilePath);
                 s.FilePath = Path.Combine(newBasePath, relPath);
-                await _repository.UpdateScoreAsync(s, ct);
+                s.UpdatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
+                list.Add(s);
             }
         }
 
         var children = await _repository.GetChildFoldersAsync(folderId, ct);
         foreach (var child in children)
         {
-            await UpdateScorePathsRecursiveAsync(child.Id, oldBasePath, newBasePath, ct);
+            var childList = await GetScoresToUpdatePathsRecursiveAsync(child.Id, oldBasePath, newBasePath, ct);
+            list.AddRange(childList);
         }
+
+        return list;
     }
 }

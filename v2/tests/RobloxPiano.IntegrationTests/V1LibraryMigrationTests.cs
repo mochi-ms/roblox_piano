@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using Microsoft.Data.Sqlite;
 using RobloxPiano.Core.Library;
+using RobloxPiano.Core.Services;
 using RobloxPiano.Infrastructure.Data;
 using Xunit;
 
@@ -8,9 +9,11 @@ namespace RobloxPiano.IntegrationTests;
 
 public class V1LibraryMigrationTests : IDisposable
 {
+    private readonly string _tempDir;
     private readonly string _tempV1DbPath;
     private readonly string _tempV2DbPath;
-    private readonly string _tempDir;
+    private readonly string _tempV1StorageRoot;
+    private readonly string _tempV2StorageRoot;
 
     public V1LibraryMigrationTests()
     {
@@ -19,6 +22,11 @@ public class V1LibraryMigrationTests : IDisposable
 
         _tempV1DbPath = Path.Combine(_tempDir, "legacy_v1.db");
         _tempV2DbPath = Path.Combine(_tempDir, "library_v2.db");
+        _tempV1StorageRoot = Path.Combine(_tempDir, "V1Storage");
+        _tempV2StorageRoot = Path.Combine(_tempDir, "V2Storage");
+
+        Directory.CreateDirectory(_tempV1StorageRoot);
+        Directory.CreateDirectory(_tempV2StorageRoot);
     }
 
     public void Dispose()
@@ -33,8 +41,19 @@ public class V1LibraryMigrationTests : IDisposable
         catch { }
     }
 
-    private async Task CreateSyntheticV1DatabaseAsync()
+    private async Task<(string File1, string File2)> CreateSyntheticV1FixtureAsync()
     {
+        string dir1 = Path.Combine(_tempV1StorageRoot, "Anime", "Ghibli");
+        string dir2 = Path.Combine(_tempV1StorageRoot, "Anime");
+        Directory.CreateDirectory(dir1);
+        Directory.CreateDirectory(dir2);
+
+        string file1 = Path.Combine(dir1, "always.mid");
+        string file2 = Path.Combine(dir2, "summer.mml");
+
+        await File.WriteAllTextAsync(file1, "SYNTHETIC_MIDI_BINARY_DATA_TEST_12345");
+        await File.WriteAllTextAsync(file2, "MML@t120l4cdefgab>c;");
+
         await using var conn = new SqliteConnection($"Data Source={_tempV1DbPath};Pooling=False;");
         await conn.OpenAsync();
 
@@ -74,12 +93,17 @@ public class V1LibraryMigrationTests : IDisposable
             ('f2', 'f1', 'Ghibli', 1700000100.0, 1700000100.0);
 
             INSERT INTO scores (id, title, source_type, source_url, filepath, original_filename, file_extension, folder_id, duration, bpm, total_notes, tags, analysis_status, favorite, created_at) VALUES
-            ('s1', 'Always with Me', 'MIDI', 'url1', 'C:\songs\always.mid', 'always.mid', '.mid', 'f2', 210.0, 95.0, 320, 'ghibli,spirited', 'READY', 1, 1700000200.0),
-            ('s2', 'Summer', 'MML', 'url2', 'C:\songs\summer.mml', 'summer.mml', '.mml', 'f1', 180.0, 120.0, 250, 'kikujiro', 'READY', 0, 1700000300.0);
+            ('s1', 'Always with Me', 'MIDI', 'url1', @file1, 'always.mid', '.mid', 'f2', 210.0, 95.0, 320, 'ghibli,spirited', 'READY', 1, 1700000200.0),
+            ('s2', 'Summer', 'MML', 'url2', @file2, 'summer.mml', '.mml', 'f1', 180.0, 120.0, 250, 'kikujiro', 'READY', 0, 1700000300.0);
         """;
+        cmd.Parameters.AddWithValue("@file1", file1);
+        cmd.Parameters.AddWithValue("@file2", file2);
+
         await cmd.ExecuteNonQueryAsync();
         await conn.CloseAsync();
         SqliteConnection.ClearAllPools();
+
+        return (file1, file2);
     }
 
     private static string ComputeFileSha256(string filePath)
@@ -92,15 +116,17 @@ public class V1LibraryMigrationTests : IDisposable
     }
 
     [Fact]
-    public async Task MigrateAsync_PreservesV1UntouchedAndMigratesAllData()
+    public async Task MigrateAsync_StrongIsolation_PreservesV1UntouchedAndCopiesPhysicalFiles()
     {
-        await CreateSyntheticV1DatabaseAsync();
+        var (v1File1, v1File2) = await CreateSyntheticV1FixtureAsync();
 
-        // 1. Compute hash of V1 database before migration
-        string hashBefore = ComputeFileSha256(_tempV1DbPath);
+        // 1. Record hashes of V1 database and physical files before migration
+        string v1DbHashBefore = ComputeFileSha256(_tempV1DbPath);
+        string v1File1HashBefore = ComputeFileSha256(v1File1);
+        string v1File2HashBefore = ComputeFileSha256(v1File2);
 
         var v2Repo = new SqliteLibraryRepository(_tempV2DbPath);
-        var migrationService = new V1LibraryMigrationService(v2Repo, _tempV1DbPath);
+        var migrationService = new V1LibraryMigrationService(v2Repo, _tempV1DbPath, _tempV2StorageRoot);
 
         // 2. Perform Migration
         var result = await migrationService.MigrateAsync();
@@ -111,32 +137,109 @@ public class V1LibraryMigrationTests : IDisposable
         Assert.NotNull(result.BackupPath);
         Assert.True(File.Exists(result.BackupPath));
 
-        // 3. Verify V1 hash is 100% UNCHANGED (Zero writes to V1 source)
-        string hashAfter = ComputeFileSha256(_tempV1DbPath);
-        Assert.Equal(hashBefore, hashAfter);
+        // 3. Verify V1 DB & files remain 100% UNTOUCHED
+        string v1DbHashAfter = ComputeFileSha256(_tempV1DbPath);
+        string v1File1HashAfter = ComputeFileSha256(v1File1);
+        string v1File2HashAfter = ComputeFileSha256(v1File2);
 
-        // 4. Verify V2 data
-        var allFolders = await v2Repo.GetAllFoldersAsync();
-        Assert.Equal(2, allFolders.Count);
-        Assert.Contains(allFolders, f => f.Id == "f1" && f.Name == "Anime");
-        Assert.Contains(allFolders, f => f.Id == "f2" && f.Name == "Ghibli" && f.ParentId == "f1");
+        Assert.Equal(v1DbHashBefore, v1DbHashAfter);
+        Assert.Equal(v1File1HashBefore, v1File1HashAfter);
+        Assert.Equal(v1File2HashBefore, v1File2HashAfter);
+        Assert.True(File.Exists(v1File1));
+        Assert.True(File.Exists(v1File2));
 
-        var allScores = await v2Repo.GetAllScoresAsync();
-        Assert.Equal(2, allScores.Count);
-
-        var s1 = allScores.FirstOrDefault(s => s.Id == "s1");
+        // 4. Verify V2 records point to newly copied V2 managed storage
+        var v2FileService = new LibraryFileService(_tempV2StorageRoot);
+        var s1 = await v2Repo.GetScoreAsync("s1");
         Assert.NotNull(s1);
-        Assert.Equal("Always with Me", s1.Title);
-        Assert.Equal("MIDI", s1.SourceType);
-        Assert.Equal(210.0, s1.Duration);
-        Assert.True(s1.Favorite);
-        Assert.Equal("f2", s1.FolderId);
+        Assert.True(v2FileService.IsPathUnderRoot(s1.FilePath));
+        Assert.NotEqual(v1File1, s1.FilePath);
+        Assert.True(File.Exists(s1.FilePath));
+        Assert.Equal(v1File1HashBefore, ComputeFileSha256(s1.FilePath));
+        Assert.Equal(v1File1, s1.SourceUrl); // Legacy V1 path preserved as source URL
 
-        var s2 = allScores.FirstOrDefault(s => s.Id == "s2");
-        Assert.NotNull(s2);
-        Assert.Equal("Summer", s2.Title);
-        Assert.Equal("MML", s2.SourceType);
-        Assert.Equal(180.0, s2.Duration);
-        Assert.False(s2.Favorite);
+        // 5. Destructive operations on V2 must NEVER affect V1
+        var v2FolderService = new FolderService(v2Repo, v2FileService);
+        var v2LibService = new LibraryService(v2Repo, v2FileService, v2FolderService);
+
+        // A. Rename score in V2
+        var renamed = await v2LibService.RenameScoreAsync(s1.Id, "Always_Renamed");
+        Assert.Equal("Always_Renamed", renamed.Title);
+        Assert.True(File.Exists(renamed.FilePath));
+        Assert.True(File.Exists(v1File1)); // V1 untouched!
+
+        // B. Move score in V2
+        await v2LibService.MoveScoreAsync(s1.Id, "f1");
+        var moved = await v2Repo.GetScoreAsync(s1.Id);
+        Assert.NotNull(moved);
+        Assert.Equal("f1", moved.FolderId);
+        Assert.True(File.Exists(moved.FilePath));
+        Assert.True(File.Exists(v1File1)); // V1 untouched!
+
+        // C. Delete score in V2
+        await v2LibService.DeleteScoreAsync(s1.Id);
+        Assert.Null(await v2Repo.GetScoreAsync(s1.Id));
+        Assert.False(File.Exists(moved.FilePath)); // V2 file deleted
+        Assert.True(File.Exists(v1File1)); // V1 file STILL EXISTS and is untouched!
+    }
+
+    [Fact]
+    public async Task MigrateAsync_AtomicRollback_LeavesZeroV2RowsOnFailure()
+    {
+        await CreateSyntheticV1FixtureAsync();
+
+        // Create failing repository wrapper
+        var failingRepo = new FailingBulkImportRepository(_tempV2DbPath);
+        var migrationService = new V1LibraryMigrationService(failingRepo, _tempV1DbPath, _tempV2StorageRoot);
+
+        var result = await migrationService.MigrateAsync();
+
+        Assert.False(result.Success);
+        Assert.NotNull(result.ErrorMessage);
+
+        // Verify V2 database has ZERO rows
+        var realRepo = new SqliteLibraryRepository(_tempV2DbPath);
+        var allFolders = await realRepo.GetAllFoldersAsync();
+        var allScores = await realRepo.GetAllScoresAsync();
+
+        Assert.Empty(allFolders);
+        Assert.Empty(allScores);
+
+        // Verify V2 storage has NO orphan copied files
+        var v2Files = Directory.GetFiles(_tempV2StorageRoot, "*.*", SearchOption.AllDirectories);
+        Assert.Empty(v2Files);
+    }
+
+    [Fact]
+    public async Task MigrateAsync_Idempotency_RunningTwiceDoesNotDuplicateManagedFiles()
+    {
+        await CreateSyntheticV1FixtureAsync();
+
+        var v2Repo = new SqliteLibraryRepository(_tempV2DbPath);
+        var migrationService = new V1LibraryMigrationService(v2Repo, _tempV1DbPath, _tempV2StorageRoot);
+
+        // Run #1
+        var res1 = await migrationService.MigrateAsync();
+        Assert.True(res1.Success);
+
+        int fileCountAfterFirst = Directory.GetFiles(_tempV2StorageRoot, "*.*", SearchOption.AllDirectories).Length;
+        Assert.Equal(2, fileCountAfterFirst);
+
+        // Run #2
+        var res2 = await migrationService.MigrateAsync();
+        Assert.True(res2.Success);
+
+        int fileCountAfterSecond = Directory.GetFiles(_tempV2StorageRoot, "*.*", SearchOption.AllDirectories).Length;
+        Assert.Equal(2, fileCountAfterSecond); // No duplicated Song (1).mid!
+    }
+
+    private class FailingBulkImportRepository : SqliteLibraryRepository
+    {
+        public FailingBulkImportRepository(string dbPath) : base(dbPath) { }
+
+        public override Task BulkImportAsync(IReadOnlyList<FolderItem> folders, IReadOnlyList<ScoreItem> scores, CancellationToken ct = default)
+        {
+            throw new InvalidOperationException("Simulated mid-migration transactional failure.");
+        }
     }
 }

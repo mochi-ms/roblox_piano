@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
 using RobloxPiano.Core.Library;
 
@@ -7,6 +8,8 @@ public class SqliteLibraryRepository : ILibraryRepository
 {
     private readonly SqliteConnectionFactory _factory;
     private readonly SqliteSchemaInitializer _initializer;
+    private bool _isInitialized = false;
+    private readonly SemaphoreSlim _initLock = new(1, 1);
 
     public SqliteLibraryRepository(SqliteConnectionFactory factory)
     {
@@ -19,13 +22,27 @@ public class SqliteLibraryRepository : ILibraryRepository
     {
     }
 
-    public async Task InitializeAsync(CancellationToken ct = default)
+    public virtual async Task InitializeAsync(CancellationToken ct = default)
     {
-        await _initializer.InitializeAsync(ct);
+        if (_isInitialized) return;
+        await _initLock.WaitAsync(ct);
+        try
+        {
+            if (!_isInitialized)
+            {
+                await _initializer.InitializeAsync(ct);
+                _isInitialized = true;
+            }
+        }
+        finally
+        {
+            _initLock.Release();
+        }
     }
 
-    public async Task InsertScoreAsync(ScoreItem score, CancellationToken ct = default)
+    public virtual async Task InsertScoreAsync(ScoreItem score, CancellationToken ct = default)
     {
+        await InitializeAsync(ct);
         await using var conn = await _factory.OpenConnectionAsync(readOnly: false, ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
@@ -60,13 +77,14 @@ public class SqliteLibraryRepository : ILibraryRepository
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    public async Task UpdateScoreAsync(ScoreItem score, CancellationToken ct = default)
+    public virtual async Task UpdateScoreAsync(ScoreItem score, CancellationToken ct = default)
     {
         await InsertScoreAsync(score, ct);
     }
 
-    public async Task DeleteScoreAsync(string scoreId, CancellationToken ct = default)
+    public virtual async Task DeleteScoreAsync(string scoreId, CancellationToken ct = default)
     {
+        await InitializeAsync(ct);
         await using var conn = await _factory.OpenConnectionAsync(readOnly: false, ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "DELETE FROM scores WHERE id = @id;";
@@ -74,8 +92,9 @@ public class SqliteLibraryRepository : ILibraryRepository
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    public async Task<ScoreItem?> GetScoreAsync(string scoreId, CancellationToken ct = default)
+    public virtual async Task<ScoreItem?> GetScoreAsync(string scoreId, CancellationToken ct = default)
     {
+        await InitializeAsync(ct);
         await using var conn = await _factory.OpenConnectionAsync(readOnly: true, ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT * FROM scores WHERE id = @id;";
@@ -89,8 +108,9 @@ public class SqliteLibraryRepository : ILibraryRepository
         return null;
     }
 
-    public async Task<IReadOnlyList<ScoreItem>> GetAllScoresAsync(CancellationToken ct = default)
+    public virtual async Task<IReadOnlyList<ScoreItem>> GetAllScoresAsync(CancellationToken ct = default)
     {
+        await InitializeAsync(ct);
         await using var conn = await _factory.OpenConnectionAsync(readOnly: true, ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT * FROM scores ORDER BY created_at DESC;";
@@ -104,7 +124,21 @@ public class SqliteLibraryRepository : ILibraryRepository
         return list;
     }
 
-    public async Task<LibraryPage> QueryScoresAsync(LibraryQuery query, CancellationToken ct = default)
+    public virtual async Task<LibraryPage> QueryScoresAsync(LibraryQuery query, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        try
+        {
+            return await ExecuteQueryScoresInternalAsync(query, useFts: _initializer.IsFts5Supported, ct);
+        }
+        catch (SqliteException) when (_initializer.IsFts5Supported && !string.IsNullOrWhiteSpace(query.SearchKeyword))
+        {
+            // Graceful fallback to LIKE when FTS query fails on special tokens
+            return await ExecuteQueryScoresInternalAsync(query, useFts: false, ct);
+        }
+    }
+
+    private async Task<LibraryPage> ExecuteQueryScoresInternalAsync(LibraryQuery query, bool useFts, CancellationToken ct)
     {
         await using var conn = await _factory.OpenConnectionAsync(readOnly: true, ct);
 
@@ -114,17 +148,19 @@ public class SqliteLibraryRepository : ILibraryRepository
         bool isSearching = !string.IsNullOrWhiteSpace(query.SearchKeyword);
         if (isSearching)
         {
-            var keyword = query.SearchKeyword!.Trim();
-            // Try FTS5 match query if enabled, otherwise LIKE fallback
-            if (_initializer.IsFts5Supported && !keyword.Contains('"') && !keyword.Contains('*'))
+            var rawKeyword = query.SearchKeyword!.Trim();
+            var cleanKeyword = Regex.Replace(rawKeyword, @"[""*+^:(){}\[\]\-]", " ").Trim();
+
+            if (useFts && !string.IsNullOrWhiteSpace(cleanKeyword))
             {
+                var ftsQuery = $"\"{cleanKeyword}\"*";
                 whereClauses.Add("s.id IN (SELECT id FROM scores_fts WHERE scores_fts MATCH @ftsKw)");
-                parameters.Add(new SqliteParameter("@ftsKw", $"{keyword}*"));
+                parameters.Add(new SqliteParameter("@ftsKw", ftsQuery));
             }
             else
             {
                 whereClauses.Add("(s.title LIKE @likeKw OR s.tags LIKE @likeKw OR s.original_filename LIKE @likeKw)");
-                parameters.Add(new SqliteParameter("@likeKw", $"%{keyword}%"));
+                parameters.Add(new SqliteParameter("@likeKw", $"%{rawKeyword}%"));
             }
         }
         else
@@ -203,8 +239,9 @@ public class SqliteLibraryRepository : ILibraryRepository
         return new LibraryPage(items, totalCount, query.PageIndex, query.PageSize);
     }
 
-    public async Task<int> GetScoreCountAsync(string? folderId = null, bool favoritesOnly = false, CancellationToken ct = default)
+    public virtual async Task<int> GetScoreCountAsync(string? folderId = null, bool favoritesOnly = false, CancellationToken ct = default)
     {
+        await InitializeAsync(ct);
         await using var conn = await _factory.OpenConnectionAsync(readOnly: true, ct);
         await using var cmd = conn.CreateCommand();
 
@@ -226,8 +263,9 @@ public class SqliteLibraryRepository : ILibraryRepository
         return Convert.ToInt32(result);
     }
 
-    public async Task ToggleFavoriteAsync(string scoreId, CancellationToken ct = default)
+    public virtual async Task ToggleFavoriteAsync(string scoreId, CancellationToken ct = default)
     {
+        await InitializeAsync(ct);
         await using var conn = await _factory.OpenConnectionAsync(readOnly: false, ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "UPDATE scores SET favorite = CASE WHEN favorite = 1 THEN 0 ELSE 1 END WHERE id = @id;";
@@ -235,8 +273,9 @@ public class SqliteLibraryRepository : ILibraryRepository
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    public async Task UpdateLastPlayedAsync(string scoreId, double timestamp, CancellationToken ct = default)
+    public virtual async Task UpdateLastPlayedAsync(string scoreId, double timestamp, CancellationToken ct = default)
     {
+        await InitializeAsync(ct);
         await using var conn = await _factory.OpenConnectionAsync(readOnly: false, ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "UPDATE scores SET last_played_at = @ts WHERE id = @id;";
@@ -245,8 +284,9 @@ public class SqliteLibraryRepository : ILibraryRepository
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    public async Task InsertFolderAsync(FolderItem folder, CancellationToken ct = default)
+    public virtual async Task InsertFolderAsync(FolderItem folder, CancellationToken ct = default)
     {
+        await InitializeAsync(ct);
         await using var conn = await _factory.OpenConnectionAsync(readOnly: false, ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
@@ -264,13 +304,14 @@ public class SqliteLibraryRepository : ILibraryRepository
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    public async Task UpdateFolderAsync(FolderItem folder, CancellationToken ct = default)
+    public virtual async Task UpdateFolderAsync(FolderItem folder, CancellationToken ct = default)
     {
         await InsertFolderAsync(folder, ct);
     }
 
-    public async Task DeleteFolderAsync(string folderId, CancellationToken ct = default)
+    public virtual async Task DeleteFolderAsync(string folderId, CancellationToken ct = default)
     {
+        await InitializeAsync(ct);
         await using var conn = await _factory.OpenConnectionAsync(readOnly: false, ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "DELETE FROM folders WHERE id = @id;";
@@ -278,8 +319,9 @@ public class SqliteLibraryRepository : ILibraryRepository
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    public async Task<FolderItem?> GetFolderAsync(string folderId, CancellationToken ct = default)
+    public virtual async Task<FolderItem?> GetFolderAsync(string folderId, CancellationToken ct = default)
     {
+        await InitializeAsync(ct);
         await using var conn = await _factory.OpenConnectionAsync(readOnly: true, ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT * FROM folders WHERE id = @id;";
@@ -293,8 +335,9 @@ public class SqliteLibraryRepository : ILibraryRepository
         return null;
     }
 
-    public async Task<IReadOnlyList<FolderItem>> GetAllFoldersAsync(CancellationToken ct = default)
+    public virtual async Task<IReadOnlyList<FolderItem>> GetAllFoldersAsync(CancellationToken ct = default)
     {
+        await InitializeAsync(ct);
         await using var conn = await _factory.OpenConnectionAsync(readOnly: true, ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT * FROM folders ORDER BY name COLLATE NOCASE ASC;";
@@ -308,8 +351,9 @@ public class SqliteLibraryRepository : ILibraryRepository
         return list;
     }
 
-    public async Task<IReadOnlyList<FolderItem>> GetChildFoldersAsync(string? parentId, CancellationToken ct = default)
+    public virtual async Task<IReadOnlyList<FolderItem>> GetChildFoldersAsync(string? parentId, CancellationToken ct = default)
     {
+        await InitializeAsync(ct);
         await using var conn = await _factory.OpenConnectionAsync(readOnly: true, ct);
         await using var cmd = conn.CreateCommand();
 
@@ -330,6 +374,159 @@ public class SqliteLibraryRepository : ILibraryRepository
             list.Add(ReadFolder(reader));
         }
         return list;
+    }
+
+    public virtual async Task BulkImportAsync(IReadOnlyList<FolderItem> folders, IReadOnlyList<ScoreItem> scores, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        await using var conn = await _factory.OpenConnectionAsync(readOnly: false, ct);
+        await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
+
+        try
+        {
+            // 1. Insert folders
+            await using (var fCmd = conn.CreateCommand())
+            {
+                fCmd.Transaction = tx;
+                fCmd.CommandText = """
+                    INSERT OR REPLACE INTO folders (id, parent_id, name, created_at, updated_at)
+                    VALUES (@id, @parent_id, @name, @created_at, @updated_at);
+                """;
+                var pId = fCmd.Parameters.Add("@id", SqliteType.Text);
+                var pParent = fCmd.Parameters.Add("@parent_id", SqliteType.Text);
+                var pName = fCmd.Parameters.Add("@name", SqliteType.Text);
+                var pCreated = fCmd.Parameters.Add("@created_at", SqliteType.Real);
+                var pUpdated = fCmd.Parameters.Add("@updated_at", SqliteType.Real);
+
+                foreach (var folder in folders)
+                {
+                    pId.Value = folder.Id;
+                    pParent.Value = (object?)folder.ParentId ?? DBNull.Value;
+                    pName.Value = folder.Name;
+                    pCreated.Value = folder.CreatedAt;
+                    pUpdated.Value = folder.UpdatedAt;
+                    await fCmd.ExecuteNonQueryAsync(ct);
+                }
+            }
+
+            // 2. Insert scores
+            await using (var sCmd = conn.CreateCommand())
+            {
+                sCmd.Transaction = tx;
+                sCmd.CommandText = """
+                    INSERT OR REPLACE INTO scores 
+                    (id, title, source_type, source_url, filepath, original_filename, file_extension, folder_id,
+                     duration, bpm, total_notes, tags, analysis_status, analysis_error, favorite,
+                     created_at, updated_at, last_played_at)
+                    VALUES (@id, @title, @source_type, @source_url, @filepath, @original_filename, @file_extension, @folder_id,
+                            @duration, @bpm, @total_notes, @tags, @analysis_status, @analysis_error, @favorite,
+                            @created_at, @updated_at, @last_played_at);
+                """;
+
+                var pId = sCmd.Parameters.Add("@id", SqliteType.Text);
+                var pTitle = sCmd.Parameters.Add("@title", SqliteType.Text);
+                var pSourceType = sCmd.Parameters.Add("@source_type", SqliteType.Text);
+                var pSourceUrl = sCmd.Parameters.Add("@source_url", SqliteType.Text);
+                var pFilePath = sCmd.Parameters.Add("@filepath", SqliteType.Text);
+                var pOrig = sCmd.Parameters.Add("@original_filename", SqliteType.Text);
+                var pExt = sCmd.Parameters.Add("@file_extension", SqliteType.Text);
+                var pFolder = sCmd.Parameters.Add("@folder_id", SqliteType.Text);
+                var pDur = sCmd.Parameters.Add("@duration", SqliteType.Real);
+                var pBpm = sCmd.Parameters.Add("@bpm", SqliteType.Real);
+                var pNotes = sCmd.Parameters.Add("@total_notes", SqliteType.Integer);
+                var pTags = sCmd.Parameters.Add("@tags", SqliteType.Text);
+                var pStatus = sCmd.Parameters.Add("@analysis_status", SqliteType.Text);
+                var pError = sCmd.Parameters.Add("@analysis_error", SqliteType.Text);
+                var pFav = sCmd.Parameters.Add("@favorite", SqliteType.Integer);
+                var pCreated = sCmd.Parameters.Add("@created_at", SqliteType.Real);
+                var pUpdated = sCmd.Parameters.Add("@updated_at", SqliteType.Real);
+                var pLastPlayed = sCmd.Parameters.Add("@last_played_at", SqliteType.Real);
+
+                foreach (var score in scores)
+                {
+                    pId.Value = score.Id;
+                    pTitle.Value = score.Title;
+                    pSourceType.Value = score.SourceType;
+                    pSourceUrl.Value = score.SourceUrl;
+                    pFilePath.Value = score.FilePath;
+                    pOrig.Value = score.OriginalFilename;
+                    pExt.Value = score.FileExtension;
+                    pFolder.Value = (object?)score.FolderId ?? DBNull.Value;
+                    pDur.Value = score.Duration;
+                    pBpm.Value = score.Bpm;
+                    pNotes.Value = score.TotalNotes;
+                    pTags.Value = score.Tags;
+                    pStatus.Value = score.AnalysisStatus;
+                    pError.Value = score.AnalysisError;
+                    pFav.Value = score.Favorite ? 1 : 0;
+                    pCreated.Value = score.CreatedAt;
+                    pUpdated.Value = score.UpdatedAt;
+                    pLastPlayed.Value = score.LastPlayedAt;
+
+                    await sCmd.ExecuteNonQueryAsync(ct);
+                }
+            }
+
+            await tx.CommitAsync(ct);
+        }
+        catch
+        {
+            await tx.RollbackAsync(ct);
+            throw;
+        }
+    }
+
+    public virtual async Task UpdateFolderAndScorePathsAsync(FolderItem folder, IReadOnlyList<ScoreItem> updatedScores, CancellationToken ct = default)
+    {
+        await InitializeAsync(ct);
+        await using var conn = await _factory.OpenConnectionAsync(readOnly: false, ct);
+        await using var tx = (SqliteTransaction)await conn.BeginTransactionAsync(ct);
+
+        try
+        {
+            await using (var fCmd = conn.CreateCommand())
+            {
+                fCmd.Transaction = tx;
+                fCmd.CommandText = """
+                    UPDATE folders SET parent_id = @parent_id, name = @name, updated_at = @updated_at
+                    WHERE id = @id;
+                """;
+                fCmd.Parameters.AddWithValue("@id", folder.Id);
+                fCmd.Parameters.AddWithValue("@parent_id", (object?)folder.ParentId ?? DBNull.Value);
+                fCmd.Parameters.AddWithValue("@name", folder.Name);
+                fCmd.Parameters.AddWithValue("@updated_at", folder.UpdatedAt);
+                await fCmd.ExecuteNonQueryAsync(ct);
+            }
+
+            await using (var sCmd = conn.CreateCommand())
+            {
+                sCmd.Transaction = tx;
+                sCmd.CommandText = """
+                    UPDATE scores SET filepath = @filepath, original_filename = @original_filename, updated_at = @updated_at
+                    WHERE id = @id;
+                """;
+                var pId = sCmd.Parameters.Add("@id", SqliteType.Text);
+                var pPath = sCmd.Parameters.Add("@filepath", SqliteType.Text);
+                var pOrig = sCmd.Parameters.Add("@original_filename", SqliteType.Text);
+                var pUpdated = sCmd.Parameters.Add("@updated_at", SqliteType.Real);
+
+                foreach (var s in updatedScores)
+                {
+                    pId.Value = s.Id;
+                    pPath.Value = s.FilePath;
+                    pOrig.Value = s.OriginalFilename;
+                    pUpdated.Value = s.UpdatedAt;
+                    await sCmd.ExecuteNonQueryAsync(ct);
+                }
+            }
+
+            await tx.CommitAsync(ct);
+        }
+        catch
+        {
+            await tx.RollbackAsync(ct);
+            throw;
+        }
     }
 
     private static ScoreItem ReadScore(SqliteDataReader r)

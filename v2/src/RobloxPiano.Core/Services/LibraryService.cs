@@ -36,6 +36,36 @@ public class LibraryService
             throw new FileNotFoundException($"Source score file not found: {sourceFilePath}", sourceFilePath);
 
         var ext = Path.GetExtension(sourceFilePath).ToLowerInvariant();
+
+        // 1. Format Validation BEFORE Copying
+        if (ext is not (".mid" or ".midi" or ".mml" or ".txt"))
+        {
+            throw new InvalidOperationException($"지원되지 않는 파일 형식입니다: {ext}");
+        }
+
+        if (ext == ".txt")
+        {
+            if (!_mmlImporter.CanImport(sourceFilePath))
+            {
+                throw new InvalidOperationException("지원되지 않는 형식이거나 유효하지 않은 텍스트 악보 파일입니다.");
+            }
+
+            var textContent = await File.ReadAllTextAsync(sourceFilePath, ct);
+            var headSnippet = textContent.Trim().ToUpperInvariant();
+            if (!headSnippet.StartsWith("MML@") && !Regex.IsMatch(headSnippet, @"\b[1-7][+#-]?\b"))
+            {
+                throw new InvalidOperationException("일반 텍스트 파일(README 등)은 악보로 등록할 수 없습니다.");
+            }
+        }
+        else if (ext == ".mml")
+        {
+            if (!_mmlImporter.CanImport(sourceFilePath))
+            {
+                throw new InvalidOperationException("유효한 MML 형식이 아닙니다.");
+            }
+        }
+
+        // 2. Prepare Destination inside Managed V2 Storage
         var allFolders = (await _repository.GetAllFoldersAsync(ct)).ToDictionary(f => f.Id);
         var targetDir = _fileService.GetFolderPath(folderId, allFolders);
         Directory.CreateDirectory(targetDir);
@@ -43,6 +73,7 @@ public class LibraryService
         var originalFilename = Path.GetFileName(sourceFilePath);
         string destFilename;
         string destFilePath;
+        bool copiedFile = false;
 
         if (string.Equals(Path.GetFullPath(Path.GetDirectoryName(sourceFilePath) ?? ""), Path.GetFullPath(targetDir), StringComparison.OrdinalIgnoreCase))
         {
@@ -54,6 +85,7 @@ public class LibraryService
             destFilename = _fileService.GetSafeFilename(targetDir, originalFilename);
             destFilePath = Path.Combine(targetDir, destFilename);
             File.Copy(sourceFilePath, destFilePath, overwrite: false);
+            copiedFile = true;
         }
 
         double duration = 0.0;
@@ -79,20 +111,17 @@ public class LibraryService
             }
             else if (ext is ".mml" or ".txt")
             {
-                if (_mmlImporter.CanImport(destFilePath))
-                {
-                    var mmlText = await File.ReadAllTextAsync(destFilePath, ct);
-                    var meta = _mmlImporter.ExtractMetadata(mmlText);
-                    duration = Convert.ToDouble(meta["duration"]);
-                    bpm = Convert.ToDouble(meta["bpm"]);
-                    totalNotes = Convert.ToInt32(meta["notes"]);
-                    sourceType = "MML";
-                }
+                var mmlText = await File.ReadAllTextAsync(destFilePath, ct);
+                var meta = _mmlImporter.ExtractMetadata(mmlText);
+                duration = Convert.ToDouble(meta["duration"]);
+                bpm = Convert.ToDouble(meta["bpm"]);
+                totalNotes = Convert.ToInt32(meta["notes"]);
+                sourceType = "MML";
             }
         }
         catch (Exception ex)
         {
-            status = "READY";
+            status = "ANALYSIS_FAILED";
             errorMsg = ex.Message;
         }
 
@@ -113,8 +142,20 @@ public class LibraryService
             analysisError: errorMsg
         );
 
-        await _repository.InsertScoreAsync(score, ct);
-        return score;
+        try
+        {
+            await _repository.InsertScoreAsync(score, ct);
+            return score;
+        }
+        catch
+        {
+            // Compensation: delete copied destination file if DB insertion failed
+            if (copiedFile && File.Exists(destFilePath) && _fileService.IsPathUnderRoot(destFilePath))
+            {
+                try { File.Delete(destFilePath); } catch { }
+            }
+            throw;
+        }
     }
 
     public async Task<ScoreItem> RenameScoreAsync(string scoreId, string newTitle, CancellationToken ct = default)
@@ -135,18 +176,43 @@ public class LibraryService
         var destFilename = _fileService.GetSafeFilename(targetDir, cleanName, ignoreFilePath: oldFilePath);
         var newFilePath = Path.Combine(targetDir, destFilename);
 
-        if (File.Exists(oldFilePath) && !string.Equals(Path.GetFullPath(oldFilePath), Path.GetFullPath(newFilePath), StringComparison.OrdinalIgnoreCase))
+        bool movedPhysical = false;
+        if (!string.IsNullOrEmpty(oldFilePath) && File.Exists(oldFilePath) && !string.Equals(Path.GetFullPath(oldFilePath), Path.GetFullPath(newFilePath), StringComparison.OrdinalIgnoreCase))
         {
+            if (!_fileService.IsPathUnderRoot(oldFilePath))
+            {
+                throw new InvalidOperationException("관리형 스토리지 외부의 파일은 직접 이름을 바꿀 수 없습니다.");
+            }
             File.Move(oldFilePath, newFilePath);
+            movedPhysical = true;
         }
+
+        var originalTitle = item.Title;
+        var originalFilePath = item.FilePath;
+        var originalFilename = item.OriginalFilename;
 
         item.Title = Path.GetFileNameWithoutExtension(destFilename);
         item.FilePath = newFilePath;
         item.OriginalFilename = destFilename;
         item.UpdatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
 
-        await _repository.UpdateScoreAsync(item, ct);
-        return item;
+        try
+        {
+            await _repository.UpdateScoreAsync(item, ct);
+            return item;
+        }
+        catch
+        {
+            // Compensation: restore file name and in-memory model
+            if (movedPhysical && File.Exists(newFilePath) && _fileService.IsPathUnderRoot(newFilePath))
+            {
+                try { File.Move(newFilePath, oldFilePath); } catch { }
+            }
+            item.Title = originalTitle;
+            item.FilePath = originalFilePath;
+            item.OriginalFilename = originalFilename;
+            throw;
+        }
     }
 
     public async Task<ScoreItem> CopyScoreAsync(string scoreId, string? targetFolderId, CancellationToken ct = default)
@@ -162,9 +228,11 @@ public class LibraryService
         var destFilename = _fileService.GetSafeFilename(targetDir, filename);
         var destFilePath = Path.Combine(targetDir, destFilename);
 
-        if (File.Exists(item.FilePath))
+        bool copiedPhysical = false;
+        if (!string.IsNullOrEmpty(item.FilePath) && File.Exists(item.FilePath))
         {
             File.Copy(item.FilePath, destFilePath);
+            copiedPhysical = true;
         }
 
         var newItem = new ScoreItem(
@@ -180,11 +248,24 @@ public class LibraryService
             bpm: item.Bpm,
             totalNotes: item.TotalNotes,
             tags: item.Tags,
-            analysisStatus: item.AnalysisStatus
+            analysisStatus: item.AnalysisStatus,
+            analysisError: item.AnalysisError
         );
 
-        await _repository.InsertScoreAsync(newItem, ct);
-        return newItem;
+        try
+        {
+            await _repository.InsertScoreAsync(newItem, ct);
+            return newItem;
+        }
+        catch
+        {
+            // Compensation: delete copied file
+            if (copiedPhysical && File.Exists(destFilePath) && _fileService.IsPathUnderRoot(destFilePath))
+            {
+                try { File.Delete(destFilePath); } catch { }
+            }
+            throw;
+        }
     }
 
     public async Task MoveScoreAsync(string scoreId, string? targetFolderId, CancellationToken ct = default)
@@ -200,20 +281,46 @@ public class LibraryService
         Directory.CreateDirectory(targetDir);
 
         var oldPath = item.FilePath;
-        if (File.Exists(oldPath))
+        string? newPath = null;
+        string? destFilename = null;
+        bool movedPhysical = false;
+
+        if (!string.IsNullOrEmpty(oldPath) && File.Exists(oldPath))
         {
+            if (!_fileService.IsPathUnderRoot(oldPath))
+            {
+                throw new InvalidOperationException("관리형 스토리지 외부의 파일은 이동할 수 없습니다.");
+            }
+
             var filename = Path.GetFileName(oldPath);
-            var destFilename = _fileService.GetSafeFilename(targetDir, filename);
-            var newPath = Path.Combine(targetDir, destFilename);
+            destFilename = _fileService.GetSafeFilename(targetDir, filename);
+            newPath = Path.Combine(targetDir, destFilename);
 
             File.Move(oldPath, newPath);
+            movedPhysical = true;
             item.FilePath = newPath;
             item.OriginalFilename = destFilename;
         }
 
+        var oldFolderId = item.FolderId;
         item.FolderId = targetFolderId;
         item.UpdatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
-        await _repository.UpdateScoreAsync(item, ct);
+
+        try
+        {
+            await _repository.UpdateScoreAsync(item, ct);
+        }
+        catch
+        {
+            // Compensation: move file back
+            if (movedPhysical && !string.IsNullOrEmpty(newPath) && File.Exists(newPath) && _fileService.IsPathUnderRoot(newPath))
+            {
+                try { File.Move(newPath, oldPath); } catch { }
+            }
+            item.FilePath = oldPath;
+            item.FolderId = oldFolderId;
+            throw;
+        }
     }
 
     public async Task DeleteScoreAsync(string scoreId, CancellationToken ct = default)
@@ -221,9 +328,16 @@ public class LibraryService
         var item = await _repository.GetScoreAsync(scoreId, ct);
         if (item != null)
         {
-            if (File.Exists(item.FilePath) && _fileService.IsPathUnderRoot(item.FilePath))
+            if (!string.IsNullOrEmpty(item.FilePath) && File.Exists(item.FilePath))
             {
-                File.Delete(item.FilePath);
+                if (_fileService.IsPathUnderRoot(item.FilePath))
+                {
+                    File.Delete(item.FilePath);
+                }
+                else
+                {
+                    throw new InvalidOperationException("관리형 스토리지 외부의 파일은 삭제할 수 없습니다.");
+                }
             }
             await _repository.DeleteScoreAsync(scoreId, ct);
         }

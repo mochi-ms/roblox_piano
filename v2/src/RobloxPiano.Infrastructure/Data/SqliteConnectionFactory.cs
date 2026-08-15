@@ -20,7 +20,7 @@ public class SqliteConnectionFactory
             DataSource = _databasePath,
             Mode = readOnly ? SqliteOpenMode.ReadOnly : SqliteOpenMode.ReadWriteCreate,
             ForeignKeys = true,
-            Cache = SqliteCacheMode.Shared
+            Cache = SqliteCacheMode.Default
         };
 
         return new SqliteConnection(builder.ToString());

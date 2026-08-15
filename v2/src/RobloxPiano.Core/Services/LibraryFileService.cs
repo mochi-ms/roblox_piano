@@ -5,6 +5,13 @@ namespace RobloxPiano.Core.Services;
 
 public class LibraryFileService
 {
+    private static readonly HashSet<string> ReservedWindowsNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "CON", "PRN", "AUX", "NUL",
+        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
+    };
+
     private readonly string _storageRoot;
 
     public LibraryFileService(string storageRoot)
@@ -26,7 +33,17 @@ public class LibraryFileService
         var clean = Regex.Replace(rawName, @"[\\/*?:""<>|]", "").Trim();
         clean = clean.Trim('.', ' ');
 
-        return string.IsNullOrWhiteSpace(clean) ? "Untitled" : clean;
+        if (string.IsNullOrWhiteSpace(clean) || clean == "." || clean == "..")
+            return "Untitled";
+
+        var baseName = Path.GetFileNameWithoutExtension(clean);
+
+        if (ReservedWindowsNames.Contains(baseName) || ReservedWindowsNames.Contains(clean))
+        {
+            clean = $"_{clean}";
+        }
+
+        return clean;
     }
 
     public bool IsPathUnderRoot(string path)
@@ -34,8 +51,24 @@ public class LibraryFileService
         if (string.IsNullOrWhiteSpace(path))
             return false;
 
-        var fullPath = Path.GetFullPath(path);
-        return fullPath.StartsWith(_storageRoot, StringComparison.OrdinalIgnoreCase);
+        try
+        {
+            var fullPath = Path.GetFullPath(path);
+            var root = Path.GetFullPath(_storageRoot);
+
+            if (string.Equals(fullPath, root, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            var rel = Path.GetRelativePath(root, fullPath);
+            return rel != ".." 
+                && !rel.StartsWith(".." + Path.DirectorySeparatorChar) 
+                && !rel.StartsWith(".." + Path.AltDirectorySeparatorChar) 
+                && !Path.IsPathRooted(rel);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     public string GetFolderPath(string? folderId, IReadOnlyDictionary<string, FolderItem> allFolders)

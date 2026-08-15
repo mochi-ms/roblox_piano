@@ -90,6 +90,10 @@ public class SqliteSchemaInitializer
                     CREATE TRIGGER IF NOT EXISTS trg_scores_ad AFTER DELETE ON scores BEGIN
                         DELETE FROM scores_fts WHERE id = old.id;
                     END;
+
+                    INSERT INTO scores_fts (id, title, tags, original_filename)
+                    SELECT id, title, tags, original_filename FROM scores
+                    WHERE id NOT IN (SELECT id FROM scores_fts);
                 """;
                 await ftsCmd.ExecuteNonQueryAsync(ct);
                 IsFts5Supported = true;

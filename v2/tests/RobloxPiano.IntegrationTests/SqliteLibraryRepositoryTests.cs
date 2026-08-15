@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using RobloxPiano.Core.Library;
 using RobloxPiano.Infrastructure.Data;
 using Xunit;
@@ -146,6 +147,84 @@ public class SqliteLibraryRepositoryTests : IDisposable
         var searchChopin = await _repository.QueryScoresAsync(new LibraryQuery { SearchKeyword = "Chopin" });
         Assert.Single(searchChopin.Items);
         Assert.Equal("s2", searchChopin.Items[0].Id);
+    }
+
+    [Theory]
+    [InlineData("\"")]
+    [InlineData("*")]
+    [InlineData("100%")]
+    [InlineData("C++")]
+    [InlineData("A-B")]
+    [InlineData("(")]
+    [InlineData(")")]
+    [InlineData("\"quoted string\"")]
+    [InlineData("AND OR NOT NEAR")]
+    public async Task SearchScores_SpecialCharacters_NeverCrashes(string specialQuery)
+    {
+        await _repository.InitializeAsync();
+        await _repository.InsertScoreAsync(new ScoreItem("s-spec", "Test Track C++ (Special) 100%", "MIDI", "", "s.mid"));
+
+        var result = await _repository.QueryScoresAsync(new LibraryQuery { SearchKeyword = specialQuery });
+        Assert.NotNull(result);
+    }
+
+    [Fact]
+    public async Task Fts5_BackfillAndSync_WorksAccurately()
+    {
+        // 1. Manually create table and insert rows BEFORE schema initialization
+        await using (var conn = new SqliteConnection($"Data Source={_tempDbPath}"))
+        {
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                CREATE TABLE scores (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    source_type TEXT DEFAULT 'FILE',
+                    source_url TEXT DEFAULT '',
+                    filepath TEXT NOT NULL,
+                    original_filename TEXT DEFAULT '',
+                    file_extension TEXT DEFAULT '',
+                    folder_id TEXT DEFAULT NULL,
+                    duration REAL DEFAULT 0.0,
+                    bpm REAL DEFAULT 120.0,
+                    total_notes INTEGER DEFAULT 0,
+                    tags TEXT DEFAULT '',
+                    analysis_status TEXT DEFAULT 'READY',
+                    analysis_error TEXT DEFAULT '',
+                    favorite INTEGER DEFAULT 0,
+                    created_at REAL,
+                    updated_at REAL DEFAULT 0.0,
+                    last_played_at REAL DEFAULT 0.0
+                );
+                INSERT INTO scores (id, title, filepath, tags) VALUES ('pre-1', 'Preexisting Ghibli Track', 'p1.mid', 'ghibli');
+            """;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // 2. Initialize schema (which must backfill existing scores into scores_fts)
+        await _repository.InitializeAsync();
+
+        // Search for preexisting record
+        var searchPre = await _repository.QueryScoresAsync(new LibraryQuery { SearchKeyword = "Ghibli" });
+        Assert.Single(searchPre.Items);
+        Assert.Equal("pre-1", searchPre.Items[0].Id);
+
+        // 3. Test Update sync
+        var preScore = await _repository.GetScoreAsync("pre-1");
+        Assert.NotNull(preScore);
+        preScore.Title = "Updated Makoto Shinkai Track";
+        preScore.Tags = "anime,radwimps";
+        await _repository.UpdateScoreAsync(preScore);
+
+        var searchUpdated = await _repository.QueryScoresAsync(new LibraryQuery { SearchKeyword = "Radwimps" });
+        Assert.Single(searchUpdated.Items);
+        Assert.Equal("pre-1", searchUpdated.Items[0].Id);
+
+        // 4. Test Delete sync
+        await _repository.DeleteScoreAsync("pre-1");
+        var searchDeleted = await _repository.QueryScoresAsync(new LibraryQuery { SearchKeyword = "Radwimps" });
+        Assert.Empty(searchDeleted.Items);
     }
 
     [Fact]

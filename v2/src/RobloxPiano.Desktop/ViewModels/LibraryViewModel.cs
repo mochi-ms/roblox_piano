@@ -16,6 +16,8 @@ public partial class LibraryViewModel : ObservableObject
     private readonly LibraryService _libraryService;
 
     private CancellationTokenSource? _searchCts;
+    private int _queryGeneration = 0;
+
     private readonly Stack<string?> _backStack = new();
     private readonly Stack<string?> _forwardStack = new();
 
@@ -48,6 +50,18 @@ public partial class LibraryViewModel : ObservableObject
 
     [ObservableProperty]
     private bool _isLoading = false;
+
+    [ObservableProperty]
+    private bool _isLoadingMore = false;
+
+    [ObservableProperty]
+    private bool _hasMoreItems = false;
+
+    [ObservableProperty]
+    private int _currentPageIndex = 0;
+
+    [ObservableProperty]
+    private int _pageSize = 100;
 
     [ObservableProperty]
     private bool _isEmpty = false;
@@ -94,14 +108,18 @@ public partial class LibraryViewModel : ObservableObject
         _ = InitializeAsync();
     }
 
-    private async Task InitializeAsync()
+    public async Task InitializeAsync()
     {
         IsLoading = true;
         try
         {
             await _repository.InitializeAsync();
             await LoadFoldersAsync();
-            await LoadScoresAsync();
+            await ReloadQueryAsync();
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"오류: {ex.Message}";
         }
         finally
         {
@@ -125,7 +143,7 @@ public partial class LibraryViewModel : ObservableObject
                 {
                     await Application.Current.Dispatcher.InvokeAsync(async () =>
                     {
-                        await LoadScoresAsync(ct);
+                        await ReloadQueryAsync(ct);
                     });
                 }
             }
@@ -148,9 +166,13 @@ public partial class LibraryViewModel : ObservableObject
         }
     }
 
-    public async Task LoadScoresAsync(CancellationToken ct = default)
+    [RelayCommand]
+    public async Task ReloadQueryAsync(CancellationToken ct = default)
     {
+        int gen = Interlocked.Increment(ref _queryGeneration);
         IsLoading = true;
+        CurrentPageIndex = 0;
+
         try
         {
             var query = new LibraryQuery
@@ -159,10 +181,12 @@ public partial class LibraryViewModel : ObservableObject
                 SearchKeyword = SearchText,
                 FavoritesOnly = IsFavoritesView,
                 PageIndex = 0,
-                PageSize = 200
+                PageSize = PageSize
             };
 
             var page = await _repository.QueryScoresAsync(query, ct);
+            if (gen != _queryGeneration) return; // Stale query check
+
             DisplayedScores.Clear();
             foreach (var item in page.Items)
             {
@@ -170,12 +194,52 @@ public partial class LibraryViewModel : ObservableObject
             }
 
             TotalItemCount = page.TotalCount;
+            HasMoreItems = DisplayedScores.Count < TotalItemCount;
             UpdateStatusText();
             UpdateEmptyState();
         }
         finally
         {
             IsLoading = false;
+        }
+    }
+
+    [RelayCommand]
+    public async Task LoadNextPageAsync(CancellationToken ct = default)
+    {
+        if (!HasMoreItems || IsLoadingMore || IsLoading) return;
+
+        int gen = _queryGeneration;
+        IsLoadingMore = true;
+
+        try
+        {
+            int nextPage = CurrentPageIndex + 1;
+            var query = new LibraryQuery
+            {
+                FolderId = CurrentFolderId,
+                SearchKeyword = SearchText,
+                FavoritesOnly = IsFavoritesView,
+                PageIndex = nextPage,
+                PageSize = PageSize
+            };
+
+            var page = await _repository.QueryScoresAsync(query, ct);
+            if (gen != _queryGeneration) return; // Stale query check
+
+            foreach (var item in page.Items)
+            {
+                DisplayedScores.Add(new ScoreItemViewModel(item));
+            }
+
+            CurrentPageIndex = nextPage;
+            TotalItemCount = page.TotalCount;
+            HasMoreItems = DisplayedScores.Count < TotalItemCount;
+            UpdateStatusText();
+        }
+        finally
+        {
+            IsLoadingMore = false;
         }
     }
 
@@ -210,7 +274,7 @@ public partial class LibraryViewModel : ObservableObject
             IsFavoritesView = false;
             CurrentFolderId = folderId;
             await UpdateBreadcrumbAsync();
-            await LoadScoresAsync();
+            await ReloadQueryAsync();
         }
     }
 
@@ -227,7 +291,7 @@ public partial class LibraryViewModel : ObservableObject
         CurrentFolderName = "즐겨찾기";
         CanGoUp = true;
 
-        await LoadScoresAsync();
+        await ReloadQueryAsync();
     }
 
     [RelayCommand]
@@ -244,7 +308,7 @@ public partial class LibraryViewModel : ObservableObject
             IsFavoritesView = false;
             CurrentFolderId = prev;
             await UpdateBreadcrumbAsync();
-            await LoadScoresAsync();
+            await ReloadQueryAsync();
         }
     }
 
@@ -252,7 +316,7 @@ public partial class LibraryViewModel : ObservableObject
     private async Task NavigateForwardAsync()
     {
         if (_forwardStack.Count > 0)
-        {
+            {
             var next = _forwardStack.Pop();
             _backStack.Push(CurrentFolderId);
 
@@ -262,7 +326,7 @@ public partial class LibraryViewModel : ObservableObject
             IsFavoritesView = false;
             CurrentFolderId = next;
             await UpdateBreadcrumbAsync();
-            await LoadScoresAsync();
+            await ReloadQueryAsync();
         }
     }
 
@@ -320,7 +384,7 @@ public partial class LibraryViewModel : ObservableObject
     {
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
-            Filter = "악보 파일 (*.mid;*.midi;*.mml;*.txt)|*.mid;*.midi;*.mml;*.txt|모든 파일 (*.*)|*.*",
+            Filter = "지원 악보 (*.mid;*.midi;*.mml;*.txt)|*.mid;*.midi;*.mml;*.txt|모든 파일 (*.*)|*.*",
             Multiselect = true,
             Title = "악보 파일 추가"
         };
@@ -329,10 +393,17 @@ public partial class LibraryViewModel : ObservableObject
         {
             foreach (var file in dialog.FileNames)
             {
-                var score = await _libraryService.ImportExternalFileAsync(file, CurrentFolderId);
-                // Incremental addition to UI collection
-                DisplayedScores.Insert(0, new ScoreItemViewModel(score));
-                TotalItemCount++;
+                try
+                {
+                    var score = await _libraryService.ImportExternalFileAsync(file, CurrentFolderId);
+                    // Incremental addition to UI collection
+                    DisplayedScores.Insert(0, new ScoreItemViewModel(score));
+                    TotalItemCount++;
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(ex.Message, "가져오기 실패", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
             }
             UpdateStatusText();
             UpdateEmptyState();
