@@ -35,6 +35,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public SettingsViewModel SettingsViewModel => _settingsViewModel;
     public IGlobalHotkeyService HotkeyService => _hotkeyService;
 
+    public MainViewModel() : this(null, null, null, null, null, null, null)
+    {
+    }
+
     public MainViewModel(
         PlayerViewModel? playerViewModel = null,
         LibraryViewModel? libraryViewModel = null,

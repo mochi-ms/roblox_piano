@@ -78,6 +78,10 @@ public partial class TranscribeViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _aiEngineStatusText = "AI 엔진 확인 중...";
 
+    public TranscribeViewModel() : this(null, null, null, null, null, null)
+    {
+    }
+
     public TranscribeViewModel(
         IAudioIngestionService? ingestionService = null,
         IFfmpegToolLocator? toolLocator = null,

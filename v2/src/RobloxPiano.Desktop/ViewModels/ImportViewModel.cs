@@ -41,6 +41,10 @@ public partial class ImportViewModel : ObservableObject, IDisposable
 
     public PianoProfileContext ProfileContext => _profileContext;
 
+    public ImportViewModel() : this(null, null)
+    {
+    }
+
     public ImportViewModel(IImportPipeline? pipeline = null, PianoProfileContext? profileContext = null)
     {
         _profileContext = profileContext ?? new PianoProfileContext();
