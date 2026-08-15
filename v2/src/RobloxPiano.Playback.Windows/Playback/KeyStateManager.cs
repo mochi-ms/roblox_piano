@@ -77,6 +77,10 @@ public class KeyStateManager : IDisposable
         lock (_lock)
         {
             _lastActivityTimestamp = Stopwatch.GetTimestamp();
+            if (_pressedPhysicalKeys.Contains(keyLower))
+            {
+                _backend.KeyUp(keyLower);
+            }
             _backend.KeyDown(keyLower);
             _pressedPhysicalKeys.Add(keyLower);
         }

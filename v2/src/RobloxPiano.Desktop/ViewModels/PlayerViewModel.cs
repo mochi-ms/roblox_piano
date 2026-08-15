@@ -3,8 +3,8 @@ using System.IO;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using RobloxPiano.Core.Library;
 using RobloxPiano.Core.Importers;
+using RobloxPiano.Core.Library;
 using RobloxPiano.Core.Music;
 using RobloxPiano.Core.Piano;
 using RobloxPiano.Playback.Windows.Input;
@@ -14,12 +14,18 @@ namespace RobloxPiano.Desktop.ViewModels;
 
 public partial class PlayerViewModel : ObservableObject, IDisposable
 {
+    private const double PixelsPerSecond = 80.0;
+
     private readonly PlaybackScheduler _scheduler;
     private readonly KeyStateManager _keyState;
     private readonly ChordEngine _chordEngine;
     private readonly PedalController _pedal;
     private readonly RobloxPianoMapper _mapper;
     private readonly IPlaybackBackend _backend;
+
+    private readonly Dictionary<int, PianoKeyViewModel> _keyLookup = new();
+    private bool _isUpdatingProgressFromScheduler;
+    private bool _disposed;
 
     [ObservableProperty]
     private ScoreItem? _currentScore;
@@ -61,6 +67,12 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
     private double _totalTime;
 
     [ObservableProperty]
+    private double _playheadCanvasLeft;
+
+    [ObservableProperty]
+    private double _pianoRollWidth = 1000;
+
+    [ObservableProperty]
     private string _statusText = "준비됨";
 
     [ObservableProperty]
@@ -85,7 +97,10 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
     private bool _hasScore;
 
     [ObservableProperty]
-    private ObservableCollection<int> _activePitches = new();
+    private ObservableCollection<PianoRollNoteViewModel> _pianoRollNotes = new();
+
+    [ObservableProperty]
+    private ObservableCollection<PianoKeyViewModel> _pianoKeys = new();
 
     public PlaybackScheduler Scheduler => _scheduler;
 
@@ -105,17 +120,93 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
         _scheduler.StateChanged += OnSchedulerStateChanged;
         _scheduler.ProgressChanged += OnSchedulerProgressChanged;
         _scheduler.CountdownTick += OnSchedulerCountdownTick;
+        _scheduler.ChordStarted += OnSchedulerChordStarted;
         _scheduler.ChordPlayed += OnSchedulerChordPlayed;
+        _scheduler.ChordEnded += OnSchedulerChordEnded;
         _scheduler.PlaybackError += OnSchedulerPlaybackError;
+
+        Initialize61Keys();
+    }
+
+    private void Initialize61Keys()
+    {
+        // 61 Keys: C2 (36) to C7 (96)
+        // 36 White keys (width 18px each -> Total 648px)
+        // 25 Black keys (width 11px each, height 34px)
+        int whiteCount = 0;
+        var whiteNotes = new[] { 0, 2, 4, 5, 7, 9, 11 }; // C, D, E, F, G, A, B
+
+        var keysList = new List<PianoKeyViewModel>();
+
+        // Generate 61 keys
+        for (int pitch = 36; pitch <= 96; pitch++)
+        {
+            int noteInOctave = pitch % 12;
+            bool isWhite = whiteNotes.Contains(noteInOctave);
+
+            if (isWhite)
+            {
+                double left = whiteCount * 18.0;
+                string noteName = FormatPitch(pitch);
+                var keyVm = new PianoKeyViewModel
+                {
+                    Pitch = pitch,
+                    NoteName = noteName,
+                    IsBlack = false,
+                    KeyLeft = left,
+                    KeyWidth = 17.0,
+                    KeyHeight = 56.0,
+                    ZIndex = 1
+                };
+                keysList.Add(keyVm);
+                _keyLookup[pitch] = keyVm;
+                whiteCount++;
+            }
+        }
+
+        // Generate Black keys positioned relative to white keys
+        whiteCount = 0;
+        for (int pitch = 36; pitch <= 96; pitch++)
+        {
+            int noteInOctave = pitch % 12;
+            bool isWhite = whiteNotes.Contains(noteInOctave);
+
+            if (isWhite)
+            {
+                whiteCount++;
+            }
+            else
+            {
+                // Black key position: between previous white key and current
+                double left = (whiteCount * 18.0) - 6.0;
+                string noteName = FormatPitch(pitch);
+                var keyVm = new PianoKeyViewModel
+                {
+                    Pitch = pitch,
+                    NoteName = noteName,
+                    IsBlack = true,
+                    KeyLeft = left,
+                    KeyWidth = 11.0,
+                    KeyHeight = 34.0,
+                    ZIndex = 2
+                };
+                keysList.Add(keyVm);
+                _keyLookup[pitch] = keyVm;
+            }
+        }
+
+        PianoKeys = new ObservableCollection<PianoKeyViewModel>(keysList.OrderBy(k => k.ZIndex).ThenBy(k => k.Pitch));
     }
 
     public async Task LoadScoreAsync(ScoreItem score, CancellationToken ct = default)
     {
+        ThrowIfDisposed();
         if (score == null) return;
 
         if (string.IsNullOrEmpty(score.FilePath) || !File.Exists(score.FilePath))
         {
             StatusText = "악보 파일을 찾을 수 없습니다.";
+            HasScore = false;
             return;
         }
 
@@ -137,6 +228,7 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
             else
             {
                 StatusText = "지원하지 않는 악보 형식입니다.";
+                HasScore = false;
                 return;
             }
 
@@ -146,11 +238,13 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             StatusText = $"악보 로드 실패: {ex.Message}";
+            HasScore = false;
         }
     }
 
     public void LoadTimeline(MusicTimeline timeline, string title = "제목 없음", string sourceType = "MIDI")
     {
+        ThrowIfDisposed();
         CurrentTimeline = timeline;
         Title = !string.IsNullOrEmpty(title) && title != "Untitled" && title != "MML Score"
             ? title
@@ -167,6 +261,8 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
         FormattedCurrentTime = "00:00";
         CurrentTime = 0.0;
         TotalTime = timeline.Duration;
+        PlayheadCanvasLeft = 0.0;
+        PianoRollWidth = Math.Max(1000.0, timeline.Duration * PixelsPerSecond + 100.0);
 
         FormattedBpm = $"{Math.Round(timeline.InitialBpm)}";
         FormattedTotalNotes = $"{timeline.Notes.Count:N0}";
@@ -181,6 +277,35 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
             PitchRangeText = "-";
         }
 
+        // Build real timeline-backed piano roll notes (cap to 2000 for high performance)
+        var rollList = new List<PianoRollNoteViewModel>();
+        int count = 0;
+        foreach (var note in timeline.Notes)
+        {
+            if (count++ >= 2000) break;
+
+            double left = note.StartTime * PixelsPerSecond;
+            double width = Math.Max(6.0, note.Duration * PixelsPerSecond);
+            // Pitch 96 (C7) at top 10px, Pitch 36 (C2) at bottom 240px
+            double top = Math.Clamp((96 - note.Pitch) * 3.8 + 10.0, 5.0, 240.0);
+            string brushKey = note.Hand == HandType.Left ? "#34D399" : "#5B8DEF";
+
+            rollList.Add(new PianoRollNoteViewModel(
+                Pitch: note.Pitch,
+                StartTime: note.StartTime,
+                Duration: note.Duration,
+                Hand: note.Hand,
+                CanvasLeft: left,
+                CanvasTop: top,
+                Width: width,
+                Height: 6.0,
+                ColorBrushKey: brushKey
+            ));
+        }
+
+        PianoRollNotes = new ObservableCollection<PianoRollNoteViewModel>(rollList);
+        ResetKeyboardHighlight();
+
         HasScore = true;
         StatusText = "준비됨";
 
@@ -189,26 +314,32 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
 
     partial void OnSelectedSpeedChanged(double value)
     {
+        if (_disposed) return;
         _scheduler.Speed = value;
     }
 
     partial void OnSelectedTransposeChanged(int value)
     {
+        if (_disposed) return;
         _scheduler.Transpose = value;
     }
 
     partial void OnCurrentTimeChanged(double value)
     {
-        // When user drags the slider, seek
+        if (_isUpdatingProgressFromScheduler || _disposed) return;
+
+        // When user manually drags slider or sets position
         if (!_isPlaying && !_isCountdown)
         {
             _scheduler.Seek(value);
+            PlayheadCanvasLeft = value * PixelsPerSecond;
         }
     }
 
     [RelayCommand]
     public void TogglePlayPause()
     {
+        ThrowIfDisposed();
         if (!HasScore) return;
         _scheduler.TogglePlayPause();
     }
@@ -216,6 +347,7 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
     [RelayCommand]
     public void Play()
     {
+        ThrowIfDisposed();
         if (!HasScore) return;
         _scheduler.Play();
     }
@@ -223,19 +355,23 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
     [RelayCommand]
     public void Pause()
     {
+        ThrowIfDisposed();
         _scheduler.Pause();
     }
 
     [RelayCommand]
     public void Stop()
     {
+        ThrowIfDisposed();
         _scheduler.Stop();
     }
 
     [RelayCommand]
     public void Seek(double targetSeconds)
     {
+        ThrowIfDisposed();
         _scheduler.Seek(targetSeconds);
+        PlayheadCanvasLeft = targetSeconds * PixelsPerSecond;
     }
 
     private void OnSchedulerStateChanged(object? sender, PlaybackState state)
@@ -259,7 +395,7 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
 
             if (state is PlaybackState.Stopped or PlaybackState.Completed)
             {
-                ActivePitches.Clear();
+                ResetKeyboardHighlight();
             }
         });
     }
@@ -268,9 +404,18 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
     {
         Application.Current?.Dispatcher?.InvokeAsync(() =>
         {
-            CurrentTime = prog.CurrentTime;
-            FormattedCurrentTime = FormatDuration(prog.CurrentTime);
-            FormattedTotalTime = $"/ {FormatDuration(prog.TotalTime)}";
+            _isUpdatingProgressFromScheduler = true;
+            try
+            {
+                CurrentTime = prog.CurrentTime;
+                PlayheadCanvasLeft = prog.CurrentTime * PixelsPerSecond;
+                FormattedCurrentTime = FormatDuration(prog.CurrentTime);
+                FormattedTotalTime = $"/ {FormatDuration(prog.TotalTime)}";
+            }
+            finally
+            {
+                _isUpdatingProgressFromScheduler = false;
+            }
         });
     }
 
@@ -283,16 +428,49 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
         });
     }
 
+    private void OnSchedulerChordStarted(object? sender, IReadOnlyList<NoteEvent> notes)
+    {
+        Application.Current?.Dispatcher?.InvokeAsync(() =>
+        {
+            HighlightNotes(notes);
+        });
+    }
+
     private void OnSchedulerChordPlayed(object? sender, IReadOnlyList<NoteEvent> notes)
     {
         Application.Current?.Dispatcher?.InvokeAsync(() =>
         {
-            ActivePitches.Clear();
-            foreach (var n in notes)
-            {
-                ActivePitches.Add(n.Pitch + SelectedTranspose);
-            }
+            HighlightNotes(notes);
         });
+    }
+
+    private void OnSchedulerChordEnded(object? sender, ChordPlaybackResult result)
+    {
+        Application.Current?.Dispatcher?.InvokeAsync(() =>
+        {
+            ResetKeyboardHighlight();
+        });
+    }
+
+    private void HighlightNotes(IReadOnlyList<NoteEvent> notes)
+    {
+        ResetKeyboardHighlight();
+        foreach (var n in notes)
+        {
+            int p = n.Pitch + SelectedTranspose;
+            if (_keyLookup.TryGetValue(p, out var keyVm))
+            {
+                keyVm.IsActive = true;
+            }
+        }
+    }
+
+    private void ResetKeyboardHighlight()
+    {
+        foreach (var key in PianoKeys)
+        {
+            key.IsActive = false;
+        }
     }
 
     private void OnSchedulerPlaybackError(object? sender, Exception ex)
@@ -303,6 +481,7 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
             IsPlaying = false;
             IsPaused = false;
             IsCountdown = false;
+            ResetKeyboardHighlight();
         });
     }
 
@@ -321,11 +500,28 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
         return $"{noteNames[noteIndex]}{octave}";
     }
 
+    private void ThrowIfDisposed()
+    {
+        if (_disposed)
+        {
+            throw new ObjectDisposedException(nameof(PlayerViewModel));
+        }
+    }
+
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
+
+        _scheduler.StateChanged -= OnSchedulerStateChanged;
+        _scheduler.ProgressChanged -= OnSchedulerProgressChanged;
+        _scheduler.CountdownTick -= OnSchedulerCountdownTick;
+        _scheduler.ChordStarted -= OnSchedulerChordStarted;
+        _scheduler.ChordPlayed -= OnSchedulerChordPlayed;
+        _scheduler.ChordEnded -= OnSchedulerChordEnded;
+        _scheduler.PlaybackError -= OnSchedulerPlaybackError;
+
         _scheduler.Dispose();
-        _keyState.Dispose();
-        _pedal.Dispose();
         _backend.Dispose();
     }
 }

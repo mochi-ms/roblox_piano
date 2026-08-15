@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
@@ -17,6 +18,25 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         SourceInitialized += OnSourceInitialized;
+        Closing += OnClosing;
+        Closed += OnClosed;
+    }
+
+    private void OnClosing(object? sender, CancelEventArgs e)
+    {
+        // Immediately stop playback and release all keys as soon as shutdown begins
+        if (DataContext is IDisposable disposable)
+        {
+            disposable.Dispose();
+        }
+    }
+
+    private void OnClosed(object? sender, EventArgs e)
+    {
+        if (DataContext is IDisposable disposable)
+        {
+            disposable.Dispose();
+        }
     }
 
     private void OnSourceInitialized(object? sender, EventArgs e)

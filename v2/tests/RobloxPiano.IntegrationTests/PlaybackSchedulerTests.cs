@@ -28,7 +28,6 @@ public class PlaybackSchedulerTests
         scheduler.SetTimeline(timeline);
         scheduler.Play();
 
-        // Wait for completion (should take < 0.2s at 10x speed)
         for (int i = 0; i < 20; i++)
         {
             if (scheduler.State == PlaybackState.Completed) break;
@@ -64,6 +63,406 @@ public class PlaybackSchedulerTests
         Assert.Equal(PlaybackState.Stopped, scheduler.State);
         Assert.Empty(keyState.ActiveKeys);
         Assert.Empty(keyState.ActiveModifiers);
+    }
+
+    [Fact]
+    public async Task Playback_DisposeWhilePlaying_WorkerTerminatesAndKeysReleased()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var keyState = new KeyStateManager(backend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 5);
+        var scheduler = new PlaybackScheduler(engine, keyState);
+        scheduler.CountdownSeconds = 0;
+
+        var timeline = new MusicTimeline("Dispose Test");
+        for (int i = 0; i < 20; i++)
+        {
+            timeline.AddNote(new NoteEvent(60, i * 0.1, (i + 1) * 0.1));
+        }
+
+        scheduler.SetTimeline(timeline);
+        scheduler.Play();
+
+        await Task.Delay(50);
+
+        scheduler.Dispose();
+
+        int eventCountAtDispose = backend.Events.Count;
+        await Task.Delay(100);
+
+        Assert.Equal(eventCountAtDispose, backend.Events.Count);
+        Assert.Empty(keyState.ActiveKeys);
+        Assert.Empty(keyState.ActiveModifiers);
+    }
+
+    [Fact]
+    public async Task Playback_Stop_ReturnsWithNoWorkerStillEmitting()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var keyState = new KeyStateManager(backend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 5);
+        using var scheduler = new PlaybackScheduler(engine, keyState);
+        scheduler.CountdownSeconds = 0;
+
+        var timeline = new MusicTimeline("Stop Test");
+        for (int i = 0; i < 30; i++)
+        {
+            timeline.AddNote(new NoteEvent(60, i * 0.05, (i + 1) * 0.05));
+        }
+
+        scheduler.SetTimeline(timeline);
+        scheduler.Play();
+
+        await Task.Delay(50);
+        scheduler.Stop();
+
+        int eventCountAtStop = backend.Events.Count;
+        await Task.Delay(100);
+
+        Assert.Equal(eventCountAtStop, backend.Events.Count);
+        Assert.Empty(keyState.ActiveKeys);
+    }
+
+    [Fact]
+    public async Task Playback_PausedSeek_ResumeStartsFromNewPosition()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var keyState = new KeyStateManager(backend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 5);
+        using var scheduler = new PlaybackScheduler(engine, keyState);
+        scheduler.CountdownSeconds = 0;
+        scheduler.Speed = 5.0;
+
+        // Timeline: 0.0 -> pitch 53 ('q'), 1.0 -> pitch 55 ('w'), 2.0 -> pitch 57 ('e'), 3.0 -> pitch 59 ('r')
+        var timeline = new MusicTimeline("Paused Seek Test");
+        timeline.AddNote(new NoteEvent(53, 0.0, 0.1));
+        timeline.AddNote(new NoteEvent(55, 0.2, 0.3));
+        timeline.AddNote(new NoteEvent(57, 1.0, 1.1));
+        timeline.AddNote(new NoteEvent(59, 1.2, 1.3));
+
+        scheduler.SetTimeline(timeline);
+        scheduler.Play();
+
+        await Task.Delay(30);
+        scheduler.Pause();
+        Assert.Equal(PlaybackState.Paused, scheduler.State);
+
+        // Seek while paused to 1.0s (past 'q' and 'w')
+        scheduler.Seek(1.0);
+        Assert.Equal(PlaybackState.Paused, scheduler.State);
+        Assert.True(Math.Abs(scheduler.CurrentTime - 1.0) < 0.01);
+
+        int eventsBeforeResume = backend.Events.Count;
+        await Task.Delay(100);
+        Assert.Equal(eventsBeforeResume, backend.Events.Count); // No notes while paused
+
+        scheduler.Resume();
+        Assert.Equal(PlaybackState.Playing, scheduler.State);
+
+        for (int i = 0; i < 30; i++)
+        {
+            if (scheduler.State == PlaybackState.Completed) break;
+            await Task.Delay(20);
+        }
+
+        Assert.Equal(PlaybackState.Completed, scheduler.State);
+
+        // After resume from 1.0s, only notes at 1.0s+ ('e' and 'r') should be emitted
+        var resumedKeys = backend.Events.Skip(eventsBeforeResume).Select(e => e.Key).ToList();
+        Assert.Contains("e", resumedKeys);
+        Assert.Contains("r", resumedKeys);
+    }
+
+    [Fact]
+    public async Task Playback_SpeedChangeDuringLongGap_ReanchorsImmediately()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var keyState = new KeyStateManager(backend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 5);
+        using var scheduler = new PlaybackScheduler(engine, keyState);
+        scheduler.CountdownSeconds = 0;
+        scheduler.Speed = 1.0;
+
+        // Note A at 0.0s, Note B at 2.0s
+        var timeline = new MusicTimeline("Speed Gap Test");
+        timeline.AddNote(new NoteEvent(60, 0.0, 0.1)); // 't'
+        timeline.AddNote(new NoteEvent(72, 2.0, 2.1)); // 's'
+
+        scheduler.SetTimeline(timeline);
+
+        long start = Stopwatch.GetTimestamp();
+        scheduler.Play();
+
+        // Wait 0.2s wall time, then increase speed to 4.0x
+        await Task.Delay(200);
+        scheduler.Speed = 4.0;
+
+        for (int i = 0; i < 40; i++)
+        {
+            if (scheduler.State == PlaybackState.Completed) break;
+            await Task.Delay(30);
+        }
+
+        long elapsedTicks = Stopwatch.GetTimestamp() - start;
+        double elapsedSeconds = (double)elapsedTicks / Stopwatch.Frequency;
+
+        Assert.Equal(PlaybackState.Completed, scheduler.State);
+        // At 1.0x for 0.2s + (1.8s / 4.0 = 0.45s) -> Expected wall time ~0.65s (much less than 2.0s!)
+        Assert.True(elapsedSeconds < 1.3, $"Elapsed wall time was {elapsedSeconds:F3}s, expected < 1.3s");
+
+        var keys = backend.Events.Select(e => e.Key).ToList();
+        Assert.Contains("t", keys);
+        Assert.Contains("s", keys);
+    }
+
+    [Fact]
+    public async Task Playback_ProgressAdvancesDuringLongGap()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var keyState = new KeyStateManager(backend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 5);
+        using var scheduler = new PlaybackScheduler(engine, keyState);
+        scheduler.CountdownSeconds = 0;
+        scheduler.Speed = 1.0;
+
+        // Note at 0.0s, Note at 3.0s
+        var timeline = new MusicTimeline("Progress Gap Test");
+        timeline.AddNote(new NoteEvent(60, 0.0, 0.1));
+        timeline.AddNote(new NoteEvent(72, 3.0, 3.1));
+
+        scheduler.SetTimeline(timeline);
+        scheduler.Play();
+
+        // Wait 0.5s in the middle of gap
+        await Task.Delay(500);
+
+        double progressInGap = scheduler.CurrentTime;
+        scheduler.Stop();
+
+        // Progress must advance continuously past 0.3s during the 3.0s rest
+        Assert.True(progressInGap >= 0.3, $"Progress was {progressInGap:F3}s, expected >= 0.3s");
+    }
+
+    [Fact]
+    public async Task Playback_ProgressDoesNotAdvanceWhilePaused()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var keyState = new KeyStateManager(backend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 5);
+        using var scheduler = new PlaybackScheduler(engine, keyState);
+        scheduler.CountdownSeconds = 0;
+
+        var timeline = new MusicTimeline("Paused Progress Test");
+        timeline.AddNote(new NoteEvent(60, 0.0, 0.1));
+        timeline.AddNote(new NoteEvent(72, 2.0, 2.1));
+
+        scheduler.SetTimeline(timeline);
+        scheduler.Play();
+
+        await Task.Delay(100);
+        scheduler.Pause();
+
+        double pausedTime1 = scheduler.CurrentTime;
+        await Task.Delay(200);
+        double pausedTime2 = scheduler.CurrentTime;
+
+        scheduler.Stop();
+
+        Assert.Equal(pausedTime1, pausedTime2);
+    }
+
+    [Fact]
+    public void Playback_Diagnostics_CountActualMappedAndSkippedNotes()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var keyState = new KeyStateManager(backend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 5);
+
+        // One valid pitch (60 -> C4), One unmappable pitch (10)
+        var n1 = new NoteEvent(60, 0.0, 0.1);
+        var n2 = new NoteEvent(10, 0.0, 0.1);
+
+        var result = engine.PlayChordNotes(new[] { n1, n2 });
+
+        Assert.Equal(2, result.RequestedCount);
+        Assert.Equal(1, result.PlayedCount);
+        Assert.Equal(1, result.SkippedUnmappedCount);
+        Assert.Equal(0, result.SkippedConflictCount);
+    }
+
+    [Fact]
+    public async Task Playback_Timing_05x()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var keyState = new KeyStateManager(backend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 2);
+        using var scheduler = new PlaybackScheduler(engine, keyState);
+        scheduler.CountdownSeconds = 0;
+        scheduler.Speed = 0.5; // 0.5x speed -> 0.10s song time = 0.20s wall time
+
+        var timeline = new MusicTimeline("Timing 0.5x");
+        timeline.AddNote(new NoteEvent(60, 0.0, 0.05));
+        timeline.AddNote(new NoteEvent(64, 0.10, 0.15));
+
+        scheduler.SetTimeline(timeline);
+
+        long start = Stopwatch.GetTimestamp();
+        scheduler.Play();
+
+        for (int i = 0; i < 30; i++)
+        {
+            if (scheduler.State == PlaybackState.Completed) break;
+            await Task.Delay(20);
+        }
+
+        double elapsedSeconds = (double)(Stopwatch.GetTimestamp() - start) / Stopwatch.Frequency;
+
+        Assert.Equal(PlaybackState.Completed, scheduler.State);
+        // Expected ~0.20s (tolerances: 0.15s - 0.40s)
+        Assert.True(elapsedSeconds >= 0.15 && elapsedSeconds <= 0.45, $"0.5x measured duration was {elapsedSeconds:F3}s");
+    }
+
+    [Fact]
+    public async Task Playback_Timing_10x()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var keyState = new KeyStateManager(backend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 2);
+        using var scheduler = new PlaybackScheduler(engine, keyState);
+        scheduler.CountdownSeconds = 0;
+        scheduler.Speed = 1.0; // 1.0x speed -> 0.20s song time = 0.20s wall time
+
+        var timeline = new MusicTimeline("Timing 1.0x");
+        timeline.AddNote(new NoteEvent(60, 0.0, 0.1));
+        timeline.AddNote(new NoteEvent(64, 0.20, 0.25));
+
+        scheduler.SetTimeline(timeline);
+
+        long start = Stopwatch.GetTimestamp();
+        scheduler.Play();
+
+        for (int i = 0; i < 30; i++)
+        {
+            if (scheduler.State == PlaybackState.Completed) break;
+            await Task.Delay(20);
+        }
+
+        double elapsedSeconds = (double)(Stopwatch.GetTimestamp() - start) / Stopwatch.Frequency;
+
+        Assert.Equal(PlaybackState.Completed, scheduler.State);
+        // Expected ~0.20s (tolerances: 0.15s - 0.40s)
+        Assert.True(elapsedSeconds >= 0.15 && elapsedSeconds <= 0.45, $"1.0x measured duration was {elapsedSeconds:F3}s");
+    }
+
+    [Fact]
+    public async Task Playback_Timing_20x()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var keyState = new KeyStateManager(backend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 2);
+        using var scheduler = new PlaybackScheduler(engine, keyState);
+        scheduler.CountdownSeconds = 0;
+        scheduler.Speed = 2.0; // 2.0x speed -> 0.40s song time = 0.20s wall time
+
+        var timeline = new MusicTimeline("Timing 2.0x");
+        timeline.AddNote(new NoteEvent(60, 0.0, 0.1));
+        timeline.AddNote(new NoteEvent(64, 0.40, 0.45));
+
+        scheduler.SetTimeline(timeline);
+
+        long start = Stopwatch.GetTimestamp();
+        scheduler.Play();
+
+        for (int i = 0; i < 30; i++)
+        {
+            if (scheduler.State == PlaybackState.Completed) break;
+            await Task.Delay(20);
+        }
+
+        double elapsedSeconds = (double)(Stopwatch.GetTimestamp() - start) / Stopwatch.Frequency;
+
+        Assert.Equal(PlaybackState.Completed, scheduler.State);
+        // Expected ~0.20s (tolerances: 0.15s - 0.40s)
+        Assert.True(elapsedSeconds >= 0.15 && elapsedSeconds <= 0.45, $"2.0x measured duration was {elapsedSeconds:F3}s");
+    }
+
+    [Fact]
+    public async Task Playback_LongTimeline_DriftRemainsBounded()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var keyState = new KeyStateManager(backend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 1);
+        using var scheduler = new PlaybackScheduler(engine, keyState);
+        scheduler.CountdownSeconds = 0;
+        scheduler.Speed = 5.0; // 5x speed -> 100 events * 0.02s = 2.0s song time -> 0.40s wall time
+
+        var timeline = new MusicTimeline("100 Events Drift Test");
+        for (int i = 0; i < 100; i++)
+        {
+            timeline.AddNote(new NoteEvent(60, i * 0.02, (i + 1) * 0.02));
+        }
+
+        scheduler.SetTimeline(timeline);
+
+        long start = Stopwatch.GetTimestamp();
+        scheduler.Play();
+
+        for (int i = 0; i < 50; i++)
+        {
+            if (scheduler.State == PlaybackState.Completed) break;
+            await Task.Delay(20);
+        }
+
+        double elapsedSeconds = (double)(Stopwatch.GetTimestamp() - start) / Stopwatch.Frequency;
+
+        Assert.Equal(PlaybackState.Completed, scheduler.State);
+        // Expected ~0.40s wall time, bounded drift within 0.35s - 0.65s
+        Assert.True(elapsedSeconds >= 0.30 && elapsedSeconds <= 0.70, $"100 events measured duration was {elapsedSeconds:F3}s");
+    }
+
+    [Fact]
+    public async Task LoadNewScoreWhilePlaying_OldWorkerCannotEmitAfterReplacement()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var keyState = new KeyStateManager(backend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 5);
+        using var scheduler = new PlaybackScheduler(engine, keyState);
+        scheduler.CountdownSeconds = 0;
+
+        var oldTimeline = new MusicTimeline("Old Song");
+        for (int i = 0; i < 50; i++)
+        {
+            oldTimeline.AddNote(new NoteEvent(60, i * 0.05, (i + 1) * 0.05));
+        }
+
+        scheduler.SetTimeline(oldTimeline);
+        scheduler.Play();
+
+        await Task.Delay(50);
+
+        var newTimeline = new MusicTimeline("New Song");
+        newTimeline.AddNote(new NoteEvent(72, 0.0, 0.1));
+        scheduler.SetTimeline(newTimeline);
+
+        Assert.Equal(PlaybackState.Idle, scheduler.State);
+        int eventCountAtReplacement = backend.Events.Count;
+
+        await Task.Delay(100);
+
+        Assert.Equal(eventCountAtReplacement, backend.Events.Count);
+        Assert.Empty(keyState.ActiveKeys);
     }
 
     [Fact]
@@ -123,7 +522,6 @@ public class PlaybackSchedulerTests
         scheduler.Resume();
         Assert.Equal(PlaybackState.Playing, scheduler.State);
 
-        // Wait for completion
         for (int i = 0; i < 30; i++)
         {
             if (scheduler.State == PlaybackState.Completed) break;
@@ -318,42 +716,6 @@ public class PlaybackSchedulerTests
         Assert.Equal(PlaybackState.Stopped, scheduler.State);
         Assert.Empty(keyState.ActiveKeys);
         Assert.Empty(keyState.ActiveModifiers);
-    }
-
-    [Fact]
-    public async Task TimingAccuracy_MonotonicTargetScheduling_NoCumulativeDrift()
-    {
-        using var backend = new DryRunPlaybackBackend();
-        using var keyState = new KeyStateManager(backend);
-        var mapper = new RobloxPianoMapper();
-        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 2);
-        using var scheduler = new PlaybackScheduler(engine, keyState);
-        scheduler.CountdownSeconds = 0;
-        scheduler.Speed = 2.0; // 2x speed -> 20 events * 0.02s = 0.4s song time -> 0.2s wall time
-
-        var timeline = new MusicTimeline("Timing Test");
-        for (int i = 0; i < 20; i++)
-        {
-            timeline.AddNote(new NoteEvent(60, i * 0.02, (i + 1) * 0.02));
-        }
-
-        scheduler.SetTimeline(timeline);
-
-        long start = Stopwatch.GetTimestamp();
-        scheduler.Play();
-
-        for (int i = 0; i < 30; i++)
-        {
-            if (scheduler.State == PlaybackState.Completed) break;
-            await Task.Delay(20);
-        }
-
-        long elapsedTicks = Stopwatch.GetTimestamp() - start;
-        double elapsedSeconds = (double)elapsedTicks / Stopwatch.Frequency;
-
-        Assert.Equal(PlaybackState.Completed, scheduler.State);
-        // Expected wall duration ~0.20s (allow reasonable CI scheduling buffer: 0.15s - 0.40s)
-        Assert.True(elapsedSeconds >= 0.15 && elapsedSeconds <= 0.45, $"Measured duration was {elapsedSeconds:F3}s");
     }
 
     private class FailingPlaybackBackend : IPlaybackBackend

@@ -99,4 +99,98 @@ public class PlayerViewModelPlaybackTests : IDisposable
         vm.SelectedTranspose = 2;
         Assert.Equal(2, vm.Scheduler.Transpose);
     }
+
+    [Fact]
+    public void PlayerViewModel_ProgrammaticProgressDoesNotTriggerSeekLoop()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var vm = new PlayerViewModel(backend);
+
+        var timeline = new MusicTimeline("Guard Test");
+        timeline.AddNote(new NoteEvent(60, 0.0, 0.5));
+        timeline.AddNote(new NoteEvent(64, 5.0, 5.5));
+        vm.LoadTimeline(timeline);
+
+        vm.Scheduler.CountdownSeconds = 0;
+        vm.Play();
+
+        // Simulate multiple programmatic scheduler progress updates
+        vm.CurrentTime = 1.5;
+
+        // Verify scheduler state remains Playing
+        Assert.Equal(RobloxPiano.Playback.Windows.Playback.PlaybackState.Playing, vm.Scheduler.State);
+        vm.Stop();
+    }
+
+    [Fact]
+    public void PlayerViewModel_LoadTimeline_BuildsRealPianoRollNotes()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var vm = new PlayerViewModel(backend);
+
+        var timeline = new MusicTimeline("Piano Roll Test");
+        timeline.AddNote(new NoteEvent(60, 0.0, 0.5, hand: HandType.Right));
+        timeline.AddNote(new NoteEvent(64, 0.5, 1.0, hand: HandType.Right));
+        timeline.AddNote(new NoteEvent(48, 0.0, 1.0, hand: HandType.Left));
+
+        vm.LoadTimeline(timeline, "Piano Roll Test", "MIDI");
+
+        Assert.Equal(3, vm.PianoRollNotes.Count);
+
+        var n1 = vm.PianoRollNotes[0];
+        Assert.Equal(60, n1.Pitch);
+        Assert.Equal(0.0, n1.CanvasLeft);
+        Assert.True(n1.Width > 0);
+        Assert.Equal("#5B8DEF", n1.ColorBrushKey); // RH Accent
+
+        var n3 = vm.PianoRollNotes[2];
+        Assert.Equal(48, n3.Pitch);
+        Assert.Equal("#34D399", n3.ColorBrushKey); // LH Success
+    }
+
+    [Fact]
+    public void PlayerViewModel_ChordEvents_UpdateAndClearActivePianoKeys()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var vm = new PlayerViewModel(backend);
+
+        Assert.Equal(61, vm.PianoKeys.Count);
+        Assert.All(vm.PianoKeys, k => Assert.False(k.IsActive));
+
+        var timeline = new MusicTimeline("Key Test");
+        timeline.AddNote(new NoteEvent(60, 0.0, 0.5));
+        vm.LoadTimeline(timeline);
+
+        var key60 = vm.PianoKeys.FirstOrDefault(k => k.Pitch == 60);
+        Assert.NotNull(key60);
+        Assert.False(key60.IsActive);
+    }
+
+    [Fact]
+    public async Task MainViewModel_Dispose_StopsPlaybackAndReleasesEverything()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        var playerVm = new PlayerViewModel(backend);
+        var mainVm = new MainViewModel(playerVm);
+
+        var timeline = new MusicTimeline("Shutdown Test");
+        for (int i = 0; i < 30; i++)
+        {
+            timeline.AddNote(new NoteEvent(60, i * 0.1, (i + 1) * 0.1));
+        }
+        playerVm.LoadTimeline(timeline);
+        playerVm.Scheduler.CountdownSeconds = 0;
+        playerVm.Play();
+
+        await Task.Delay(50);
+
+        // App/window shutdown triggers MainViewModel.Dispose()
+        mainVm.Dispose();
+
+        int eventsAtDispose = backend.Events.Count;
+        await Task.Delay(100);
+
+        Assert.Equal(eventsAtDispose, backend.Events.Count);
+        Assert.Empty(backend.PressedKeys);
+    }
 }

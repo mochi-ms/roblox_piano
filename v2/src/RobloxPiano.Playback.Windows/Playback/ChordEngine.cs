@@ -36,7 +36,7 @@ public class ChordEngine
         _randomizationMs = randomizationMs;
     }
 
-    public void PlayChordNotes(
+    public ChordPlaybackResult PlayChordNotes(
         IReadOnlyList<NoteEvent> notes,
         double? holdDurationMs = null,
         int transpose = 0,
@@ -44,14 +44,17 @@ public class ChordEngine
     {
         if (notes == null || notes.Count == 0 || ct.IsCancellationRequested)
         {
-            return;
+            return new ChordPlaybackResult(notes?.Count ?? 0, 0, 0, 0, Array.Empty<int>());
         }
 
+        int requestedCount = notes.Count;
         double holdMs = holdDurationMs ?? _defaultHoldDurationMs;
         if (holdMs < 1.0) holdMs = 1.0;
 
         // 1. Map notes to physical keys with transpose
         var mappedKeys = new List<(NoteEvent Note, KeyMapping Mapping)>();
+        int skippedUnmapped = 0;
+
         foreach (var n in notes)
         {
             int effectivePitch = n.Pitch + transpose;
@@ -60,11 +63,15 @@ public class ChordEngine
             {
                 mappedKeys.Add((n, km));
             }
+            else
+            {
+                skippedUnmapped++;
+            }
         }
 
         if (mappedKeys.Count == 0)
         {
-            return;
+            return new ChordPlaybackResult(requestedCount, 0, skippedUnmapped, 0, Array.Empty<int>());
         }
 
         // 2. Check for same physical key conflicts
@@ -81,6 +88,7 @@ public class ChordEngine
         }
 
         bool hasPhysicalConflicts = physicalKeyMap.Values.Any(list => list.Count > 1);
+        int skippedConflicts = 0;
 
         if (hasPhysicalConflicts && _conflictPolicy == ConflictPolicy.SkipConflicted)
         {
@@ -95,9 +103,15 @@ public class ChordEngine
                 {
                     filteredMapped.Add(item);
                 }
+                else
+                {
+                    skippedConflicts++;
+                }
             }
             mappedKeys = filteredMapped;
         }
+
+        var playedPitches = mappedKeys.Select(m => m.Note.Pitch + transpose).ToList();
 
         // 3. Group by modifier sets
         var modifierGroups = new Dictionary<string, (IReadOnlySet<string> Modifiers, List<KeyMapping> Keys)>();
@@ -198,6 +212,14 @@ public class ChordEngine
                 _keyState.SetModifier(mod, false);
             }
         }
+
+        return new ChordPlaybackResult(
+            requestedCount,
+            mappedKeys.Count,
+            skippedUnmapped,
+            skippedConflicts,
+            playedPitches
+        );
     }
 
     private static void PreciseDelay(double milliseconds, CancellationToken ct)
