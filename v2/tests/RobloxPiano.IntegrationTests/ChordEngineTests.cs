@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using RobloxPiano.Core.Music;
 using RobloxPiano.Core.Piano;
 using RobloxPiano.Playback.Windows.Input;
@@ -143,5 +144,124 @@ public class ChordEngineTests
 
         Assert.Empty(backend.Events);
         Assert.Empty(keyState.ActiveKeys);
+    }
+
+    [Fact]
+    public void ChordEngine_CancelMidChord_StopsFurtherKeyDownAndReleasesAll()
+    {
+        var cts = new CancellationTokenSource();
+        var hookBackend = new ActionHookPlaybackBackend(onKeyDown: (key) =>
+        {
+            // Cancel token immediately upon first KeyDown
+            cts.Cancel();
+        });
+
+        using var keyState = new KeyStateManager(hookBackend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 50);
+
+        // Multi-note chord: F3 (53 -> 'q'), G3 (55 -> 'w'), A3 (57 -> 'e')
+        var n1 = new NoteEvent(53, 0.0, 0.1);
+        var n2 = new NoteEvent(55, 0.0, 0.1);
+        var n3 = new NoteEvent(57, 0.0, 0.1);
+
+        Assert.Throws<OperationCanceledException>(() =>
+        {
+            engine.PlayChordNotes(new[] { n1, n2, n3 }, ct: cts.Token);
+        });
+
+        var actions = hookBackend.Events.Select(e => (e.Action, e.Key)).ToList();
+        int keyDownCount = actions.Count(a => a.Action == BackendAction.KeyDown);
+
+        // Only the first key was pressed before cancellation stopped further KeyDown
+        Assert.Equal(1, keyDownCount);
+        Assert.Empty(keyState.ActiveKeys);
+        Assert.Empty(keyState.ActiveModifiers);
+    }
+
+    [Fact]
+    public void ChordEngine_CancelAfterModifierDown_ReleasesModifier()
+    {
+        var cts = new CancellationTokenSource();
+        var hookBackend = new ActionHookPlaybackBackend(onKeyDown: (key) =>
+        {
+            if (string.Equals(key, "shift", StringComparison.OrdinalIgnoreCase))
+            {
+                cts.Cancel();
+            }
+        });
+
+        using var keyState = new KeyStateManager(hookBackend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 50);
+
+        // Shifted note: G#3 (56 -> 'W' -> Shift + w)
+        var n = new NoteEvent(56, 0.0, 0.1);
+
+        Assert.Throws<OperationCanceledException>(() =>
+        {
+            engine.PlayChordNotes(new[] { n }, ct: cts.Token);
+        });
+
+        var actions = hookBackend.Events.Select(e => (e.Action, e.Key)).ToList();
+        Assert.Contains((BackendAction.KeyDown, "shift"), actions);
+        Assert.Contains((BackendAction.KeyUp, "shift"), actions);
+
+        Assert.Empty(keyState.ActiveModifiers);
+        Assert.Empty(keyState.ActiveKeys);
+    }
+
+    [Fact]
+    public void ChordEngine_LongHold_CancellationInterruptsImmediately()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var keyState = new KeyStateManager(backend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper);
+
+        var cts = new CancellationTokenSource();
+        var n = new NoteEvent(60, 0.0, 1.0);
+
+        // Cancel after 30ms
+        cts.CancelAfter(30);
+
+        long start = Stopwatch.GetTimestamp();
+
+        Assert.Throws<OperationCanceledException>(() =>
+        {
+            engine.PlayChordNotes(new[] { n }, holdDurationMs: 1000, ct: cts.Token);
+        });
+
+        double elapsedSeconds = (double)(Stopwatch.GetTimestamp() - start) / Stopwatch.Frequency;
+
+        // Must exit promptly (< 200ms) rather than waiting out the full 1000ms
+        Assert.True(elapsedSeconds < 0.20, $"Elapsed was {elapsedSeconds:F3}s, expected < 0.20s");
+        Assert.Empty(keyState.ActiveKeys);
+    }
+
+    private class ActionHookPlaybackBackend : IPlaybackBackend
+    {
+        private readonly Action<string>? _onKeyDown;
+        public List<PlaybackBackendEvent> Events { get; } = new();
+
+        public ActionHookPlaybackBackend(Action<string>? onKeyDown = null)
+        {
+            _onKeyDown = onKeyDown;
+        }
+
+        public void KeyDown(string key)
+        {
+            Events.Add(new PlaybackBackendEvent(Stopwatch.GetTimestamp(), BackendAction.KeyDown, key));
+            _onKeyDown?.Invoke(key);
+        }
+
+        public void KeyUp(string key)
+        {
+            Events.Add(new PlaybackBackendEvent(Stopwatch.GetTimestamp(), BackendAction.KeyUp, key));
+        }
+
+        public void ReleaseAll() { }
+
+        public void Dispose() { }
     }
 }

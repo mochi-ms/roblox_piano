@@ -101,28 +101,6 @@ public class PlayerViewModelPlaybackTests : IDisposable
     }
 
     [Fact]
-    public void PlayerViewModel_ProgrammaticProgressDoesNotTriggerSeekLoop()
-    {
-        using var backend = new DryRunPlaybackBackend();
-        using var vm = new PlayerViewModel(backend);
-
-        var timeline = new MusicTimeline("Guard Test");
-        timeline.AddNote(new NoteEvent(60, 0.0, 0.5));
-        timeline.AddNote(new NoteEvent(64, 5.0, 5.5));
-        vm.LoadTimeline(timeline);
-
-        vm.Scheduler.CountdownSeconds = 0;
-        vm.Play();
-
-        // Simulate multiple programmatic scheduler progress updates
-        vm.CurrentTime = 1.5;
-
-        // Verify scheduler state remains Playing
-        Assert.Equal(RobloxPiano.Playback.Windows.Playback.PlaybackState.Playing, vm.Scheduler.State);
-        vm.Stop();
-    }
-
-    [Fact]
     public void PlayerViewModel_LoadTimeline_BuildsRealPianoRollNotes()
     {
         using var backend = new DryRunPlaybackBackend();
@@ -149,25 +127,106 @@ public class PlayerViewModelPlaybackTests : IDisposable
     }
 
     [Fact]
-    public void PlayerViewModel_ChordEvents_UpdateAndClearActivePianoKeys()
+    public async Task PlayerViewModel_RealChordLifecycle_ActivatesAndClearsPianoKey()
     {
         using var backend = new DryRunPlaybackBackend();
         using var vm = new PlayerViewModel(backend);
 
-        Assert.Equal(61, vm.PianoKeys.Count);
-        Assert.All(vm.PianoKeys, k => Assert.False(k.IsActive));
+        var timeline = new MusicTimeline("Key Activation Test");
+        timeline.AddNote(new NoteEvent(60, 0.0, 0.15));
 
-        var timeline = new MusicTimeline("Key Test");
-        timeline.AddNote(new NoteEvent(60, 0.0, 0.5));
         vm.LoadTimeline(timeline);
+        vm.Scheduler.CountdownSeconds = 0;
 
-        var key60 = vm.PianoKeys.FirstOrDefault(k => k.Pitch == 60);
-        Assert.NotNull(key60);
+        var key60 = vm.PianoKeys.First(k => k.Pitch == 60);
         Assert.False(key60.IsActive);
+
+        bool wasActiveDuringChord = false;
+        vm.Scheduler.ChordStarted += (_, notes) =>
+        {
+            if (notes.Any(n => n.Pitch == 60))
+            {
+                wasActiveDuringChord = key60.IsActive;
+            }
+        };
+
+        vm.Play();
+
+        for (int i = 0; i < 30; i++)
+        {
+            if (vm.Scheduler.State == RobloxPiano.Playback.Windows.Playback.PlaybackState.Completed) break;
+            if (key60.IsActive) wasActiveDuringChord = true;
+            await Task.Delay(15);
+        }
+
+        Assert.True(wasActiveDuringChord, "Key 60 should have been active during chord execution");
+        Assert.False(key60.IsActive, "Key 60 must be cleared after chord completion");
     }
 
     [Fact]
-    public async Task MainViewModel_Dispose_StopsPlaybackAndReleasesEverything()
+    public async Task PlayerViewModel_TransposedChordLifecycle_ActivatesTransposedPianoKey()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var vm = new PlayerViewModel(backend);
+
+        var timeline = new MusicTimeline("Transpose Key Test");
+        timeline.AddNote(new NoteEvent(60, 0.0, 0.15)); // Pitch 60 + transpose 12 -> Pitch 72
+
+        vm.LoadTimeline(timeline);
+        vm.SelectedTranspose = 12;
+        vm.Scheduler.CountdownSeconds = 0;
+
+        var key60 = vm.PianoKeys.First(k => k.Pitch == 60);
+        var key72 = vm.PianoKeys.First(k => k.Pitch == 72);
+
+        bool was72Active = false;
+        bool was60Active = false;
+
+        vm.Play();
+
+        for (int i = 0; i < 30; i++)
+        {
+            if (vm.Scheduler.State == RobloxPiano.Playback.Windows.Playback.PlaybackState.Completed) break;
+            if (key72.IsActive) was72Active = true;
+            if (key60.IsActive) was60Active = true;
+            await Task.Delay(15);
+        }
+
+        Assert.True(was72Active, "Transposed key 72 should have been active");
+        Assert.False(was60Active, "Untransposed key 60 must not be active");
+    }
+
+    [Fact]
+    public async Task PlayerViewModel_ActualSchedulerProgressDoesNotCauseSeekFeedback()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var vm = new PlayerViewModel(backend);
+
+        var timeline = new MusicTimeline("Progress Feedback Test");
+        timeline.AddNote(new NoteEvent(60, 0.0, 0.2));
+        timeline.AddNote(new NoteEvent(64, 0.4, 0.6));
+
+        vm.LoadTimeline(timeline);
+        vm.Scheduler.CountdownSeconds = 0;
+
+        int initialSeekCount = vm.Scheduler.SeekInvocationCount;
+        vm.Play();
+
+        // Allow real progress events to fire
+        await Task.Delay(150);
+
+        // Scheduler progress events must NOT have invoked Seek on scheduler
+        Assert.Equal(initialSeekCount, vm.Scheduler.SeekInvocationCount);
+
+        // Manually invoke user seek
+        vm.Seek(0.1);
+        Assert.Equal(initialSeekCount + 1, vm.Scheduler.SeekInvocationCount);
+
+        vm.Stop();
+    }
+
+    [Fact]
+    public async Task MainViewModel_Shutdown_FullyTerminatesPlaybackWorker()
     {
         using var backend = new DryRunPlaybackBackend();
         var playerVm = new PlayerViewModel(backend);
@@ -184,9 +243,10 @@ public class PlayerViewModelPlaybackTests : IDisposable
 
         await Task.Delay(50);
 
-        // App/window shutdown triggers MainViewModel.Dispose()
+        // Window / App shutdown triggers MainViewModel.Dispose()
         mainVm.Dispose();
 
+        Assert.False(playerVm.Scheduler.HasActiveWorker);
         int eventsAtDispose = backend.Events.Count;
         await Task.Delay(100);
 

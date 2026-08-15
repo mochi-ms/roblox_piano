@@ -11,4 +11,8 @@
     <ProjectReference Include="..\RobloxPiano.Core\RobloxPiano.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="RobloxPiano.IntegrationTests" />
+  </ItemGroup>
+
 </Project>

@@ -121,7 +121,6 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
         _scheduler.ProgressChanged += OnSchedulerProgressChanged;
         _scheduler.CountdownTick += OnSchedulerCountdownTick;
         _scheduler.ChordStarted += OnSchedulerChordStarted;
-        _scheduler.ChordPlayed += OnSchedulerChordPlayed;
         _scheduler.ChordEnded += OnSchedulerChordEnded;
         _scheduler.PlaybackError += OnSchedulerPlaybackError;
 
@@ -374,9 +373,22 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
         PlayheadCanvasLeft = targetSeconds * PixelsPerSecond;
     }
 
+    private static void PostToDispatcherOrDirect(Action action)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher != null && !dispatcher.CheckAccess())
+        {
+            dispatcher.InvokeAsync(action);
+        }
+        else
+        {
+            action();
+        }
+    }
+
     private void OnSchedulerStateChanged(object? sender, PlaybackState state)
     {
-        Application.Current?.Dispatcher?.InvokeAsync(() =>
+        PostToDispatcherOrDirect(() =>
         {
             IsPlaying = (state == PlaybackState.Playing);
             IsPaused = (state == PlaybackState.Paused);
@@ -402,7 +414,7 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
 
     private void OnSchedulerProgressChanged(object? sender, PlaybackProgress prog)
     {
-        Application.Current?.Dispatcher?.InvokeAsync(() =>
+        PostToDispatcherOrDirect(() =>
         {
             _isUpdatingProgressFromScheduler = true;
             try
@@ -421,7 +433,7 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
 
     private void OnSchedulerCountdownTick(object? sender, int tick)
     {
-        Application.Current?.Dispatcher?.InvokeAsync(() =>
+        PostToDispatcherOrDirect(() =>
         {
             CountdownValue = tick;
             StatusText = $"{tick}초 후 시작";
@@ -430,15 +442,7 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
 
     private void OnSchedulerChordStarted(object? sender, IReadOnlyList<NoteEvent> notes)
     {
-        Application.Current?.Dispatcher?.InvokeAsync(() =>
-        {
-            HighlightNotes(notes);
-        });
-    }
-
-    private void OnSchedulerChordPlayed(object? sender, IReadOnlyList<NoteEvent> notes)
-    {
-        Application.Current?.Dispatcher?.InvokeAsync(() =>
+        PostToDispatcherOrDirect(() =>
         {
             HighlightNotes(notes);
         });
@@ -446,7 +450,7 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
 
     private void OnSchedulerChordEnded(object? sender, ChordPlaybackResult result)
     {
-        Application.Current?.Dispatcher?.InvokeAsync(() =>
+        PostToDispatcherOrDirect(() =>
         {
             ResetKeyboardHighlight();
         });
@@ -475,7 +479,7 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
 
     private void OnSchedulerPlaybackError(object? sender, Exception ex)
     {
-        Application.Current?.Dispatcher?.InvokeAsync(() =>
+        PostToDispatcherOrDirect(() =>
         {
             StatusText = $"오류: {ex.Message}";
             IsPlaying = false;
@@ -517,7 +521,6 @@ public partial class PlayerViewModel : ObservableObject, IDisposable
         _scheduler.ProgressChanged -= OnSchedulerProgressChanged;
         _scheduler.CountdownTick -= OnSchedulerCountdownTick;
         _scheduler.ChordStarted -= OnSchedulerChordStarted;
-        _scheduler.ChordPlayed -= OnSchedulerChordPlayed;
         _scheduler.ChordEnded -= OnSchedulerChordEnded;
         _scheduler.PlaybackError -= OnSchedulerPlaybackError;
 

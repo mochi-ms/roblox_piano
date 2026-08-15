@@ -42,7 +42,9 @@ public class ChordEngine
         int transpose = 0,
         CancellationToken ct = default)
     {
-        if (notes == null || notes.Count == 0 || ct.IsCancellationRequested)
+        ct.ThrowIfCancellationRequested();
+
+        if (notes == null || notes.Count == 0)
         {
             return new ChordPlaybackResult(notes?.Count ?? 0, 0, 0, 0, Array.Empty<int>());
         }
@@ -135,82 +137,124 @@ public class ChordEngine
 
         bool isMultiGroup = sortedGroups.Count > 1 || hasPhysicalConflicts;
 
-        if (isMultiGroup)
+        // Local tracking for guaranteed balanced cleanup in try/finally
+        var locallyPressedKeys = new List<string>();
+        var locallyPressedModifiers = new List<string>();
+
+        try
         {
-            // Micro-Arpeggio execution
-            for (int i = 0; i < sortedGroups.Count; i++)
+            if (isMultiGroup)
             {
-                if (ct.IsCancellationRequested) break;
+                // Micro-Arpeggio execution
+                for (int i = 0; i < sortedGroups.Count; i++)
+                {
+                    ct.ThrowIfCancellationRequested();
 
-                var (mods, kms) = sortedGroups[i];
+                    var (mods, kms) = sortedGroups[i];
 
-                // Set modifiers for this group
+                    // Set modifiers for this group
+                    foreach (var mod in mods)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        _keyState.SetModifier(mod, true);
+                        locallyPressedModifiers.Add(mod);
+                    }
+                    if (mods.Count > 0 && _modifierSettleMs > 0)
+                    {
+                        PreciseDelay(_modifierSettleMs, ct);
+                    }
+
+                    // Press physical keys
+                    foreach (var km in kms)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        _keyState.PressPhysicalKey(km.PhysicalKey);
+                        locallyPressedKeys.Add(km.PhysicalKey);
+                    }
+
+                    // Hold duration: conflict delay for intermediate groups, full duration for the last group
+                    double delay = (i < sortedGroups.Count - 1) ? _conflictDelayMs : holdMs;
+                    PreciseDelay(delay, ct);
+
+                    // Release physical keys
+                    foreach (var km in kms)
+                    {
+                        _keyState.ReleasePhysicalKey(km.PhysicalKey);
+                        locallyPressedKeys.Remove(km.PhysicalKey);
+                    }
+
+                    // Release modifiers
+                    foreach (var mod in mods)
+                    {
+                        _keyState.SetModifier(mod, false);
+                        locallyPressedModifiers.Remove(mod);
+                    }
+                    if (mods.Count > 0 && _modifierSettleMs > 0)
+                    {
+                        PreciseDelay(_modifierSettleMs, ct);
+                    }
+                }
+            }
+            else
+            {
+                // Single modifier group standard execution
+                var (mods, kms) = sortedGroups[0];
+
                 foreach (var mod in mods)
                 {
+                    ct.ThrowIfCancellationRequested();
                     _keyState.SetModifier(mod, true);
+                    locallyPressedModifiers.Add(mod);
                 }
                 if (mods.Count > 0 && _modifierSettleMs > 0)
                 {
                     PreciseDelay(_modifierSettleMs, ct);
                 }
 
-                // Press physical keys
                 foreach (var km in kms)
                 {
+                    ct.ThrowIfCancellationRequested();
                     _keyState.PressPhysicalKey(km.PhysicalKey);
+                    locallyPressedKeys.Add(km.PhysicalKey);
                 }
 
-                // Hold duration: conflict delay for intermediate groups, full duration for the last group
-                double delay = (i < sortedGroups.Count - 1) ? _conflictDelayMs : holdMs;
-                PreciseDelay(delay, ct);
+                PreciseDelay(holdMs, ct);
 
-                // Release physical keys
                 foreach (var km in kms)
                 {
                     _keyState.ReleasePhysicalKey(km.PhysicalKey);
+                    locallyPressedKeys.Remove(km.PhysicalKey);
                 }
 
-                // Release modifiers
                 foreach (var mod in mods)
                 {
                     _keyState.SetModifier(mod, false);
-                }
-                if (mods.Count > 0 && _modifierSettleMs > 0)
-                {
-                    PreciseDelay(_modifierSettleMs, ct);
+                    locallyPressedModifiers.Remove(mod);
                 }
             }
         }
-        else
+        finally
         {
-            // Single modifier group standard execution
-            var (mods, kms) = sortedGroups[0];
-
-            foreach (var mod in mods)
+            // Defensive cleanup: always release any remaining keys/modifiers in reverse order
+            foreach (var pk in locallyPressedKeys.ToList())
             {
-                _keyState.SetModifier(mod, true);
+                try
+                {
+                    _keyState.ReleasePhysicalKey(pk);
+                }
+                catch { }
             }
-            if (mods.Count > 0 && _modifierSettleMs > 0)
-            {
-                PreciseDelay(_modifierSettleMs, ct);
-            }
+            locallyPressedKeys.Clear();
 
-            foreach (var km in kms)
+            foreach (var mod in locallyPressedModifiers.ToList())
             {
-                _keyState.PressPhysicalKey(km.PhysicalKey);
+                try
+                {
+                    _keyState.SetModifier(mod, false);
+                }
+                catch { }
             }
-
-            PreciseDelay(holdMs, ct);
-
-            foreach (var km in kms)
-            {
-                _keyState.ReleasePhysicalKey(km.PhysicalKey);
-            }
-
-            foreach (var mod in mods)
-            {
-                _keyState.SetModifier(mod, false);
-            }
+            locallyPressedModifiers.Clear();
         }
 
         return new ChordPlaybackResult(
@@ -224,30 +268,27 @@ public class ChordEngine
 
     private static void PreciseDelay(double milliseconds, CancellationToken ct)
     {
-        if (milliseconds <= 0 || ct.IsCancellationRequested) return;
+        if (milliseconds <= 0) return;
+        ct.ThrowIfCancellationRequested();
 
         long start = Stopwatch.GetTimestamp();
         long targetTicks = (long)(milliseconds * Stopwatch.Frequency / 1000.0);
 
-        if (milliseconds > 5.0)
+        if (milliseconds > 2.0)
         {
-            int sleepMs = (int)(milliseconds - 3.0);
+            int sleepMs = (int)(milliseconds - 1.5);
             if (sleepMs > 0)
             {
-                try
+                if (ct.WaitHandle.WaitOne(sleepMs))
                 {
-                    Thread.Sleep(sleepMs);
-                }
-                catch
-                {
-                    // Interrupted or canceled
+                    ct.ThrowIfCancellationRequested();
                 }
             }
         }
 
         while (Stopwatch.GetTimestamp() - start < targetTicks)
         {
-            if (ct.IsCancellationRequested) break;
+            ct.ThrowIfCancellationRequested();
             Thread.Yield();
         }
     }
