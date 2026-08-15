@@ -21,6 +21,7 @@ public class PlaybackScheduler : IDisposable, IAsyncDisposable
     private readonly ChordEngine _chordEngine;
     private readonly KeyStateManager _keyState;
     private readonly PedalController _pedal;
+    private readonly TimeSpan _workerTerminationTimeout;
 
     private MusicTimeline? _timeline;
     private PlaybackState _state = PlaybackState.Idle;
@@ -44,6 +45,7 @@ public class PlaybackScheduler : IDisposable, IAsyncDisposable
 
     private long _generationCounter;
     private PlaybackRunContext? _activeRun;
+    private PlaybackRunContext? _terminatingRun;
     private int _seekInvocationCount;
 
     private readonly object _stateLock = new();
@@ -51,7 +53,8 @@ public class PlaybackScheduler : IDisposable, IAsyncDisposable
     private readonly ManualResetEventSlim _pauseEvent = new(true);
     private readonly AutoResetEvent _controlWakeEvent = new(false);
 
-    private bool _disposed;
+    private bool _shutdownRequested;
+    private bool _resourcesDisposed;
 
     public event EventHandler<PlaybackState>? StateChanged;
     public event EventHandler<PlaybackProgress>? ProgressChanged;
@@ -72,7 +75,45 @@ public class PlaybackScheduler : IDisposable, IAsyncDisposable
         {
             lock (_stateLock)
             {
-                return _activeRun?.WorkerTask != null && !_activeRun.WorkerTask.IsCompleted;
+                bool activeLive = _activeRun?.WorkerTask != null && !_activeRun.WorkerTask.IsCompleted;
+                bool terminatingLive = _terminatingRun?.WorkerTask != null && !_terminatingRun.WorkerTask.IsCompleted;
+                return activeLive || terminatingLive;
+            }
+        }
+    }
+
+    internal int LiveWorkerCount
+    {
+        get
+        {
+            lock (_stateLock)
+            {
+                int count = 0;
+                if (_activeRun?.WorkerTask != null && !_activeRun.WorkerTask.IsCompleted) count++;
+                if (_terminatingRun?.WorkerTask != null && !_terminatingRun.WorkerTask.IsCompleted) count++;
+                return count;
+            }
+        }
+    }
+
+    internal Task? ActiveWorkerTask
+    {
+        get
+        {
+            lock (_stateLock)
+            {
+                return _activeRun?.WorkerTask;
+            }
+        }
+    }
+
+    internal Task? TerminatingWorkerTask
+    {
+        get
+        {
+            lock (_stateLock)
+            {
+                return _terminatingRun?.WorkerTask;
             }
         }
     }
@@ -130,11 +171,13 @@ public class PlaybackScheduler : IDisposable, IAsyncDisposable
     public PlaybackScheduler(
         ChordEngine chordEngine,
         KeyStateManager keyState,
-        PedalController? pedal = null)
+        PedalController? pedal = null,
+        TimeSpan? workerTerminationTimeout = null)
     {
         _chordEngine = chordEngine;
         _keyState = keyState;
-        _pedal = pedal ?? new PedalController(keyState.ActiveKeys.Count > 0 ? null! : null!);
+        _pedal = pedal ?? new PedalController(keyState.Backend);
+        _workerTerminationTimeout = workerTerminationTimeout ?? TimeSpan.FromSeconds(2);
     }
 
     public void SetTimeline(MusicTimeline timeline)
@@ -148,7 +191,7 @@ public class PlaybackScheduler : IDisposable, IAsyncDisposable
         await _controlGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            await TerminateActiveWorkerInternalAsync().ConfigureAwait(false);
+            await TerminateActiveWorkerInternalAsync(ct).ConfigureAwait(false);
 
             lock (_stateLock)
             {
@@ -193,7 +236,7 @@ public class PlaybackScheduler : IDisposable, IAsyncDisposable
 
             if (isPaused && !startOffset.HasValue)
             {
-                await ResumeInternalAsync().ConfigureAwait(false);
+                await ResumeInternalAsync(ct).ConfigureAwait(false);
                 return;
             }
 
@@ -340,7 +383,7 @@ public class PlaybackScheduler : IDisposable, IAsyncDisposable
         await _controlGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            await TerminateActiveWorkerInternalAsync().ConfigureAwait(false);
+            await TerminateActiveWorkerInternalAsync(ct).ConfigureAwait(false);
 
             lock (_stateLock)
             {
@@ -385,7 +428,7 @@ public class PlaybackScheduler : IDisposable, IAsyncDisposable
             else if (wasPaused)
             {
                 // Fully terminate old worker, reset position, remain Paused
-                await TerminateActiveWorkerInternalAsync().ConfigureAwait(false);
+                await TerminateActiveWorkerInternalAsync(ct).ConfigureAwait(false);
 
                 lock (_stateLock)
                 {
@@ -447,13 +490,17 @@ public class PlaybackScheduler : IDisposable, IAsyncDisposable
         _transpose = Math.Clamp(semitones, -24, 24);
     }
 
-    private async Task TerminateActiveWorkerInternalAsync()
+    private async Task TerminateActiveWorkerInternalAsync(CancellationToken ct = default)
     {
         PlaybackRunContext? oldRun;
         lock (_stateLock)
         {
             oldRun = _activeRun;
             _activeRun = null;
+            if (oldRun != null)
+            {
+                _terminatingRun = oldRun;
+            }
         }
 
         if (oldRun != null)
@@ -466,23 +513,36 @@ public class PlaybackScheduler : IDisposable, IAsyncDisposable
 
             _controlWakeEvent.Set();
             _pauseEvent.Set();
-            _keyState.ReleaseAll();
-            _pedal.Release();
 
             if (oldRun.WorkerTask != null)
             {
                 try
                 {
-                    var completed = await Task.WhenAny(oldRun.WorkerTask, Task.Delay(2000)).ConfigureAwait(false);
+                    using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    var completed = await Task.WhenAny(oldRun.WorkerTask, Task.Delay(_workerTerminationTimeout, timeoutCts.Token)).ConfigureAwait(false);
                     if (completed != oldRun.WorkerTask)
                     {
                         _keyState.ReleaseAll();
                         _pedal.Release();
-                        throw new TimeoutException("Playback worker failed to terminate within 2000ms bounded timeout.");
+                        throw new TimeoutException($"Playback worker failed to terminate within {_workerTerminationTimeout.TotalMilliseconds}ms bounded timeout.");
                     }
+                    timeoutCts.Cancel();
                     await oldRun.WorkerTask.ConfigureAwait(false);
                 }
-                catch (OperationCanceledException) { }
+                catch (OperationCanceledException) when (oldRun.Cts.IsCancellationRequested)
+                {
+                }
+            }
+
+            _keyState.ReleaseAll();
+            _pedal.Release();
+
+            lock (_stateLock)
+            {
+                if (ReferenceEquals(_terminatingRun, oldRun))
+                {
+                    _terminatingRun = null;
+                }
             }
 
             try
@@ -500,7 +560,7 @@ public class PlaybackScheduler : IDisposable, IAsyncDisposable
         CancellationToken externalCt = default)
     {
         // 1. Cancel and await old worker to fully exit before starting new worker
-        await TerminateActiveWorkerInternalAsync().ConfigureAwait(false);
+        await TerminateActiveWorkerInternalAsync(externalCt).ConfigureAwait(false);
 
         ThrowIfDisposed();
 
@@ -525,7 +585,7 @@ public class PlaybackScheduler : IDisposable, IAsyncDisposable
 
             if (targetState is PlaybackState.Playing or PlaybackState.Countdown)
             {
-                newRun.WorkerTask = Task.Run(() => WorkerLoop(newRun, countdown), newRun.Cts.Token);
+                newRun.WorkerTask = Task.Run(() => WorkerLoop(newRun, countdown));
             }
         }
     }
@@ -548,7 +608,7 @@ public class PlaybackScheduler : IDisposable, IAsyncDisposable
 
     private bool IsCurrentGeneration(PlaybackRunContext run)
     {
-        if (_disposed || run.Cts.IsCancellationRequested) return false;
+        if (_shutdownRequested || _resourcesDisposed || run.Cts.IsCancellationRequested) return false;
         lock (_stateLock)
         {
             return _activeRun != null && _activeRun.Generation == run.Generation;
@@ -852,7 +912,7 @@ public class PlaybackScheduler : IDisposable, IAsyncDisposable
 
     private void ThrowIfDisposed()
     {
-        if (_disposed)
+        if (_shutdownRequested || _resourcesDisposed)
         {
             throw new ObjectDisposedException(nameof(PlaybackScheduler));
         }
@@ -860,37 +920,48 @@ public class PlaybackScheduler : IDisposable, IAsyncDisposable
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
-
-        try
-        {
-            Stop();
-        }
-        catch { }
-
-        _controlGate.Dispose();
-        _controlWakeEvent.Dispose();
-        _pauseEvent.Dispose();
-        _keyState.Dispose();
-        _pedal.Dispose();
+        DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 
     public async ValueTask DisposeAsync()
     {
-        if (_disposed) return;
-        _disposed = true;
+        if (_resourcesDisposed) return;
+        _shutdownRequested = true;
 
+        await _controlGate.WaitAsync().ConfigureAwait(false);
         try
         {
-            await StopAsync().ConfigureAwait(false);
-        }
-        catch { }
+            await TerminateActiveWorkerInternalAsync().ConfigureAwait(false);
 
-        _controlGate.Dispose();
-        _controlWakeEvent.Dispose();
-        _pauseEvent.Dispose();
-        _keyState.Dispose();
-        _pedal.Dispose();
+            lock (_stateLock)
+            {
+                _currentTime = 0.0;
+                SetState(PlaybackState.Stopped);
+                NotifyProgress();
+            }
+
+            _resourcesDisposed = true;
+            _keyState.Dispose();
+            _pedal.Dispose();
+            _controlWakeEvent.Dispose();
+            _pauseEvent.Dispose();
+        }
+        catch (TimeoutException)
+        {
+            _keyState.ReleaseAll();
+            _pedal.Release();
+            throw;
+        }
+        finally
+        {
+            if (_resourcesDisposed)
+            {
+                _controlGate.Dispose();
+            }
+            else
+            {
+                _controlGate.Release();
+            }
+        }
     }
 }

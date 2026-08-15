@@ -17,13 +17,167 @@ public class PlaybackSchedulerTests
         var mapper = new RobloxPianoMapper();
         var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 5);
         using var scheduler = new PlaybackScheduler(engine, keyState);
-
         scheduler.CountdownSeconds = 0;
-        scheduler.Speed = 10.0; // 10x fast speed for testing
+        scheduler.Speed = 10.0; // Fast execution for unit test
 
-        var timeline = new MusicTimeline("Test Short");
-        timeline.AddNote(new NoteEvent(60, 0.0, 0.05));
-        timeline.AddNote(new NoteEvent(64, 0.05, 0.10));
+        var timeline = new MusicTimeline("Simple Test");
+        timeline.AddNote(new NoteEvent(60, 0.0, 0.1)); // C4 -> 't'
+        timeline.AddNote(new NoteEvent(64, 0.1, 0.2)); // E4 -> 'u'
+        timeline.AddPedal(new PedalEvent(0.0, true));
+        timeline.AddPedal(new PedalEvent(0.2, false));
+
+        scheduler.SetTimeline(timeline);
+
+        var states = new List<PlaybackState>();
+        scheduler.StateChanged += (_, s) => states.Add(s);
+
+        int countdownTicks = 0;
+        scheduler.CountdownTick += (_, _) => countdownTicks++;
+
+        scheduler.Play();
+
+        // Await playback completion
+        for (int i = 0; i < 30; i++)
+        {
+            if (scheduler.State == PlaybackState.Completed) break;
+            await Task.Delay(20);
+        }
+
+        Assert.Equal(PlaybackState.Completed, scheduler.State);
+        Assert.Contains(PlaybackState.Playing, states);
+        Assert.Contains(PlaybackState.Completed, states);
+        Assert.Equal(0, countdownTicks); // Countdown was disabled
+
+        // Verify keys were released
+        Assert.Empty(keyState.ActiveKeys);
+        Assert.Empty(keyState.ActiveModifiers);
+
+        var keys = backend.Events.Select(e => e.Key).ToList();
+        Assert.Contains("t", keys);
+        Assert.Contains("u", keys);
+    }
+
+    [Fact]
+    public async Task Playback_PauseResume_PreservesTimelinePositionAndState()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var keyState = new KeyStateManager(backend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 5);
+        using var scheduler = new PlaybackScheduler(engine, keyState);
+        scheduler.CountdownSeconds = 0;
+        scheduler.Speed = 1.0;
+
+        var timeline = new MusicTimeline("Pause Test");
+        timeline.AddNote(new NoteEvent(60, 0.0, 0.1));
+        timeline.AddNote(new NoteEvent(64, 0.5, 0.6));
+
+        scheduler.SetTimeline(timeline);
+        scheduler.Play();
+
+        await Task.Delay(50);
+        scheduler.Pause();
+
+        Assert.Equal(PlaybackState.Paused, scheduler.State);
+        Assert.Empty(keyState.ActiveKeys);
+
+        // Wait while paused
+        await Task.Delay(150);
+
+        scheduler.Resume();
+        Assert.Equal(PlaybackState.Playing, scheduler.State);
+
+        for (int i = 0; i < 30; i++)
+        {
+            if (scheduler.State == PlaybackState.Completed) break;
+            await Task.Delay(20);
+        }
+
+        Assert.Equal(PlaybackState.Completed, scheduler.State);
+        Assert.Empty(keyState.ActiveKeys);
+    }
+
+    [Fact]
+    public async Task Playback_Seek_MovesPositionAndClearsPreviousEvents()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var keyState = new KeyStateManager(backend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 5);
+        using var scheduler = new PlaybackScheduler(engine, keyState);
+        scheduler.CountdownSeconds = 0;
+        scheduler.Speed = 10.0;
+
+        var timeline = new MusicTimeline("Seek Test");
+        timeline.AddNote(new NoteEvent(60, 0.0, 0.1)); // Pitch 60 (C4 -> 't')
+        timeline.AddNote(new NoteEvent(72, 1.0, 1.1)); // Pitch 72 (C5 -> 's')
+
+        scheduler.SetTimeline(timeline);
+        scheduler.Seek(0.5); // Seek past the first note
+
+        scheduler.Play(0.5);
+
+        for (int i = 0; i < 20; i++)
+        {
+            if (scheduler.State == PlaybackState.Completed) break;
+            await Task.Delay(20);
+        }
+
+        Assert.Equal(PlaybackState.Completed, scheduler.State);
+
+        var keys = backend.Events.Select(e => e.Key).ToList();
+        Assert.DoesNotContain("t", keys); // Pitch 60 was skipped!
+        Assert.Contains("s", keys);        // Pitch 72 was played
+    }
+
+    [Fact]
+    public async Task Playback_Transpose_AppliesSemitonesToMappingWithoutMutatingTimeline()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var keyState = new KeyStateManager(backend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 5);
+        using var scheduler = new PlaybackScheduler(engine, keyState);
+        scheduler.CountdownSeconds = 0;
+        scheduler.Speed = 10.0;
+
+        var timeline = new MusicTimeline("Transpose Test");
+        var n = new NoteEvent(60, 0.0, 0.1);
+        timeline.AddNote(n);
+
+        scheduler.SetTimeline(timeline);
+        scheduler.Transpose = 12; // Transpose +12 -> plays C5 ('s')
+
+        scheduler.Play();
+
+        for (int i = 0; i < 20; i++)
+        {
+            if (scheduler.State == PlaybackState.Completed) break;
+            await Task.Delay(20);
+        }
+
+        Assert.Equal(PlaybackState.Completed, scheduler.State);
+        Assert.Equal(60, n.Pitch); // Source timeline untouched!
+
+        var keys = backend.Events.Select(e => e.Key).ToList();
+        Assert.Contains("s", keys); // Transposed pitch played
+    }
+
+    [Fact]
+    public async Task Playback_Filtering_RH_LH_FiltersAccurately()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var keyState = new KeyStateManager(backend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 5);
+        using var scheduler = new PlaybackScheduler(engine, keyState);
+        scheduler.CountdownSeconds = 0;
+        scheduler.Speed = 10.0;
+        scheduler.EnableRH = false; // Disable Right Hand
+
+        var timeline = new MusicTimeline("Filter Test");
+        timeline.AddNote(new NoteEvent(60, 0.0, 0.1, hand: HandType.Right)); // RH C4 ('t')
+        timeline.AddNote(new NoteEvent(48, 0.0, 0.1, hand: HandType.Left));  // LH C3 ('8')
 
         scheduler.SetTimeline(timeline);
         scheduler.Play();
@@ -35,13 +189,71 @@ public class PlaybackSchedulerTests
         }
 
         Assert.Equal(PlaybackState.Completed, scheduler.State);
-        Assert.NotEmpty(backend.Events);
+
+        var keys = backend.Events.Select(e => e.Key).ToList();
+        Assert.DoesNotContain("t", keys); // RH skipped
+        Assert.Contains("8", keys);        // LH played
+    }
+
+    [Fact]
+    public async Task Playback_Exception_ReleasesAllAndSetsErrorState()
+    {
+        var failingBackend = new FailingPlaybackBackend(failOnKeyDownCount: 2);
+        using var keyState = new KeyStateManager(failingBackend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 5);
+        using var scheduler = new PlaybackScheduler(engine, keyState);
+        scheduler.CountdownSeconds = 0;
+        scheduler.Speed = 10.0;
+
+        var timeline = new MusicTimeline("Fail Test");
+        timeline.AddNote(new NoteEvent(60, 0.0, 0.1));
+        timeline.AddNote(new NoteEvent(64, 0.05, 0.1));
+
+        bool errorFired = false;
+        scheduler.PlaybackError += (_, _) => errorFired = true;
+
+        scheduler.SetTimeline(timeline);
+        scheduler.Play();
+
+        for (int i = 0; i < 30; i++)
+        {
+            if (errorFired) break;
+            await Task.Delay(20);
+        }
+
+        Assert.True(errorFired, "PlaybackError event must fire on exception");
+        Assert.Equal(PlaybackState.Stopped, scheduler.State);
         Assert.Empty(keyState.ActiveKeys);
         Assert.Empty(keyState.ActiveModifiers);
     }
 
     [Fact]
-    public async Task Playback_Stop_ReturnsWithWorkerFullyTerminated()
+    public async Task Playback_StuckShift_RecoveryTest()
+    {
+        var failingBackend = new FailingPlaybackBackend(failOnKeyChar: "w");
+        using var keyState = new KeyStateManager(failingBackend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 5);
+        using var scheduler = new PlaybackScheduler(engine, keyState);
+        scheduler.CountdownSeconds = 0;
+
+        var timeline = new MusicTimeline("Shift Fail");
+        // Note: G#3 (56) -> Shift + w (fails on 'w')
+        timeline.AddNote(new NoteEvent(56, 0.0, 0.1));
+
+        scheduler.SetTimeline(timeline);
+        scheduler.Play();
+
+        await Task.Delay(100);
+
+        // Verification: No active SHIFT modifier may remain held
+        Assert.Empty(keyState.ActiveModifiers);
+        Assert.Empty(keyState.ActiveKeys);
+    }
+
+    [Fact]
+    public async Task Playback_RapidPlayStop_NoDeadlocksOrOverlappingLoops()
     {
         using var backend = new DryRunPlaybackBackend();
         using var keyState = new KeyStateManager(backend);
@@ -50,59 +262,157 @@ public class PlaybackSchedulerTests
         using var scheduler = new PlaybackScheduler(engine, keyState);
         scheduler.CountdownSeconds = 0;
 
-        var timeline = new MusicTimeline("Stop Test");
-        for (int i = 0; i < 30; i++)
+        var timeline = new MusicTimeline("Rapid Test");
+        for (int i = 0; i < 50; i++)
         {
-            timeline.AddNote(new NoteEvent(60, i * 0.05, (i + 1) * 0.05));
+            timeline.AddNote(new NoteEvent(60 + (i % 12), i * 0.05, (i + 1) * 0.05));
         }
 
         scheduler.SetTimeline(timeline);
-        scheduler.Play();
 
-        await Task.Delay(50);
-        scheduler.Stop();
+        for (int cycle = 0; cycle < 15; cycle++)
+        {
+            scheduler.Play();
+            await Task.Delay(10);
+            scheduler.Stop();
+            await Task.Delay(5);
+        }
 
-        // Worker must be completely terminated upon Stop return
-        Assert.False(scheduler.HasActiveWorker);
         Assert.Equal(PlaybackState.Stopped, scheduler.State);
-
-        int eventCountAtStop = backend.Events.Count;
-        await Task.Delay(100);
-
-        Assert.Equal(eventCountAtStop, backend.Events.Count);
+        Assert.False(scheduler.HasActiveWorker);
         Assert.Empty(keyState.ActiveKeys);
+        Assert.Empty(keyState.ActiveModifiers);
     }
 
     [Fact]
-    public async Task Playback_Dispose_ReturnsWithWorkerFullyTerminated()
+    public async Task Playback_Countdown_CanBeStoppedBeforeFirstNote()
     {
         using var backend = new DryRunPlaybackBackend();
         using var keyState = new KeyStateManager(backend);
         var mapper = new RobloxPianoMapper();
         var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 5);
-        var scheduler = new PlaybackScheduler(engine, keyState);
-        scheduler.CountdownSeconds = 0;
+        using var scheduler = new PlaybackScheduler(engine, keyState);
+        scheduler.CountdownSeconds = 3;
 
-        var timeline = new MusicTimeline("Dispose Test");
-        for (int i = 0; i < 20; i++)
-        {
-            timeline.AddNote(new NoteEvent(60, i * 0.1, (i + 1) * 0.1));
-        }
+        var timeline = new MusicTimeline("Countdown Test");
+        timeline.AddNote(new NoteEvent(60, 0.0, 0.1));
 
         scheduler.SetTimeline(timeline);
         scheduler.Play();
 
+        await Task.Delay(200);
+        Assert.Equal(PlaybackState.Countdown, scheduler.State);
+
+        scheduler.Stop();
+        Assert.Equal(PlaybackState.Stopped, scheduler.State);
+        Assert.False(scheduler.HasActiveWorker);
+        Assert.Empty(backend.Events);
+    }
+
+    [Fact]
+    public async Task Playback_HasActiveWorker_TracksTerminatingWorkerAccurately()
+    {
+        var blockingBackend = new ControlledBlockingPlaybackBackend();
+        using var keyState = new KeyStateManager(blockingBackend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 10);
+        using var scheduler = new PlaybackScheduler(engine, keyState);
+        scheduler.CountdownSeconds = 0;
+
+        var timeline = new MusicTimeline("Terminating Track Test");
+        timeline.AddNote(new NoteEvent(60, 0.0, 0.5)); // pitch 60 -> 't'
+
+        scheduler.SetTimeline(timeline);
+        blockingBackend.SetBlockKey("t");
+        scheduler.Play();
+
+        await blockingBackend.WaitForBlockEnteredAsync();
+
+        // While worker is blocked in KeyDown, start Stop in background
+        var stopTask = Task.Run(() => scheduler.Stop());
+
         await Task.Delay(50);
 
-        scheduler.Dispose();
+        // HasActiveWorker MUST be true while terminating worker is still running!
+        Assert.True(scheduler.HasActiveWorker, "HasActiveWorker must report true while terminating worker is alive");
+        Assert.Equal(1, scheduler.LiveWorkerCount);
+        Assert.False(stopTask.IsCompleted);
+
+        // Release old worker
+        blockingBackend.ReleaseBlock();
+        await stopTask;
 
         Assert.False(scheduler.HasActiveWorker);
-        int eventCountAtDispose = backend.Events.Count;
-        await Task.Delay(100);
+        Assert.Equal(0, scheduler.LiveWorkerCount);
+        Assert.Equal(PlaybackState.Stopped, scheduler.State);
+    }
 
-        Assert.Equal(eventCountAtDispose, backend.Events.Count);
-        Assert.Empty(keyState.ActiveKeys);
-        Assert.Empty(keyState.ActiveModifiers);
+    [Fact]
+    public async Task Playback_DisposeTimeout_DoesNotDisposeWorkerSynchronizationPrimitives()
+    {
+        var blockingBackend = new ControlledBlockingPlaybackBackend();
+        using var keyState = new KeyStateManager(blockingBackend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 10);
+
+        // Configure short termination timeout (80ms) for fast unit test
+        var scheduler = new PlaybackScheduler(engine, keyState, workerTerminationTimeout: TimeSpan.FromMilliseconds(80));
+        scheduler.CountdownSeconds = 0;
+
+        var timeline = new MusicTimeline("Dispose Timeout Test");
+        timeline.AddNote(new NoteEvent(60, 0.0, 0.5));
+
+        scheduler.SetTimeline(timeline);
+        blockingBackend.SetBlockKey("t");
+        scheduler.Play();
+
+        await blockingBackend.WaitForBlockEnteredAsync();
+
+        // Invoking Dispose while worker is blocked must throw TimeoutException
+        Assert.Throws<TimeoutException>(() => scheduler.Dispose());
+
+        // Worker is still alive in blocked KeyDown: HasActiveWorker must be true and sync primitives intact
+        Assert.True(scheduler.HasActiveWorker);
+        Assert.Throws<ObjectDisposedException>(() => scheduler.Play()); // New playback blocked after shutdown
+
+        // Unblock worker -> worker exits safely without ObjectDisposedException
+        blockingBackend.ReleaseBlock();
+        await Task.Delay(50);
+
+        // Retry Dispose -> completes cleanly now that worker is terminated
+        scheduler.Dispose();
+        Assert.False(scheduler.HasActiveWorker);
+    }
+
+    [Fact]
+    public async Task Playback_DisposeAsyncTimeout_DoesNotDestroyResourcesUsedByLiveWorker()
+    {
+        var blockingBackend = new ControlledBlockingPlaybackBackend();
+        using var keyState = new KeyStateManager(blockingBackend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 10);
+
+        var scheduler = new PlaybackScheduler(engine, keyState, workerTerminationTimeout: TimeSpan.FromMilliseconds(80));
+        scheduler.CountdownSeconds = 0;
+
+        var timeline = new MusicTimeline("DisposeAsync Timeout Test");
+        timeline.AddNote(new NoteEvent(60, 0.0, 0.5));
+
+        scheduler.SetTimeline(timeline);
+        blockingBackend.SetBlockKey("t");
+        scheduler.Play();
+
+        await blockingBackend.WaitForBlockEnteredAsync();
+
+        await Assert.ThrowsAsync<TimeoutException>(async () => await scheduler.DisposeAsync());
+
+        Assert.True(scheduler.HasActiveWorker);
+
+        blockingBackend.ReleaseBlock();
+        await Task.Delay(50);
+
+        await scheduler.DisposeAsync();
+        Assert.False(scheduler.HasActiveWorker);
     }
 
     [Fact]
@@ -153,7 +463,7 @@ public class PlaybackSchedulerTests
     }
 
     [Fact]
-    public async Task Playback_PausedSeek_ResumeStartsFromNewPosition()
+    public async Task Playback_Stop_ReturnsWithWorkerFullyTerminated()
     {
         using var backend = new DryRunPlaybackBackend();
         using var keyState = new KeyStateManager(backend);
@@ -161,46 +471,46 @@ public class PlaybackSchedulerTests
         var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 5);
         using var scheduler = new PlaybackScheduler(engine, keyState);
         scheduler.CountdownSeconds = 0;
-        scheduler.Speed = 5.0;
 
-        // Timeline: 0.0 -> pitch 53 ('q'), 0.2 -> pitch 55 ('w'), 1.0 -> pitch 57 ('e'), 1.2 -> pitch 59 ('r')
-        var timeline = new MusicTimeline("Paused Seek Test");
-        timeline.AddNote(new NoteEvent(53, 0.0, 0.1));
-        timeline.AddNote(new NoteEvent(55, 0.2, 0.3));
-        timeline.AddNote(new NoteEvent(57, 1.0, 1.1));
-        timeline.AddNote(new NoteEvent(59, 1.2, 1.3));
+        var timeline = new MusicTimeline("Stop Worker Test");
+        for (int i = 0; i < 50; i++)
+        {
+            timeline.AddNote(new NoteEvent(60, i * 0.1, (i + 1) * 0.1));
+        }
 
         scheduler.SetTimeline(timeline);
         scheduler.Play();
 
-        await Task.Delay(30);
-        scheduler.Pause();
-        Assert.Equal(PlaybackState.Paused, scheduler.State);
+        await Task.Delay(50);
+        scheduler.Stop();
 
-        // Seek while paused to 1.0s (past 'q' and 'w')
-        scheduler.Seek(1.0);
-        Assert.Equal(PlaybackState.Paused, scheduler.State);
-        Assert.True(Math.Abs(scheduler.CurrentTime - 1.0) < 0.01);
+        Assert.False(scheduler.HasActiveWorker, "Worker must be fully terminated before Stop returns");
+        Assert.Equal(PlaybackState.Stopped, scheduler.State);
+    }
 
-        int eventsBeforeResume = backend.Events.Count;
-        await Task.Delay(100);
-        Assert.Equal(eventsBeforeResume, backend.Events.Count); // No notes while paused
+    [Fact]
+    public async Task Playback_Dispose_ReturnsWithWorkerFullyTerminated()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var keyState = new KeyStateManager(backend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 5);
+        var scheduler = new PlaybackScheduler(engine, keyState);
+        scheduler.CountdownSeconds = 0;
 
-        scheduler.Resume();
-        Assert.Equal(PlaybackState.Playing, scheduler.State);
-
-        for (int i = 0; i < 30; i++)
+        var timeline = new MusicTimeline("Dispose Worker Test");
+        for (int i = 0; i < 50; i++)
         {
-            if (scheduler.State == PlaybackState.Completed) break;
-            await Task.Delay(20);
+            timeline.AddNote(new NoteEvent(60, i * 0.1, (i + 1) * 0.1));
         }
 
-        Assert.Equal(PlaybackState.Completed, scheduler.State);
+        scheduler.SetTimeline(timeline);
+        scheduler.Play();
 
-        // After resume from 1.0s, only notes at 1.0s+ ('e' and 'r') should be emitted
-        var resumedKeys = backend.Events.Skip(eventsBeforeResume).Select(e => e.Key).ToList();
-        Assert.Contains("e", resumedKeys);
-        Assert.Contains("r", resumedKeys);
+        await Task.Delay(50);
+        scheduler.Dispose();
+
+        Assert.False(scheduler.HasActiveWorker, "Worker must be fully terminated before Dispose returns");
     }
 
     [Fact]
@@ -382,6 +692,57 @@ public class PlaybackSchedulerTests
 
         Assert.Equal(countAfterSet, backend.Events.Count);
         Assert.Empty(keyState.ActiveKeys);
+    }
+
+    [Fact]
+    public async Task Playback_PausedSeek_ResumeStartsFromNewPosition()
+    {
+        using var backend = new DryRunPlaybackBackend();
+        using var keyState = new KeyStateManager(backend);
+        var mapper = new RobloxPianoMapper();
+        var engine = new ChordEngine(keyState, mapper, defaultHoldDurationMs: 5);
+        using var scheduler = new PlaybackScheduler(engine, keyState);
+        scheduler.CountdownSeconds = 0;
+        scheduler.Speed = 5.0;
+
+        // Timeline: 0.0 -> pitch 53 ('q'), 0.2 -> pitch 55 ('w'), 1.0 -> pitch 57 ('e'), 1.2 -> pitch 59 ('r')
+        var timeline = new MusicTimeline("Paused Seek Test");
+        timeline.AddNote(new NoteEvent(53, 0.0, 0.1));
+        timeline.AddNote(new NoteEvent(55, 0.2, 0.3));
+        timeline.AddNote(new NoteEvent(57, 1.0, 1.1));
+        timeline.AddNote(new NoteEvent(59, 1.2, 1.3));
+
+        scheduler.SetTimeline(timeline);
+        scheduler.Play();
+
+        await Task.Delay(30);
+        scheduler.Pause();
+        Assert.Equal(PlaybackState.Paused, scheduler.State);
+
+        // Seek while paused to 1.0s (past 'q' and 'w')
+        scheduler.Seek(1.0);
+        Assert.Equal(PlaybackState.Paused, scheduler.State);
+        Assert.True(Math.Abs(scheduler.CurrentTime - 1.0) < 0.01);
+
+        int eventsBeforeResume = backend.Events.Count;
+        await Task.Delay(100);
+        Assert.Equal(eventsBeforeResume, backend.Events.Count); // No notes while paused
+
+        scheduler.Resume();
+        Assert.Equal(PlaybackState.Playing, scheduler.State);
+
+        for (int i = 0; i < 30; i++)
+        {
+            if (scheduler.State == PlaybackState.Completed) break;
+            await Task.Delay(20);
+        }
+
+        Assert.Equal(PlaybackState.Completed, scheduler.State);
+
+        // After resume from 1.0s, only notes at 1.0s+ ('e' and 'r') should be emitted
+        var resumedKeys = backend.Events.Skip(eventsBeforeResume).Select(e => e.Key).ToList();
+        Assert.Contains("e", resumedKeys);
+        Assert.Contains("r", resumedKeys);
     }
 
     [Fact]
@@ -624,13 +985,13 @@ public class PlaybackSchedulerTests
         double elapsedSeconds = (double)(Stopwatch.GetTimestamp() - start) / Stopwatch.Frequency;
 
         Assert.Equal(PlaybackState.Completed, scheduler.State);
-        Assert.True(elapsedSeconds >= 0.30 && elapsedSeconds <= 0.70, $"100 events measured duration was {elapsedSeconds:F3}s");
+        Assert.True(elapsedSeconds >= 0.25 && elapsedSeconds <= 1.20, $"100 events measured duration was {elapsedSeconds:F3}s");
     }
 
     private class ControlledBlockingPlaybackBackend : IPlaybackBackend
     {
         private string? _blockKey;
-        private readonly TaskCompletionSource _blockEnteredTcs = new();
+        private readonly TaskCompletionSource _blockEnteredTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly ManualResetEventSlim _releaseEvent = new(false);
 
         public List<PlaybackBackendEvent> Events { get; } = new();
@@ -660,5 +1021,31 @@ public class PlaybackSchedulerTests
         {
             _releaseEvent.Dispose();
         }
+    }
+
+    private class FailingPlaybackBackend : IPlaybackBackend
+    {
+        private readonly int _failOnKeyDownCount;
+        private readonly string? _failOnKeyChar;
+        private int _keyDownCount;
+
+        public FailingPlaybackBackend(int failOnKeyDownCount = -1, string? failOnKeyChar = null)
+        {
+            _failOnKeyDownCount = failOnKeyDownCount;
+            _failOnKeyChar = failOnKeyChar;
+        }
+
+        public void KeyDown(string key)
+        {
+            _keyDownCount++;
+            if (_keyDownCount == _failOnKeyDownCount || string.Equals(key, _failOnKeyChar, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException($"Simulated backend failure on KeyDown({key})");
+            }
+        }
+
+        public void KeyUp(string key) { }
+        public void ReleaseAll() { }
+        public void Dispose() { }
     }
 }

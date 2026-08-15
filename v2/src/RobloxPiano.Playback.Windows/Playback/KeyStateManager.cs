@@ -27,6 +27,8 @@ public class KeyStateManager : IDisposable
         }
     }
 
+    internal IPlaybackBackend Backend => _backend;
+
     public IReadOnlySet<string> ActiveModifiers
     {
         get
@@ -53,6 +55,8 @@ public class KeyStateManager : IDisposable
     {
         var modUpper = modifier.ToUpperInvariant();
         var modLower = modifier.ToLowerInvariant();
+        bool changeToActive = false;
+        bool changeToInactive = false;
 
         lock (_lock)
         {
@@ -60,86 +64,105 @@ public class KeyStateManager : IDisposable
 
             if (active && !_activeModifiers.Contains(modUpper))
             {
-                _backend.KeyDown(modLower);
                 _activeModifiers.Add(modUpper);
+                changeToActive = true;
             }
             else if (!active && _activeModifiers.Contains(modUpper))
             {
-                _backend.KeyUp(modLower);
                 _activeModifiers.Remove(modUpper);
+                changeToInactive = true;
             }
+        }
+
+        if (changeToActive)
+        {
+            _backend.KeyDown(modLower);
+        }
+        else if (changeToInactive)
+        {
+            _backend.KeyUp(modLower);
         }
     }
 
     public void PressPhysicalKey(string physicalKey)
     {
         var keyLower = physicalKey.ToLowerInvariant();
+        bool alreadyPressed;
         lock (_lock)
         {
             _lastActivityTimestamp = Stopwatch.GetTimestamp();
-            if (_pressedPhysicalKeys.Contains(keyLower))
-            {
-                _backend.KeyUp(keyLower);
-            }
-            _backend.KeyDown(keyLower);
+            alreadyPressed = _pressedPhysicalKeys.Contains(keyLower);
             _pressedPhysicalKeys.Add(keyLower);
         }
+
+        if (alreadyPressed)
+        {
+            _backend.KeyUp(keyLower);
+        }
+        _backend.KeyDown(keyLower);
     }
 
     public void ReleasePhysicalKey(string physicalKey)
     {
         var keyLower = physicalKey.ToLowerInvariant();
+        bool wasPressed;
         lock (_lock)
         {
             _lastActivityTimestamp = Stopwatch.GetTimestamp();
-            if (_pressedPhysicalKeys.Contains(keyLower))
-            {
-                _backend.KeyUp(keyLower);
-                _pressedPhysicalKeys.Remove(keyLower);
-            }
+            wasPressed = _pressedPhysicalKeys.Remove(keyLower);
+        }
+
+        if (wasPressed)
+        {
+            _backend.KeyUp(keyLower);
         }
     }
 
     public void ReleaseAll()
     {
+        List<string> keysToRelease;
+        List<string> modsToRelease;
+
         lock (_lock)
         {
             _lastActivityTimestamp = Stopwatch.GetTimestamp();
-
-            foreach (var k in _pressedPhysicalKeys.ToList())
-            {
-                try
-                {
-                    _backend.KeyUp(k);
-                }
-                catch
-                {
-                    // Best-effort release
-                }
-            }
+            keysToRelease = _pressedPhysicalKeys.ToList();
             _pressedPhysicalKeys.Clear();
-
-            foreach (var mod in _activeModifiers.ToList())
-            {
-                try
-                {
-                    _backend.KeyUp(mod.ToLowerInvariant());
-                }
-                catch
-                {
-                    // Best-effort release
-                }
-            }
+            modsToRelease = _activeModifiers.ToList();
             _activeModifiers.Clear();
+        }
 
+        foreach (var k in keysToRelease)
+        {
             try
             {
-                _backend.ReleaseAll();
+                _backend.KeyUp(k);
             }
             catch
             {
                 // Best-effort release
             }
+        }
+
+        foreach (var mod in modsToRelease)
+        {
+            try
+            {
+                _backend.KeyUp(mod.ToLowerInvariant());
+            }
+            catch
+            {
+                // Best-effort release
+            }
+        }
+
+        try
+        {
+            _backend.ReleaseAll();
+        }
+        catch
+        {
+            // Best-effort release
         }
     }
 

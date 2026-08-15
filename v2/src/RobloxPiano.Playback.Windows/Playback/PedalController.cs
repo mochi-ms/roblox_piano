@@ -32,7 +32,7 @@ public class PedalController : IDisposable
         {
             if (!_isDown)
             {
-                _backend.KeyDown(_pedalKey);
+                _backend?.KeyDown(_pedalKey);
                 _isDown = true;
             }
         }
@@ -44,7 +44,7 @@ public class PedalController : IDisposable
         {
             if (_isDown)
             {
-                _backend.KeyUp(_pedalKey);
+                _backend?.KeyUp(_pedalKey);
                 _isDown = false;
             }
         }
