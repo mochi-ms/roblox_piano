@@ -1,32 +1,429 @@
 using System.Collections.ObjectModel;
+using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using RobloxPiano.Core.Library;
+using RobloxPiano.Core.Services;
+using RobloxPiano.Infrastructure.Data;
 
 namespace RobloxPiano.Desktop.ViewModels;
 
-public class MockScoreItem
-{
-    public string Name { get; set; } = "";
-    public string Type { get; set; } = "";
-    public string Duration { get; set; } = "";
-    public string Bpm { get; set; } = "";
-    public string Notes { get; set; } = "";
-    public string Modified { get; set; } = "";
-    public string Icon { get; set; } = "";
-}
-
 public partial class LibraryViewModel : ObservableObject
 {
+    private readonly ILibraryRepository _repository;
+    private readonly LibraryFileService _fileService;
+    private readonly FolderService _folderService;
+    private readonly LibraryService _libraryService;
+
+    private CancellationTokenSource? _searchCts;
+    private readonly Stack<string?> _backStack = new();
+    private readonly Stack<string?> _forwardStack = new();
+
+    private ScoreItemViewModel? _clipboardScore;
+    private bool _isCut;
+
     [ObservableProperty]
-    private ObservableCollection<MockScoreItem> _mockScores = new();
+    private ObservableCollection<ScoreItemViewModel> _displayedScores = new();
+
+    [ObservableProperty]
+    private ObservableCollection<FolderItemViewModel> _folderList = new();
+
+    [ObservableProperty]
+    private ScoreItemViewModel? _selectedScore;
+
+    [ObservableProperty]
+    private string _searchText = string.Empty;
+
+    [ObservableProperty]
+    private string? _currentFolderId;
+
+    [ObservableProperty]
+    private string _currentFolderName = "내 라이브러리";
+
+    [ObservableProperty]
+    private string _breadcrumbPath = "내 라이브러리";
+
+    [ObservableProperty]
+    private bool _isFavoritesView = false;
+
+    [ObservableProperty]
+    private bool _isLoading = false;
+
+    [ObservableProperty]
+    private bool _isEmpty = false;
+
+    [ObservableProperty]
+    private int _totalItemCount = 0;
+
+    [ObservableProperty]
+    private string _statusText = "0개 항목";
+
+    [ObservableProperty]
+    private bool _canGoBack = false;
+
+    [ObservableProperty]
+    private bool _canGoForward = false;
+
+    [ObservableProperty]
+    private bool _canGoUp = false;
 
     public LibraryViewModel()
     {
-        MockScores.Add(new MockScoreItem { Name = "Mrs. GREEN APPLE - ライラック", Type = "MIDI", Duration = "04:46", Bpm = "150", Notes = "1,482", Modified = "2024-05-12", Icon = "M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" });
-        MockScores.Add(new MockScoreItem { Name = "あいみょん - マリーゴールド", Type = "MML", Duration = "05:06", Bpm = "106", Notes = "924", Modified = "2024-03-21", Icon = "M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8V4h5v5h5v9z" });
-        MockScores.Add(new MockScoreItem { Name = "Practice 01 (C Major Scale)", Type = "MusicXML", Duration = "01:20", Bpm = "120", Notes = "15", Modified = "2024-01-10", Icon = "M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8V4h5v5h5v9z" });
-        for (int i = 2; i <= 15; i++)
+        var dbPath = LibraryDatabasePathProvider.GetDefaultDatabasePath();
+        var storageRoot = LibraryDatabasePathProvider.GetDefaultLibraryStorageRoot();
+
+        _repository = new SqliteLibraryRepository(dbPath);
+        _fileService = new LibraryFileService(storageRoot);
+        _folderService = new FolderService(_repository, _fileService);
+        _libraryService = new LibraryService(_repository, _fileService, _folderService);
+
+        _ = InitializeAsync();
+    }
+
+    public LibraryViewModel(
+        ILibraryRepository repository,
+        LibraryFileService fileService,
+        FolderService folderService,
+        LibraryService libraryService)
+    {
+        _repository = repository;
+        _fileService = fileService;
+        _folderService = folderService;
+        _libraryService = libraryService;
+
+        _ = InitializeAsync();
+    }
+
+    private async Task InitializeAsync()
+    {
+        IsLoading = true;
+        try
         {
-            MockScores.Add(new MockScoreItem { Name = $"Practice {i:00}", Type = "MIDI", Duration = "02:00", Bpm = "120", Notes = "300", Modified = "2024-01-10", Icon = "M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" });
+            await _repository.InitializeAsync();
+            await LoadFoldersAsync();
+            await LoadScoresAsync();
         }
+        finally
+        {
+            IsLoading = false;
+            UpdateEmptyState();
+        }
+    }
+
+    partial void OnSearchTextChanged(string value)
+    {
+        _searchCts?.Cancel();
+        _searchCts = new CancellationTokenSource();
+        var ct = _searchCts.Token;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(150, ct); // 150ms debounce
+                if (!ct.IsCancellationRequested)
+                {
+                    await Application.Current.Dispatcher.InvokeAsync(async () =>
+                    {
+                        await LoadScoresAsync(ct);
+                    });
+                }
+            }
+            catch (TaskCanceledException) { }
+        }, ct);
+    }
+
+    partial void OnSelectedScoreChanged(ScoreItemViewModel? value)
+    {
+        UpdateStatusText();
+    }
+
+    public async Task LoadFoldersAsync(CancellationToken ct = default)
+    {
+        var folders = await _repository.GetAllFoldersAsync(ct);
+        FolderList.Clear();
+        foreach (var f in folders)
+        {
+            FolderList.Add(new FolderItemViewModel(f));
+        }
+    }
+
+    public async Task LoadScoresAsync(CancellationToken ct = default)
+    {
+        IsLoading = true;
+        try
+        {
+            var query = new LibraryQuery
+            {
+                FolderId = CurrentFolderId,
+                SearchKeyword = SearchText,
+                FavoritesOnly = IsFavoritesView,
+                PageIndex = 0,
+                PageSize = 200
+            };
+
+            var page = await _repository.QueryScoresAsync(query, ct);
+            DisplayedScores.Clear();
+            foreach (var item in page.Items)
+            {
+                DisplayedScores.Add(new ScoreItemViewModel(item));
+            }
+
+            TotalItemCount = page.TotalCount;
+            UpdateStatusText();
+            UpdateEmptyState();
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private void UpdateStatusText()
+    {
+        string baseCount = $"{TotalItemCount}개 항목";
+        if (SelectedScore != null)
+        {
+            StatusText = $"{baseCount}     1개 선택됨";
+        }
+        else
+        {
+            StatusText = baseCount;
+        }
+    }
+
+    private void UpdateEmptyState()
+    {
+        IsEmpty = DisplayedScores.Count == 0 && !IsLoading;
+    }
+
+    [RelayCommand]
+    private async Task NavigateToFolderAsync(string? folderId)
+    {
+        if (CurrentFolderId != folderId || IsFavoritesView)
+        {
+            _backStack.Push(CurrentFolderId);
+            _forwardStack.Clear();
+            CanGoBack = _backStack.Count > 0;
+            CanGoForward = false;
+
+            IsFavoritesView = false;
+            CurrentFolderId = folderId;
+            await UpdateBreadcrumbAsync();
+            await LoadScoresAsync();
+        }
+    }
+
+    [RelayCommand]
+    private async Task NavigateToFavoritesAsync()
+    {
+        _backStack.Push(CurrentFolderId);
+        _forwardStack.Clear();
+        CanGoBack = _backStack.Count > 0;
+        CanGoForward = false;
+
+        IsFavoritesView = true;
+        BreadcrumbPath = "즐겨찾기";
+        CurrentFolderName = "즐겨찾기";
+        CanGoUp = true;
+
+        await LoadScoresAsync();
+    }
+
+    [RelayCommand]
+    private async Task NavigateBackAsync()
+    {
+        if (_backStack.Count > 0)
+        {
+            var prev = _backStack.Pop();
+            _forwardStack.Push(CurrentFolderId);
+
+            CanGoBack = _backStack.Count > 0;
+            CanGoForward = _forwardStack.Count > 0;
+
+            IsFavoritesView = false;
+            CurrentFolderId = prev;
+            await UpdateBreadcrumbAsync();
+            await LoadScoresAsync();
+        }
+    }
+
+    [RelayCommand]
+    private async Task NavigateForwardAsync()
+    {
+        if (_forwardStack.Count > 0)
+        {
+            var next = _forwardStack.Pop();
+            _backStack.Push(CurrentFolderId);
+
+            CanGoBack = _backStack.Count > 0;
+            CanGoForward = _forwardStack.Count > 0;
+
+            IsFavoritesView = false;
+            CurrentFolderId = next;
+            await UpdateBreadcrumbAsync();
+            await LoadScoresAsync();
+        }
+    }
+
+    [RelayCommand]
+    private async Task NavigateUpAsync()
+    {
+        if (IsFavoritesView)
+        {
+            await NavigateToFolderAsync(null);
+            return;
+        }
+
+        if (!string.IsNullOrEmpty(CurrentFolderId))
+        {
+            var currentFolder = await _repository.GetFolderAsync(CurrentFolderId);
+            await NavigateToFolderAsync(currentFolder?.ParentId);
+        }
+    }
+
+    private async Task UpdateBreadcrumbAsync()
+    {
+        if (string.IsNullOrEmpty(CurrentFolderId))
+        {
+            BreadcrumbPath = "내 라이브러리";
+            CurrentFolderName = "내 라이브러리";
+            CanGoUp = false;
+            return;
+        }
+
+        CanGoUp = true;
+        var allFolders = (await _repository.GetAllFoldersAsync()).ToDictionary(f => f.Id);
+        var parts = new List<string>();
+        string? curId = CurrentFolderId;
+
+        while (!string.IsNullOrEmpty(curId) && allFolders.TryGetValue(curId, out var f))
+        {
+            parts.Add(f.Name);
+            curId = f.ParentId;
+        }
+
+        parts.Reverse();
+        BreadcrumbPath = "내 라이브러리 > " + string.Join(" > ", parts);
+        CurrentFolderName = parts.LastOrDefault() ?? "내 라이브러리";
+    }
+
+    [RelayCommand]
+    private async Task CreateFolderAsync()
+    {
+        var newFolder = await _folderService.CreateFolderAsync("새 폴더", CurrentFolderId);
+        FolderList.Add(new FolderItemViewModel(newFolder));
+    }
+
+    [RelayCommand]
+    private async Task AddFileAsync()
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Filter = "악보 파일 (*.mid;*.midi;*.mml;*.txt)|*.mid;*.midi;*.mml;*.txt|모든 파일 (*.*)|*.*",
+            Multiselect = true,
+            Title = "악보 파일 추가"
+        };
+
+        if (dialog.ShowDialog() == true)
+        {
+            foreach (var file in dialog.FileNames)
+            {
+                var score = await _libraryService.ImportExternalFileAsync(file, CurrentFolderId);
+                // Incremental addition to UI collection
+                DisplayedScores.Insert(0, new ScoreItemViewModel(score));
+                TotalItemCount++;
+            }
+            UpdateStatusText();
+            UpdateEmptyState();
+        }
+    }
+
+    [RelayCommand]
+    private async Task DeleteSelectedScoreAsync()
+    {
+        if (SelectedScore == null) return;
+
+        var target = SelectedScore;
+        await _libraryService.DeleteScoreAsync(target.Id);
+
+        // Incremental removal
+        DisplayedScores.Remove(target);
+        TotalItemCount = Math.Max(0, TotalItemCount - 1);
+        SelectedScore = null;
+        UpdateStatusText();
+        UpdateEmptyState();
+    }
+
+    [RelayCommand]
+    private async Task RenameSelectedScoreAsync()
+    {
+        if (SelectedScore == null) return;
+
+        var target = SelectedScore;
+        string newTitle = target.Title + " (수정)";
+        var updated = await _libraryService.RenameScoreAsync(target.Id, newTitle);
+
+        // Incremental update
+        target.UpdateFromModel(updated);
+    }
+
+    [RelayCommand]
+    private async Task ToggleFavoriteScoreAsync(ScoreItemViewModel? scoreVm)
+    {
+        var target = scoreVm ?? SelectedScore;
+        if (target == null) return;
+
+        await _repository.ToggleFavoriteAsync(target.Id);
+        target.Favorite = !target.Favorite;
+
+        if (IsFavoritesView && !target.Favorite)
+        {
+            DisplayedScores.Remove(target);
+            TotalItemCount = Math.Max(0, TotalItemCount - 1);
+            UpdateStatusText();
+            UpdateEmptyState();
+        }
+    }
+
+    [RelayCommand]
+    private void CutSelectedScore()
+    {
+        if (SelectedScore == null) return;
+        _clipboardScore = SelectedScore;
+        _isCut = true;
+    }
+
+    [RelayCommand]
+    private void CopySelectedScore()
+    {
+        if (SelectedScore == null) return;
+        _clipboardScore = SelectedScore;
+        _isCut = false;
+    }
+
+    [RelayCommand]
+    private async Task PasteScoreAsync()
+    {
+        if (_clipboardScore == null) return;
+
+        if (_isCut)
+        {
+            await _libraryService.MoveScoreAsync(_clipboardScore.Id, CurrentFolderId);
+            if (_clipboardScore.FolderId != CurrentFolderId)
+            {
+                DisplayedScores.Remove(_clipboardScore);
+            }
+            _clipboardScore = null;
+        }
+        else
+        {
+            var newScore = await _libraryService.CopyScoreAsync(_clipboardScore.Id, CurrentFolderId);
+            DisplayedScores.Insert(0, new ScoreItemViewModel(newScore));
+            TotalItemCount++;
+        }
+
+        UpdateStatusText();
+        UpdateEmptyState();
     }
 }

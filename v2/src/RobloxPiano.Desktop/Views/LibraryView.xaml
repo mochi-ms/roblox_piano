@@ -10,6 +10,10 @@
     <UserControl.DataContext>
         <vm:LibraryViewModel />
     </UserControl.DataContext>
+
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+    </UserControl.Resources>
     
     <Grid Background="{StaticResource Background.Root}">
         <Grid.ColumnDefinitions>
@@ -30,13 +34,13 @@
                 <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="10,0,10,12">
                         <!-- Navigation Items -->
-                        <Button HorizontalContentAlignment="Left" Padding="12,8" Margin="0,0,0,4" Background="Transparent" BorderThickness="0">
+                        <Button HorizontalContentAlignment="Left" Padding="12,8" Margin="0,0,0,4" Background="Transparent" BorderThickness="0" Command="{Binding NavigateToFolderCommand}" CommandParameter="{x:Null}">
                             <StackPanel Orientation="Horizontal">
                                 <Path Data="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z" Fill="{StaticResource Accent.Primary}" Width="15" Height="15" Stretch="Uniform" Margin="0,0,12,0"/>
                                 <TextBlock Text="내 라이브러리" Foreground="{StaticResource Text.Primary}" FontWeight="Medium" FontSize="12.5"/>
                             </StackPanel>
                         </Button>
-                        <Button HorizontalContentAlignment="Left" Padding="12,8" Margin="0,0,0,4" Background="Transparent" BorderThickness="0">
+                        <Button HorizontalContentAlignment="Left" Padding="12,8" Margin="0,0,0,4" Background="Transparent" BorderThickness="0" Command="{Binding NavigateToFavoritesCommand}">
                             <StackPanel Orientation="Horizontal">
                                 <Path Data="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" Fill="{StaticResource Status.Warning}" Width="15" Height="15" Stretch="Uniform" Margin="0,0,12,0"/>
                                 <TextBlock Text="즐겨찾기" Foreground="{StaticResource Text.Secondary}" FontSize="12.5"/>
@@ -47,30 +51,21 @@
                         
                         <!-- Folders -->
                         <TextBlock Text="폴더" Foreground="{StaticResource Text.Tertiary}" FontSize="11.5" FontWeight="SemiBold" Margin="12,6,0,6" />
-                        <Button HorizontalContentAlignment="Left" Padding="20,7,12,7" Margin="0,0,0,2" Background="Transparent" BorderThickness="0">
-                            <StackPanel Orientation="Horizontal">
-                                <Path Data="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z" Fill="{StaticResource Text.Secondary}" Width="14" Height="14" Stretch="Uniform" Margin="0,0,10,0"/>
-                                <TextBlock Text="J-POP" Foreground="{StaticResource Text.Secondary}" FontSize="12.5"/>
-                            </StackPanel>
-                        </Button>
-                        <Button HorizontalContentAlignment="Left" Padding="20,7,12,7" Margin="0,0,0,2" Background="Transparent" BorderThickness="0">
-                            <StackPanel Orientation="Horizontal">
-                                <Path Data="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z" Fill="{StaticResource Text.Secondary}" Width="14" Height="14" Stretch="Uniform" Margin="0,0,10,0"/>
-                                <TextBlock Text="Anime" Foreground="{StaticResource Text.Secondary}" FontSize="12.5"/>
-                            </StackPanel>
-                        </Button>
-                        <Button HorizontalContentAlignment="Left" Padding="20,7,12,7" Margin="0,0,0,2" Background="Transparent" BorderThickness="0">
-                            <StackPanel Orientation="Horizontal">
-                                <Path Data="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z" Fill="{StaticResource Text.Secondary}" Width="14" Height="14" Stretch="Uniform" Margin="0,0,10,0"/>
-                                <TextBlock Text="Game" Foreground="{StaticResource Text.Secondary}" FontSize="12.5"/>
-                            </StackPanel>
-                        </Button>
-                        <Button HorizontalContentAlignment="Left" Padding="20,7,12,7" Margin="0,0,0,2" Background="Transparent" BorderThickness="0">
-                            <StackPanel Orientation="Horizontal">
-                                <Path Data="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z" Fill="{StaticResource Text.Secondary}" Width="14" Height="14" Stretch="Uniform" Margin="0,0,10,0"/>
-                                <TextBlock Text="Practice" Foreground="{StaticResource Text.Secondary}" FontSize="12.5"/>
-                            </StackPanel>
-                        </Button>
+                        
+                        <ItemsControl ItemsSource="{Binding FolderList}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button HorizontalContentAlignment="Left" Padding="20,7,12,7" Margin="0,0,0,2" Background="Transparent" BorderThickness="0"
+                                            Command="{Binding DataContext.NavigateToFolderCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                            CommandParameter="{Binding Id}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Path Data="{Binding Icon}" Fill="{StaticResource Text.Secondary}" Width="14" Height="14" Stretch="Uniform" Margin="0,0,10,0"/>
+                                            <TextBlock Text="{Binding Name}" Foreground="{StaticResource Text.Secondary}" FontSize="12.5"/>
+                                        </StackPanel>
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
                     </StackPanel>
                 </ScrollViewer>
             </Grid>
@@ -95,13 +90,13 @@
                 
                 <!-- Back / Forward / Up -->
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,12,0">
-                    <Button Width="30" Height="30" Padding="6" Margin="0,0,3,0" Background="Transparent" BorderThickness="0">
-                        <Path Data="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" Fill="{StaticResource Text.Disabled}" Stretch="Uniform" />
+                    <Button Width="30" Height="30" Padding="6" Margin="0,0,3,0" Background="Transparent" BorderThickness="0" Command="{Binding NavigateBackCommand}" IsEnabled="{Binding CanGoBack}">
+                        <Path Data="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z" Fill="{StaticResource Text.Primary}" Stretch="Uniform" />
                     </Button>
-                    <Button Width="30" Height="30" Padding="6" Margin="0,0,3,0" Background="Transparent" BorderThickness="0">
-                        <Path Data="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z" Fill="{StaticResource Text.Disabled}" Stretch="Uniform" />
+                    <Button Width="30" Height="30" Padding="6" Margin="0,0,3,0" Background="Transparent" BorderThickness="0" Command="{Binding NavigateForwardCommand}" IsEnabled="{Binding CanGoForward}">
+                        <Path Data="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z" Fill="{StaticResource Text.Primary}" Stretch="Uniform" />
                     </Button>
-                    <Button Width="30" Height="30" Padding="6" Background="Transparent" BorderThickness="0">
+                    <Button Width="30" Height="30" Padding="6" Background="Transparent" BorderThickness="0" Command="{Binding NavigateUpCommand}" IsEnabled="{Binding CanGoUp}">
                         <Path Data="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z" Fill="{StaticResource Text.Primary}" Stretch="Uniform" />
                     </Button>
                 </StackPanel>
@@ -110,33 +105,31 @@
                 <Border Grid.Column="1" Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="4" Padding="10,0" Margin="0,0,12,0" Height="32">
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                         <Path Data="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z" Fill="{StaticResource Text.Secondary}" Width="13" Height="13" Stretch="Uniform" Margin="0,0,6,0"/>
-                        <TextBlock Text="내 라이브러리" FontSize="12" Foreground="{StaticResource Text.Primary}" VerticalAlignment="Center" />
-                        <Path Data="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z" Fill="{StaticResource Text.Tertiary}" Width="14" Height="14" Stretch="Uniform" Margin="4,0" />
-                        <TextBlock Text="J-POP" FontSize="12" Foreground="{StaticResource Text.Primary}" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding BreadcrumbPath}" FontSize="12" Foreground="{StaticResource Text.Primary}" VerticalAlignment="Center" />
                     </StackPanel>
                 </Border>
                 
                 <!-- Search Box -->
-                <TextBox Grid.Column="2" Height="32" VerticalContentAlignment="Center" BorderThickness="1" BorderBrush="{StaticResource Border.Subtle}" Background="{StaticResource Surface.Elevated}" Padding="8,4" Text="라이브러리 검색" Foreground="{StaticResource Text.Secondary}"/>
+                <TextBox Grid.Column="2" Height="32" VerticalContentAlignment="Center" BorderThickness="1" BorderBrush="{StaticResource Border.Subtle}" Background="{StaticResource Surface.Elevated}" Padding="8,4" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Foreground="{StaticResource Text.Primary}"/>
             </Grid>
 
             <!-- Command Bar -->
             <Border Grid.Row="1" Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="0,1,0,1" Padding="14,6">
                 <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
                     <StackPanel Orientation="Horizontal">
-                        <Button Margin="0,0,4,0" Padding="8,4" Background="Transparent" BorderThickness="0">
+                        <Button Margin="0,0,4,0" Padding="8,4" Background="Transparent" BorderThickness="0" Command="{Binding CreateFolderCommand}">
                             <StackPanel Orientation="Horizontal">
                                 <Path Data="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" Fill="{StaticResource Text.Primary}" Width="13" Height="13" Stretch="Uniform" Margin="0,0,6,0"/>
                                 <TextBlock Text="새로 만들기" FontSize="12"/>
                             </StackPanel>
                         </Button>
-                        <Button Margin="0,0,4,0" Padding="8,4" Background="Transparent" BorderThickness="0">
+                        <Button Margin="0,0,4,0" Padding="8,4" Background="Transparent" BorderThickness="0" Command="{Binding AddFileCommand}">
                             <StackPanel Orientation="Horizontal">
                                 <Path Data="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 14h-3v3h-2v-3H8v-2h3v-3h2v3h3v2zm-3-7V3.5L18.5 9H13z" Fill="{StaticResource Text.Primary}" Width="13" Height="13" Stretch="Uniform" Margin="0,0,6,0"/>
                                 <TextBlock Text="파일 추가" FontSize="12"/>
                             </StackPanel>
                         </Button>
-                        <Button Margin="0,0,8,0" Padding="8,4" Background="Transparent" BorderThickness="0">
+                        <Button Margin="0,0,8,0" Padding="8,4" Background="Transparent" BorderThickness="0" Command="{Binding CreateFolderCommand}">
                             <StackPanel Orientation="Horizontal">
                                 <Path Data="M20 6h-8l-2-2H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-1 8h-3v3h-2v-3h-3v-2h3V9h2v3h3v2z" Fill="{StaticResource Text.Primary}" Width="13" Height="13" Stretch="Uniform" Margin="0,0,6,0"/>
                                 <TextBlock Text="폴더 추가" FontSize="12"/>
@@ -145,19 +138,19 @@
                         
                         <Separator Background="{StaticResource Border.Subtle}" Margin="4,2,8,2"/>
                         
-                        <Button Margin="0,0,3,0" Padding="7,4" Background="Transparent" BorderThickness="0" ToolTip="잘라내기">
+                        <Button Margin="0,0,3,0" Padding="7,4" Background="Transparent" BorderThickness="0" ToolTip="잘라내기" Command="{Binding CutSelectedScoreCommand}">
                             <Path Data="M9.64 7.64c.23-.5.36-1.05.36-1.64 0-2.21-1.79-4-4-4S2 3.79 2 6s1.79 4 4 4c.59 0 1.14-.13 1.64-.36L10 12l-2.36 2.36C7.14 14.13 6.59 14 6 14c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4c0-.59-.13-1.14-.36-1.64L12 14l7 7h3v-1L9.64 7.64zM6 8c-1.1 0-2-.89-2-2s.9-2 2-2 2 .89 2 2-.9 2-2 2zm0 12c-1.1 0-2-.89-2-2s.9-2 2-2 2 .89 2 2-.9 2-2 2zm6-7.5c-.28 0-.5-.22-.5-.5s.22-.5.5-.5.5.22.5.5-.22.5-.5.5zM19 3l-6 6 2 2 7-7V3z" Fill="{StaticResource Text.Secondary}" Width="13" Height="13" Stretch="Uniform"/>
                         </Button>
-                        <Button Margin="0,0,3,0" Padding="7,4" Background="Transparent" BorderThickness="0" ToolTip="복사">
+                        <Button Margin="0,0,3,0" Padding="7,4" Background="Transparent" BorderThickness="0" ToolTip="복사" Command="{Binding CopySelectedScoreCommand}">
                             <Path Data="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" Fill="{StaticResource Text.Secondary}" Width="13" Height="13" Stretch="Uniform"/>
                         </Button>
-                        <Button Margin="0,0,3,0" Padding="7,4" Background="Transparent" BorderThickness="0" ToolTip="붙여넣기">
+                        <Button Margin="0,0,3,0" Padding="7,4" Background="Transparent" BorderThickness="0" ToolTip="붙여넣기" Command="{Binding PasteScoreCommand}">
                             <Path Data="M19 2h-4.18C14.4.84 13.3 0 12 0c-1.3 0-2.4.84-2.82 2H5c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm7 18H5V4h2v3h10V4h2v16z" Fill="{StaticResource Text.Secondary}" Width="13" Height="13" Stretch="Uniform"/>
                         </Button>
-                        <Button Margin="0,0,3,0" Padding="7,4" Background="Transparent" BorderThickness="0" ToolTip="이름 바꾸기">
+                        <Button Margin="0,0,3,0" Padding="7,4" Background="Transparent" BorderThickness="0" ToolTip="이름 바꾸기" Command="{Binding RenameSelectedScoreCommand}">
                             <Path Data="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z" Fill="{StaticResource Text.Secondary}" Width="13" Height="13" Stretch="Uniform"/>
                         </Button>
-                        <Button Margin="0,0,8,0" Padding="7,4" Background="Transparent" BorderThickness="0" ToolTip="삭제">
+                        <Button Margin="0,0,8,0" Padding="7,4" Background="Transparent" BorderThickness="0" ToolTip="삭제" Command="{Binding DeleteSelectedScoreCommand}">
                             <Path Data="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" Fill="{StaticResource Status.Error}" Width="13" Height="13" Stretch="Uniform"/>
                         </Button>
                         
@@ -178,7 +171,7 @@
 
                         <Separator Background="{StaticResource Border.Subtle}" Margin="4,2,8,2"/>
 
-                        <Button Margin="0,0,4,0" Padding="8,4" Background="Transparent" BorderThickness="0">
+                        <Button Margin="0,0,4,0" Padding="8,4" Background="Transparent" BorderThickness="0" Command="{Binding AddFileCommand}">
                             <StackPanel Orientation="Horizontal">
                                 <Path Data="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" Fill="{StaticResource Accent.Primary}" Width="13" Height="13" Stretch="Uniform" Margin="0,0,6,0"/>
                                 <TextBlock Text="MML 가져오기" FontSize="12" Foreground="{StaticResource Accent.Primary}" FontWeight="Medium"/>
@@ -188,37 +181,59 @@
                 </ScrollViewer>
             </Border>
 
-            <!-- Details List (DataGrid) -->
-            <DataGrid Grid.Row="2" ItemsSource="{Binding MockScores}" AutoGenerateColumns="False" 
-                      Background="{StaticResource Background.Root}" 
-                      RowBackground="Transparent" AlternatingRowBackground="Transparent" 
-                      GridLinesVisibility="None" HeadersVisibility="Column" BorderThickness="0"
-                      RowHeight="36" FontSize="12.5" Foreground="{StaticResource Text.Primary}" Margin="16,8">
-                
-                <DataGrid.Columns>
-                    <DataGridTemplateColumn Header="이름" Width="300">
-                        <DataGridTemplateColumn.CellTemplate>
-                            <DataTemplate>
-                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                    <Path Data="{Binding Icon}" Fill="{StaticResource Text.Secondary}" Width="14" Height="14" Stretch="Uniform" Margin="0,0,10,0" VerticalAlignment="Center"/>
-                                    <TextBlock Text="{Binding Name}" VerticalAlignment="Center" Foreground="{StaticResource Text.Primary}"/>
-                                </StackPanel>
-                            </DataTemplate>
-                        </DataGridTemplateColumn.CellTemplate>
-                    </DataGridTemplateColumn>
-                    <DataGridTextColumn Header="유형" Binding="{Binding Type}" Width="90"/>
-                    <DataGridTextColumn Header="길이" Binding="{Binding Duration}" Width="80"/>
-                    <DataGridTextColumn Header="BPM" Binding="{Binding Bpm}" Width="60"/>
-                    <DataGridTextColumn Header="음표 수" Binding="{Binding Notes}" Width="80"/>
-                    <DataGridTextColumn Header="수정한 날짜" Binding="{Binding Modified}" Width="140"/>
-                </DataGrid.Columns>
-            </DataGrid>
+            <!-- Details List Area (With Real WPF Virtualization & Empty State) -->
+            <Grid Grid.Row="2" Background="{StaticResource Background.Root}" Margin="16,8">
+                <!-- Virtualized DataGrid -->
+                <DataGrid ItemsSource="{Binding DisplayedScores}" SelectedItem="{Binding SelectedScore}"
+                          AutoGenerateColumns="False" 
+                          Background="{StaticResource Background.Root}" 
+                          RowBackground="Transparent" AlternatingRowBackground="Transparent" 
+                          GridLinesVisibility="None" HeadersVisibility="Column" BorderThickness="0"
+                          RowHeight="36" FontSize="12.5" Foreground="{StaticResource Text.Primary}"
+                          EnableRowVirtualization="True"
+                          EnableColumnVirtualization="True"
+                          VirtualizingPanel.IsVirtualizing="True"
+                          VirtualizingPanel.VirtualizationMode="Recycling"
+                          ScrollViewer.CanContentScroll="True">
+                    
+                    <DataGrid.Columns>
+                        <DataGridTemplateColumn Header="이름" Width="300">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Path Data="{Binding Icon}" Fill="{StaticResource Text.Secondary}" Width="14" Height="14" Stretch="Uniform" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                                        <TextBlock Text="{Binding Title}" VerticalAlignment="Center" Foreground="{StaticResource Text.Primary}"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                        <DataGridTextColumn Header="유형" Binding="{Binding Type}" Width="90"/>
+                        <DataGridTextColumn Header="길이" Binding="{Binding Duration}" Width="80"/>
+                        <DataGridTextColumn Header="BPM" Binding="{Binding Bpm}" Width="60"/>
+                        <DataGridTextColumn Header="음표 수" Binding="{Binding Notes}" Width="80"/>
+                        <DataGridTextColumn Header="수정한 날짜" Binding="{Binding Modified}" Width="140"/>
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <!-- Compact Empty State -->
+                <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6"
+                        HorizontalAlignment="Center" VerticalAlignment="Center" Padding="32,24"
+                        Visibility="{Binding IsEmpty, Converter={StaticResource BoolToVis}}">
+                    <StackPanel HorizontalAlignment="Center">
+                        <TextBlock Text="라이브러리가 비어 있습니다." FontSize="14" FontWeight="Medium" Foreground="{StaticResource Text.Primary}" HorizontalAlignment="Center" Margin="0,0,0,8"/>
+                        <TextBlock Text="파일이나 폴더를 추가하여 악보를 관리하세요." FontSize="12" Foreground="{StaticResource Text.Secondary}" HorizontalAlignment="Center" Margin="0,0,0,16"/>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                            <Button Content="파일 추가" Style="{StaticResource AccentButtonStyle}" Padding="16,6" Margin="0,0,8,0" Command="{Binding AddFileCommand}"/>
+                            <Button Content="폴더 추가" Padding="16,6" Command="{Binding CreateFolderCommand}"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+            </Grid>
 
             <!-- Bottom Status Bar -->
             <Border Grid.Row="3" Background="{StaticResource Surface.Base}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="0,1,0,0" Padding="16,0">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Text="17개 항목" FontSize="11" Foreground="{StaticResource Text.Secondary}" Margin="0,0,24,0"/>
-                    <TextBlock Text="1개 선택됨" FontSize="11" Foreground="{StaticResource Text.Secondary}"/>
+                    <TextBlock Text="{Binding StatusText}" FontSize="11" Foreground="{StaticResource Text.Secondary}"/>
                 </StackPanel>
             </Border>
         </Grid>

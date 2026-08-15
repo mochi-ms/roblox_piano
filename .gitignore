@@ -11,3 +11,10 @@ dist/
 library_rename_report.json
 *.backup_migrate
 user_library/
+*.db
+*.db-wal
+*.db-shm
+*.bak
+[Bb]in/
+[Oo]bj/
+.vs/
