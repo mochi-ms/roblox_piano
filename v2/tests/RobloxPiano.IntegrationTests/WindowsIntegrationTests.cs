@@ -554,7 +554,8 @@ public class WindowsIntegrationTests
     {
         var fakeApi = new FakeWindowApi();
         using var hotkeyService = new GlobalHotkeyService(fakeApi);
-        using var playerVm = new PlayerViewModel();
+        using var backend = new DryRunPlaybackBackend();
+        using var playerVm = new PlayerViewModel(backend);
         using var mainVm = new MainViewModel(playerVm, null, null, null, hotkeyService);
 
         // Dispose playerVm early to simulate exception on hotkey handling
