@@ -85,8 +85,12 @@ public class KeyStateManagerTests
         Assert.Contains("q", manager.ActiveKeys);
         Assert.Contains("SHIFT", manager.ActiveModifiers);
 
-        // Wait 600ms for watchdog check to trigger
-        await Task.Delay(600);
+        // Wait for watchdog check to trigger (timeout 1.5s)
+        var deadline = DateTime.UtcNow.AddSeconds(1.5);
+        while (DateTime.UtcNow < deadline && (manager.ActiveKeys.Count > 0 || manager.ActiveModifiers.Count > 0))
+        {
+            await Task.Delay(50);
+        }
 
         Assert.Empty(manager.ActiveKeys);
         Assert.Empty(manager.ActiveModifiers);

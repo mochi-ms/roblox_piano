@@ -202,6 +202,11 @@ public class ImportViewModelTests : IDisposable
             }
         }
 
+        public Task<ImportResult> ImportTextAsync(string mmlText, string? preferredTitle = null, bool addToLibrary = true, RobloxPiano.Core.Piano.PianoProfile? targetPianoProfile = null, string? targetFolderId = null, CancellationToken ct = default)
+        {
+            return ImportFileAsync(new ImportRequest("text://mml", preferredTitle), ct);
+        }
+
         public Task<ImportBatchResult> ImportBatchAsync(IReadOnlyList<ImportRequest> requests, IProgress<(int Current, int Total, string FileName)>? progress = null, CancellationToken ct = default)
         {
             return Task.FromResult(new ImportBatchResult(new List<ImportResult>(), false));
@@ -227,6 +232,11 @@ public class ImportViewModelTests : IDisposable
                 "Async Score",
                 timeline,
                 1, 0, 60, 60));
+        }
+
+        public Task<ImportResult> ImportTextAsync(string mmlText, string? preferredTitle = null, bool addToLibrary = true, RobloxPiano.Core.Piano.PianoProfile? targetPianoProfile = null, string? targetFolderId = null, CancellationToken ct = default)
+        {
+            return ImportFileAsync(new ImportRequest("text://mml", preferredTitle), ct);
         }
 
         public Task<ImportBatchResult> ImportBatchAsync(IReadOnlyList<ImportRequest> requests, IProgress<(int Current, int Total, string FileName)>? progress = null, CancellationToken ct = default)

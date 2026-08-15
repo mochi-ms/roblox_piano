@@ -1,6 +1,7 @@
 using RobloxPiano.Core.Importers;
 using RobloxPiano.Core.Library;
 using RobloxPiano.Core.Music;
+using RobloxPiano.Core.Piano;
 using RobloxPiano.Core.Services;
 
 namespace RobloxPiano.Core.Importing;
@@ -143,6 +144,89 @@ public class ImportPipeline : IImportPipeline
         return ImportResult.Successful(
             normalizedPath,
             sourceType,
+            normalizedTitle,
+            timeline,
+            validation.PlayableNotes,
+            validation.OutOfRangeNotes,
+            validation.MinPitch,
+            validation.MaxPitch,
+            createdScore);
+    }
+
+    public async Task<ImportResult> ImportTextAsync(
+        string mmlText,
+        string? preferredTitle = null,
+        bool addToLibrary = true,
+        PianoProfile? targetPianoProfile = null,
+        string? targetFolderId = null,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+
+        if (string.IsNullOrWhiteSpace(mmlText))
+        {
+            return ImportResult.Failed("text://pasted-mml", "MML 텍스트가 비어 있습니다.", errorCode: "EMPTY_TEXT", sourceType: ImportSourceType.Mml);
+        }
+
+        ct.ThrowIfCancellationRequested();
+
+        MusicTimeline timeline;
+        try
+        {
+            timeline = _mmlImporter.ImportScore(mmlText);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (MmlParseException ex)
+        {
+            return ImportResult.Failed("text://pasted-mml", $"{ImportError.InvalidMml}: {ex.Message}", errorCode: "MML_SYNTAX", sourceType: ImportSourceType.Mml);
+        }
+        catch (Exception ex)
+        {
+            return ImportResult.Failed("text://pasted-mml", $"{ImportError.InvalidMml} ({ex.Message})", errorCode: "PARSE_ERROR", sourceType: ImportSourceType.Mml);
+        }
+
+        ct.ThrowIfCancellationRequested();
+
+        var validation = ImportTimelineValidator.Validate(timeline, targetPianoProfile);
+        if (!validation.IsValid)
+        {
+            return ImportResult.Failed("text://pasted-mml", validation.ErrorMessage ?? ImportError.CorruptTiming, errorCode: "TIMELINE_INVALID", sourceType: ImportSourceType.Mml);
+        }
+
+        string normalizedTitle = NormalizeTitle(timeline.Title, preferredTitle, "붙여넣은 MML.mml");
+        timeline.Title = normalizedTitle;
+
+        ct.ThrowIfCancellationRequested();
+
+        ScoreItem? createdScore = null;
+        if (addToLibrary && _libraryService != null)
+        {
+            try
+            {
+                createdScore = await _libraryService.CreateScoreFromTextAsync(
+                    mmlText,
+                    normalizedTitle,
+                    targetFolderId,
+                    ct);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                return ImportResult.Failed("text://pasted-mml", $"라이브러리 등록 실패: {ex.Message}", errorCode: "LIBRARY_PERSIST_ERROR", sourceType: ImportSourceType.Mml);
+            }
+        }
+
+        ct.ThrowIfCancellationRequested();
+
+        return ImportResult.Successful(
+            createdScore?.FilePath ?? "text://pasted-mml",
+            ImportSourceType.Mml,
             normalizedTitle,
             timeline,
             validation.PlayableNotes,

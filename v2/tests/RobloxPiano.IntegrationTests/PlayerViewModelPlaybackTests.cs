@@ -378,6 +378,13 @@ public class PlayerViewModelPlaybackTests : IDisposable
             return Task.FromResult(RobloxPiano.Core.Importing.ImportResult.Successful(request.FilePath, RobloxPiano.Core.Importing.ImportSourceType.Midi, "Mock", tl, 1, 0, 21, 21));
         }
 
+        public Task<RobloxPiano.Core.Importing.ImportResult> ImportTextAsync(string mmlText, string? preferredTitle = null, bool addToLibrary = true, RobloxPiano.Core.Piano.PianoProfile? targetPianoProfile = null, string? targetFolderId = null, CancellationToken ct = default)
+        {
+            var tl = new MusicTimeline(preferredTitle ?? "Mock MML");
+            tl.Notes.Add(new NoteEvent(60, 0, 1));
+            return Task.FromResult(RobloxPiano.Core.Importing.ImportResult.Successful("text://mml", RobloxPiano.Core.Importing.ImportSourceType.Mml, preferredTitle ?? "Mock MML", tl, 1, 0, 60, 60));
+        }
+
         public Task<RobloxPiano.Core.Importing.ImportBatchResult> ImportBatchAsync(IReadOnlyList<RobloxPiano.Core.Importing.ImportRequest> requests, IProgress<(int Current, int Total, string FileName)>? progress = null, CancellationToken ct = default)
         {
             return Task.FromResult(new RobloxPiano.Core.Importing.ImportBatchResult(new List<RobloxPiano.Core.Importing.ImportResult>()));

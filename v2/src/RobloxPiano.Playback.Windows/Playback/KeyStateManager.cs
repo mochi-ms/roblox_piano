@@ -24,7 +24,8 @@ public class KeyStateManager : IDisposable
 
         if (enableWatchdog)
         {
-            _watchdogTimer = new Timer(WatchdogCheck, null, TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(500));
+            var interval = TimeSpan.FromMilliseconds(Math.Clamp(idleTimeoutSeconds * 500, 50, 500));
+            _watchdogTimer = new Timer(WatchdogCheck, null, interval, interval);
         }
     }
 

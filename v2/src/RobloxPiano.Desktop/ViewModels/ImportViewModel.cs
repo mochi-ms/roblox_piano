@@ -35,6 +35,33 @@ public partial class ImportViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _summaryText = string.Empty;
 
+    [ObservableProperty]
+    private int _selectedModeIndex = 0; // 0 = File, 1 = Text
+
+    [ObservableProperty]
+    private string _pastedMmlText = string.Empty;
+
+    [ObservableProperty]
+    private string _pastedMmlTitle = string.Empty;
+
+    [ObservableProperty]
+    private string _textImportErrorMessage = string.Empty;
+
+    [ObservableProperty]
+    private bool _hasTextImportError;
+
+    [ObservableProperty]
+    private bool _isTextImporting;
+
+    public bool IsFileMode => SelectedModeIndex == 0;
+    public bool IsTextMode => SelectedModeIndex == 1;
+
+    partial void OnSelectedModeIndexChanged(int value)
+    {
+        OnPropertyChanged(nameof(IsFileMode));
+        OnPropertyChanged(nameof(IsTextMode));
+    }
+
     public event EventHandler<ScoreItem>? OpenScoreRequested;
     public event EventHandler? ViewLibraryRequested;
     public event EventHandler? ScoreImported;
@@ -297,6 +324,60 @@ public partial class ImportViewModel : ObservableObject, IDisposable
     public void ViewInLibrary(ImportQueueItemViewModel? item)
     {
         ViewLibraryRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    [RelayCommand]
+    public void SelectMode(string mode)
+    {
+        SelectedModeIndex = mode == "Text" ? 1 : 0;
+    }
+
+    [RelayCommand]
+    public async Task ImportPastedTextAsync()
+    {
+        if (IsTextImporting || string.IsNullOrWhiteSpace(PastedMmlText))
+            return;
+
+        IsTextImporting = true;
+        HasTextImportError = false;
+        TextImportErrorMessage = string.Empty;
+
+        try
+        {
+            var result = await _pipeline.ImportTextAsync(
+                PastedMmlText.Trim(),
+                string.IsNullOrWhiteSpace(PastedMmlTitle) ? null : PastedMmlTitle.Trim(),
+                addToLibrary: true,
+                targetPianoProfile: _profileContext.CurrentProfile);
+
+            if (result.Success)
+            {
+                var queueItem = new ImportQueueItemViewModel(result.FilePath);
+                queueItem.SetCompleted(result);
+                QueueItems.Insert(0, queueItem);
+                HasItems = true;
+                SummaryText = $"'{result.Title}' 가져오기 완료";
+                ScoreImported?.Invoke(this, EventArgs.Empty);
+
+                SelectedModeIndex = 0;
+                PastedMmlText = string.Empty;
+                PastedMmlTitle = string.Empty;
+            }
+            else
+            {
+                HasTextImportError = true;
+                TextImportErrorMessage = result.ErrorMessage ?? "MML 파싱에 실패했습니다.";
+            }
+        }
+        catch (Exception ex)
+        {
+            HasTextImportError = true;
+            TextImportErrorMessage = $"오류: {ex.Message}";
+        }
+        finally
+        {
+            IsTextImporting = false;
+        }
     }
 
     public void Dispose()

@@ -152,6 +152,67 @@ public class LibraryService
         }
     }
 
+    public async Task<ScoreItem> CreateScoreFromTextAsync(
+        string mmlText,
+        string title,
+        string? folderId = null,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(mmlText))
+            throw new InvalidOperationException("빈 MML 텍스트는 악보로 등록할 수 없습니다.");
+
+        var meta = _mmlImporter.ExtractMetadata(mmlText);
+        double duration = Convert.ToDouble(meta["duration"]);
+        double bpm = Convert.ToDouble(meta["bpm"]);
+        int totalNotes = Convert.ToInt32(meta["notes"]);
+
+        if (totalNotes <= 0)
+        {
+            throw new InvalidOperationException("유효한 음표 데이터가 없습니다.");
+        }
+
+        var allFolders = (await _repository.GetAllFoldersAsync(ct)).ToDictionary(f => f.Id);
+        var targetDir = _fileService.GetFolderPath(folderId, allFolders);
+        Directory.CreateDirectory(targetDir);
+
+        var cleanTitle = string.IsNullOrWhiteSpace(title) ? "붙여넣은 MML" : _fileService.SanitizeName(title);
+        var destFilename = _fileService.GetSafeFilename(targetDir, $"{cleanTitle}.mml");
+        var destFilePath = Path.Combine(targetDir, destFilename);
+
+        await File.WriteAllTextAsync(destFilePath, mmlText, ct);
+
+        var score = new ScoreItem(
+            id: Guid.NewGuid().ToString(),
+            title: cleanTitle,
+            sourceType: "MML",
+            sourceUrl: "text://pasted-mml",
+            filePath: destFilePath,
+            originalFilename: destFilename,
+            fileExtension: ".mml",
+            folderId: folderId,
+            duration: duration,
+            bpm: bpm,
+            totalNotes: totalNotes,
+            tags: "imported,pasted",
+            analysisStatus: "READY",
+            analysisError: ""
+        );
+
+        try
+        {
+            await _repository.InsertScoreAsync(score, ct);
+            return score;
+        }
+        catch
+        {
+            if (File.Exists(destFilePath) && _fileService.IsPathUnderRoot(destFilePath))
+            {
+                try { File.Delete(destFilePath); } catch { }
+            }
+            throw;
+        }
+    }
+
     public async Task<ScoreItem> RenameScoreAsync(string scoreId, string newTitle, CancellationToken ct = default)
     {
         var item = await _repository.GetScoreAsync(scoreId, ct)

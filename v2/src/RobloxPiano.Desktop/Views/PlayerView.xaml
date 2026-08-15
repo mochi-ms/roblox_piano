@@ -306,17 +306,17 @@
         <Border Grid.Row="3" Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="0,1,0,0" Padding="20,0">
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="220" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="220" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 
                 <!-- Time & Playback Status -->
-                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,16,0">
                     <TextBlock Text="{Binding FormattedCurrentTime}" FontSize="13" Foreground="{StaticResource Text.Primary}" FontWeight="SemiBold" Margin="0,0,4,0"/>
                     <TextBlock Text="{Binding FormattedTotalTime}" FontSize="12.5" Foreground="{StaticResource Text.Secondary}" Margin="0,0,12,0"/>
-                    <Border Background="#162D20" BorderBrush="{StaticResource Status.Success}" BorderThickness="1" CornerRadius="4" Padding="6,2">
-                        <TextBlock Text="{Binding StatusText}" FontSize="11" Foreground="{StaticResource Status.Success}" FontWeight="Medium" />
+                    <Border Background="{StaticResource Surface.Base}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="4" Padding="8,3" MaxWidth="320">
+                        <TextBlock Text="{Binding StatusText}" FontSize="11" Foreground="{StaticResource Text.Primary}" FontWeight="Medium" TextTrimming="CharacterEllipsis" ToolTip="{Binding StatusText}" />
                     </Border>
                 </StackPanel>
                 
