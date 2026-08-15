@@ -6,7 +6,7 @@
              xmlns:vm="clr-namespace:RobloxPiano.Desktop.ViewModels"
              mc:Ignorable="d" 
              Background="{StaticResource Background.Root}"
-             d:DesignHeight="700" d:DesignWidth="1100">
+             d:DesignHeight="750" d:DesignWidth="1150">
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
     </UserControl.Resources>
@@ -27,13 +27,18 @@
             </Grid.ColumnDefinitions>
 
             <StackPanel Grid.Column="0">
-                <TextBlock Text="오디오에서 악보 만들기" FontSize="20" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" Margin="0,0,0,4" />
-                <TextBlock Text="로컬 오디오를 불러와 분석 가능한 형식으로 준비합니다." FontSize="13" Foreground="{StaticResource Text.Secondary}" />
+                <TextBlock Text="오디오에서 악보 만들기 (AI Transcription)" FontSize="20" FontWeight="SemiBold" Foreground="{StaticResource Text.Primary}" Margin="0,0,0,4" />
+                <TextBlock Text="로컬 오디오를 불러와 Spotify Basic Pitch AI로 피아노 악보(MIDI)를 생성합니다." FontSize="13" Foreground="{StaticResource Text.Secondary}" />
             </StackPanel>
 
-            <Border Grid.Column="1" Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="10,6" VerticalAlignment="Center">
-                <TextBlock Text="{Binding FfmpegStatusText}" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
-            </Border>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="10,6" Margin="0,0,8,0">
+                    <TextBlock Text="{Binding FfmpegStatusText}" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                </Border>
+                <Border Background="{StaticResource Surface.Elevated}" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="1" CornerRadius="6" Padding="10,6">
+                    <TextBlock Text="{Binding AiEngineStatusText}" FontSize="11.5" Foreground="{StaticResource Text.Secondary}" />
+                </Border>
+            </StackPanel>
         </Grid>
 
         <!-- 2. Drop Zone Area -->
@@ -42,7 +47,7 @@
                 BorderBrush="{StaticResource Border.Subtle}"
                 BorderThickness="1"
                 CornerRadius="8"
-                Padding="24,28"
+                Padding="24,24"
                 Margin="0,0,0,20"
                 AllowDrop="True"
                 DragEnter="DropZone_DragEnter"
@@ -77,20 +82,22 @@
                 <Border Grid.Row="0" BorderBrush="{StaticResource Border.Subtle}" BorderThickness="0,0,0,1" Padding="16,10" Background="{StaticResource Background.Root}">
                     <Grid>
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="3*" />
+                            <ColumnDefinition Width="2.5*" />
+                            <ColumnDefinition Width="70" />
                             <ColumnDefinition Width="80" />
-                            <ColumnDefinition Width="90" />
                             <ColumnDefinition Width="100" />
-                            <ColumnDefinition Width="140" />
-                            <ColumnDefinition Width="100" />
+                            <ColumnDefinition Width="130" />
+                            <ColumnDefinition Width="160" />
+                            <ColumnDefinition Width="200" />
                         </Grid.ColumnDefinitions>
 
                         <TextBlock Grid.Column="0" Text="파일명" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource Text.Secondary}" />
                         <TextBlock Grid.Column="1" Text="형식" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource Text.Secondary}" />
-                        <TextBlock Grid.Column="2" Text="재생 시간" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource Text.Secondary}" />
+                        <TextBlock Grid.Column="2" Text="길이" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource Text.Secondary}" />
                         <TextBlock Grid.Column="3" Text="상태" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource Text.Secondary}" />
-                        <TextBlock Grid.Column="4" Text="진행률" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource Text.Secondary}" />
-                        <TextBlock Grid.Column="5" Text="작업" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource Text.Secondary}" HorizontalAlignment="Center" />
+                        <TextBlock Grid.Column="4" Text="진행률 / AI 상태" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource Text.Secondary}" />
+                        <TextBlock Grid.Column="5" Text="악보 분석 통계" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource Text.Secondary}" />
+                        <TextBlock Grid.Column="6" Text="작업" FontSize="11.5" FontWeight="SemiBold" Foreground="{StaticResource Text.Secondary}" HorizontalAlignment="Center" />
                     </Grid>
                 </Border>
 
@@ -110,15 +117,16 @@
                                 <Border BorderBrush="{StaticResource Border.Subtle}" BorderThickness="0,0,0,1" Padding="16,12">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="3*" />
+                                            <ColumnDefinition Width="2.5*" />
+                                            <ColumnDefinition Width="70" />
                                             <ColumnDefinition Width="80" />
-                                            <ColumnDefinition Width="90" />
                                             <ColumnDefinition Width="100" />
-                                            <ColumnDefinition Width="140" />
-                                            <ColumnDefinition Width="100" />
+                                            <ColumnDefinition Width="130" />
+                                            <ColumnDefinition Width="160" />
+                                            <ColumnDefinition Width="200" />
                                         </Grid.ColumnDefinitions>
 
-                                        <!-- Filename + Tooltip Error -->
+                                        <!-- Filename + Error Tooltip -->
                                         <StackPanel Grid.Column="0" VerticalAlignment="Center">
                                             <TextBlock Text="{Binding FileName}" FontSize="12.5" FontWeight="Medium" Foreground="{StaticResource Text.Primary}" TextTrimming="CharacterEllipsis" />
                                             <TextBlock Text="{Binding ErrorMessage}" FontSize="11" Foreground="{StaticResource Status.Error}" TextTrimming="CharacterEllipsis"
@@ -137,14 +145,48 @@
                                             <TextBlock Text="{Binding StatusText}" FontSize="11" FontWeight="Medium" Foreground="{StaticResource Text.Primary}" />
                                         </Border>
 
-                                        <!-- Progress Bar -->
-                                        <ProgressBar Grid.Column="4" Value="{Binding ProgressPercent}" Maximum="100" Height="6" VerticalAlignment="Center" Margin="0,0,12,0" />
+                                        <!-- Progress Bar / Sub-Status -->
+                                        <StackPanel Grid.Column="4" VerticalAlignment="Center" Margin="0,0,10,0">
+                                            <!-- Normalization Progress -->
+                                            <ProgressBar Value="{Binding ProgressPercent}" Maximum="100" Height="5"
+                                                         Visibility="{Binding IsAiProcessing, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}" />
+                                            <!-- AI Indeterminate Progress -->
+                                            <ProgressBar IsIndeterminate="True" Height="5"
+                                                         Visibility="{Binding IsAiProcessing, Converter={StaticResource BoolToVis}}" />
+                                            <TextBlock Text="{Binding AiStatusText}" FontSize="10.5" Foreground="{StaticResource Text.Secondary}" Margin="0,3,0,0" TextTrimming="CharacterEllipsis"
+                                                       Visibility="{Binding IsAiProcessing, Converter={StaticResource BoolToVis}}" />
+                                        </StackPanel>
 
-                                        <!-- Action: Open Folder -->
-                                        <Button Grid.Column="5" Content="폴더 열기" Padding="8,4" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                IsEnabled="{Binding IsPrepared}"
-                                                Command="{Binding DataContext.OpenWorkspaceFolderCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                CommandParameter="{Binding}" />
+                                        <!-- Note Stats -->
+                                        <TextBlock Grid.Column="5" Text="{Binding NoteStatsText}" FontSize="11.5" Foreground="{StaticResource Accent.Primary}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+
+                                        <!-- Row Action Buttons -->
+                                        <StackPanel Grid.Column="6" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                            <!-- Prepared -> AI Convert -->
+                                            <Button Content="AI 악보 변환" Padding="8,4" FontSize="11"
+                                                    Style="{StaticResource AccentButtonStyle}"
+                                                    Visibility="{Binding CanStartAi, Converter={StaticResource BoolToVis}}"
+                                                    Command="{Binding DataContext.StartAiTranscriptionCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                    CommandParameter="{Binding}" Margin="0,0,4,0" />
+
+                                            <!-- AI Completed -> Play -->
+                                            <Button Content="바로 연주" Padding="8,4" FontSize="11"
+                                                    Visibility="{Binding HasAiResult, Converter={StaticResource BoolToVis}}"
+                                                    Command="{Binding DataContext.OpenInPlayerCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                    CommandParameter="{Binding}" Margin="0,0,4,0" />
+
+                                            <!-- AI Completed -> Add to Library -->
+                                            <Button Content="라이브러리" Padding="8,4" FontSize="11"
+                                                    Visibility="{Binding HasAiResult, Converter={StaticResource BoolToVis}}"
+                                                    Command="{Binding DataContext.AddToLibraryCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                    CommandParameter="{Binding}" Margin="0,0,4,0" />
+
+                                            <!-- Folder -->
+                                            <Button Content="폴더" Padding="6,4" FontSize="11"
+                                                    IsEnabled="{Binding IsPrepared}"
+                                                    Command="{Binding DataContext.OpenWorkspaceFolderCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                    CommandParameter="{Binding}" />
+                                        </StackPanel>
                                     </Grid>
                                 </Border>
                             </DataTemplate>
@@ -174,14 +216,24 @@
                             IsEnabled="{Binding IsProcessing, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"
                             Margin="0,0,8,0" Padding="14,8" />
 
-                    <Button Content="취소" Command="{Binding CancelIngestCommand}"
-                            IsEnabled="{Binding IsProcessing}"
+                    <Button Content="취소"
+                            Command="{Binding CancelIngestCommand}"
+                            Visibility="{Binding IsProcessing, Converter={StaticResource BoolToVis}}"
+                            Margin="0,0,8,0" Padding="14,8" />
+
+                    <Button Content="AI 취소"
+                            Command="{Binding CancelAiTranscriptionCommand}"
+                            Visibility="{Binding IsAiProcessing, Converter={StaticResource BoolToVis}}"
                             Margin="0,0,8,0" Padding="14,8" />
 
                     <Button Content="오디오 준비" Command="{Binding StartIngestCommand}"
-                            Style="{StaticResource AccentButtonStyle}"
                             IsEnabled="{Binding IsProcessing, Converter={StaticResource BoolToVis}, ConverterParameter=Invert}"
-                            Padding="20,8" />
+                            Margin="0,0,8,0" Padding="16,8" />
+
+                    <Button Content="준비된 파일 모두 분석" Command="{Binding StartBatchAiTranscriptionCommand}"
+                            Style="{StaticResource AccentButtonStyle}"
+                            IsEnabled="{Binding HasPreparedItems}"
+                            Padding="18,8" />
                 </StackPanel>
             </Grid>
         </Border>

@@ -1,6 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using RobloxPiano.Core.Library;
+using RobloxPiano.Core.Music;
 using RobloxPiano.Playback.Windows.WindowsIntegration;
 
 namespace RobloxPiano.Desktop.ViewModels;
@@ -20,6 +21,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly EventHandler _viewLibraryHandler;
     private readonly EventHandler _scoreImportedHandler;
     private readonly EventHandler<HotkeyAction> _hotkeyHandler;
+    private readonly EventHandler<MusicTimeline> _transcribeOpenScoreHandler;
 
     private bool _disposed;
 
@@ -104,10 +106,26 @@ public partial class MainViewModel : ObservableObject, IDisposable
             }
         };
 
+        _transcribeOpenScoreHandler = (_, timeline) =>
+        {
+            try
+            {
+                _playerViewModel.LoadTimeline(timeline, timeline.Title ?? "AI 변환 악보", "AI MIDI");
+                CurrentView = _playerViewModel;
+            }
+            catch (ObjectDisposedException) { }
+            catch (Exception ex)
+            {
+                _playerViewModel.StatusText = $"악보 불러오기 실패: {ex.Message}";
+            }
+        };
+
         _libraryViewModel.OpenScoreRequested += _openScoreHandler;
         _importViewModel.OpenScoreRequested += _openScoreHandler;
         _importViewModel.ViewLibraryRequested += _viewLibraryHandler;
         _importViewModel.ScoreImported += _scoreImportedHandler;
+        _transcribeViewModel.OpenScoreRequested += _transcribeOpenScoreHandler;
+        _transcribeViewModel.ScoreImported += _scoreImportedHandler;
         _hotkeyService.HotkeyPressed += _hotkeyHandler;
         CurrentView = _playerViewModel;
     }
@@ -135,6 +153,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _importViewModel.OpenScoreRequested -= _openScoreHandler;
         _importViewModel.ViewLibraryRequested -= _viewLibraryHandler;
         _importViewModel.ScoreImported -= _scoreImportedHandler;
+        _transcribeViewModel.OpenScoreRequested -= _transcribeOpenScoreHandler;
+        _transcribeViewModel.ScoreImported -= _scoreImportedHandler;
         _hotkeyService.HotkeyPressed -= _hotkeyHandler;
         _hotkeyService.Dispose();
         _importViewModel.Dispose();

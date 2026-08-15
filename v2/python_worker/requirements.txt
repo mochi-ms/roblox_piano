@@ -1,0 +1,3 @@
+# Spotify Basic Pitch AI Transcription Dependency
+# Requires CPython 3.11.x
+basic-pitch==0.4.0
