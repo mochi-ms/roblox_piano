@@ -41,6 +41,16 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+
+# The host's PATH may provide an unrelated ICU build (for example Poppler's
+# ICU 78). PySide6 does not ship ICU with its Windows wheel, so bundling that
+# host copy makes it shadow Windows' ICU and can break Qt imports at startup.
+_incompatible_icu_dlls = {'icuuc.dll', 'icudt78.dll'}
+a.binaries = [
+    entry for entry in a.binaries
+    if entry[0].replace('\\', '/').rsplit('/', 1)[-1].lower() not in _incompatible_icu_dlls
+]
+
 pyz = PYZ(a.pure)
 
 exe = EXE(
