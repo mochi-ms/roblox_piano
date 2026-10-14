@@ -63,6 +63,8 @@ class PlaybackScheduler:
         self._current_time: float = 0.0
         self._total_time: float = 0.0
         self._lock = threading.Lock()
+        self._progress_interval = 1.0 / 30.0
+        self._last_progress_emit = 0.0
 
     @property
     def state(self) -> PlaybackState:
@@ -91,6 +93,19 @@ class PlaybackScheduler:
         if self.on_log:
             self.on_log(msg)
 
+    def _emit_progress(self, *, force: bool = False) -> None:
+        """Throttle cross-thread UI updates while keeping the playhead smooth."""
+        callback = self.on_progress
+        if callback is None:
+            return
+
+        now = time.perf_counter()
+        if not force and now - self._last_progress_emit < self._progress_interval:
+            return
+
+        self._last_progress_emit = now
+        callback(self._current_time, self._total_time)
+
     def play(self, start_offset: Optional[float] = None) -> None:
         """Starts or restarts playback."""
         if not self._timeline or not self._timeline.notes:
@@ -102,6 +117,9 @@ class PlaybackScheduler:
             return
 
         self.stop()
+        if self._thread and self._thread.is_alive():
+            self._log("Playback is still stopping; start was ignored to prevent overlapping input.")
+            return
         if start_offset is not None:
             self._current_time = max(0.0, min(start_offset, self._total_time))
         else:
@@ -138,9 +156,14 @@ class PlaybackScheduler:
         """Immediate emergency or routine stop."""
         self._stop_event.set()
         self._pause_event.set()  # Unblock if paused
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=0.5)
-        self._thread = None
+        worker = self._thread
+        if worker and worker.is_alive() and worker is not threading.current_thread():
+            worker.join(timeout=1.0)
+        if worker and worker.is_alive():
+            self._log("Playback is still stopping; no new playback can start yet.")
+            return
+        if self._thread is worker:
+            self._thread = None
         self.key_state.release_all()
         if self.pedal_backend and self.target_hwnd_getter:
             hwnd = self.target_hwnd_getter()
@@ -153,8 +176,7 @@ class PlaybackScheduler:
         was_playing = (self._state == PlaybackState.PLAYING)
         self.stop()
         self._current_time = max(0.0, min(target_time, self._total_time))
-        if self.on_progress:
-            self.on_progress(self._current_time, self._total_time)
+        self._emit_progress(force=True)
         if was_playing:
             self.play(start_offset=self._current_time)
 
@@ -184,8 +206,10 @@ class PlaybackScheduler:
             if remaining <= 0:
                 break
             elif remaining > 0.005:
-                # Normal OS sleep for bulk duration
-                time.sleep(remaining - 0.003)
+                # Event.wait is interruptible, unlike time.sleep, so stop is
+                # responsive even during long rests or sparse scores.
+                if self._stop_event.wait(remaining - 0.003):
+                    return False
             else:
                 # Busy wait spinlock for sub-millisecond precision
                 while time.perf_counter() < target_perf_time:
@@ -278,8 +302,7 @@ class PlaybackScheduler:
 
                 # Play the event
                 self._current_time = ev_time
-                if self.on_progress:
-                    self.on_progress(self._current_time, self._total_time)
+                self._emit_progress()
 
                 if ev_type == "chord":
                     cg = ev_data
@@ -296,8 +319,7 @@ class PlaybackScheduler:
 
             if not self._stop_event.is_set():
                 self._current_time = self._total_time
-                if self.on_progress:
-                    self.on_progress(self._current_time, self._total_time)
+                self._emit_progress(force=True)
                 self._set_state(PlaybackState.COMPLETED)
                 self._log("Playback finished.")
 
@@ -306,3 +328,5 @@ class PlaybackScheduler:
             self._set_state(PlaybackState.STOPPED)
         finally:
             self.key_state.release_all()
+            if self._stop_event.is_set() and self._state != PlaybackState.STOPPED:
+                self._set_state(PlaybackState.STOPPED)

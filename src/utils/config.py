@@ -3,6 +3,7 @@ Roblox Piano Player - Settings & Configuration Manager
 """
 import os
 import json
+import sys
 from dataclasses import dataclass, asdict, field
 from typing import Dict, Any, Optional
 
@@ -44,19 +45,37 @@ class ConfigManager:
     CONFIG_FILE = "settings.json"
 
     def __init__(self, config_dir: Optional[str] = None):
-        self.config_dir = config_dir or os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if config_dir is not None:
+            self.config_dir = config_dir
+        elif getattr(sys, "frozen", False):
+            local_app_data = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
+            self.config_dir = os.path.join(local_app_data, "RobloxPianoPlayer")
+        else:
+            self.config_dir = os.path.dirname(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            )
+        os.makedirs(self.config_dir, exist_ok=True)
         self.config_path = os.path.join(self.config_dir, self.CONFIG_FILE)
         self.config: AppConfig = self.load_config()
 
     def load_config(self) -> AppConfig:
         cfg = AppConfig()
-        if os.path.exists(self.config_path):
+        read_path = self.config_path
+        if not os.path.exists(read_path) and getattr(sys, "frozen", False):
+            legacy_path = os.path.join(os.path.dirname(sys.executable), "_internal", self.CONFIG_FILE)
+            if os.path.exists(legacy_path):
+                read_path = legacy_path
+
+        if os.path.exists(read_path):
             try:
-                with open(self.config_path, "r", encoding="utf-8") as f:
+                with open(read_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 cfg = AppConfig(**{k: v for k, v in data.items() if k in AppConfig.__annotations__})
             except Exception:
                 pass
+
+        if read_path != self.config_path:
+            self.save_config(cfg)
         
         # Ensure library_dir is set to default LOCALAPPDATA path if empty
         if not cfg.library_dir:

@@ -61,11 +61,10 @@
 
 ---
 
-## 📦 독립 실행형 `.exe` 파일로 빌드 (선택 사항)
+## 📦 Windows 실행 파일 빌드
 
-PyInstaller를 사용하여 설치가 필요 없는 Windows용 실행 파일(.exe)로 컴파일할 수 있습니다:
+가상환경에서 PyInstaller를 실행하면 필요한 라이브러리를 함께 담은 폴더형 실행 파일을 만들 수 있습니다:
 ```bash
-.\.venv\Scripts\uv pip install pyinstaller
-.\.venv\Scripts\pyinstaller --name "RobloxPianoPlayer" --windowed --add-data "src/piano/profiles;src/piano/profiles" run.py
+.\.venv\Scripts\pyinstaller.exe --clean --noconfirm RobloxPianoPlayer.spec
 ```
-빌드가 완료되면 `dist/RobloxPianoPlayer/` 또는 `dist/RobloxPianoPlayer.exe` (설정에 따라)에서 실행 파일을 확인할 수 있습니다.
+빌드가 완료되면 `dist/RobloxPianoPlayer/RobloxPianoPlayer.exe`를 실행하세요. 폴더 안의 `_internal` 파일도 함께 있어야 실행됩니다. 설정은 `%LOCALAPPDATA%\RobloxPianoPlayer\settings.json`에 저장됩니다.

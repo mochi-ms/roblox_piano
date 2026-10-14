@@ -2,8 +2,9 @@
 Roblox Piano Player - Main Application Window
 """
 import os
+from collections import deque
 from typing import Optional, List, Dict
-from PySide6.QtCore import Qt, QTimer, Signal, Slot
+from PySide6.QtCore import Qt, QTimer, Signal, Slot, QThread
 from PySide6.QtGui import QDragEnterEvent, QDropEvent, QIcon, QFont
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -16,11 +17,7 @@ from src.music.timeline import MusicTimeline
 from src.music.transpose import Transposer
 from src.music.range_processor import RangeProcessor, RangeAnalysisResult
 from src.piano.mapper import RobloxPianoMapper
-from src.importers.midi_importer import MidiImporter
-from src.importers.musicxml_importer import MusicXmlImporter
 from src.importers.numeric_importer import NumericImporter
-from src.importers.image_importer import ImageImporter
-from src.importers.pdf_importer import PdfImporter
 from src.playback.keyboard_backend import KeyboardBackend
 from src.playback.sendinput_backend import SendInputBackend
 from src.playback.dryrun_backend import DryRunBackend
@@ -42,6 +39,44 @@ from src.app.library_widget import LibraryWidget
 from src.app.import_widget import ImportWidget
 from src.video.pipeline import VideoAnalysisWorker
 from src.library.models import ScoreItem
+
+
+class ScoreLoadWorker(QThread):
+    """Parse score files off the GUI thread so large imports cannot freeze the window."""
+
+    def __init__(self, file_path: str, parent=None):
+        super().__init__(parent)
+        self.file_path = file_path
+        self.timeline: Optional[MusicTimeline] = None
+        self.error = ""
+
+    def run(self) -> None:
+        try:
+            ext = os.path.splitext(self.file_path)[1].lower()
+            if ext in (".mid", ".midi"):
+                from src.importers.midi_importer import MidiImporter
+                importer = MidiImporter()
+            elif ext in (".musicxml", ".xml", ".mxl"):
+                from src.importers.musicxml_importer import MusicXmlImporter
+                importer = MusicXmlImporter()
+            elif ext in (".txt", ".num", ".jianpu"):
+                importer = NumericImporter()
+            elif ext in (".png", ".jpg", ".jpeg", ".bmp", ".tiff"):
+                from src.importers.image_importer import ImageImporter
+                importer = ImageImporter()
+            elif ext == ".pdf":
+                from src.importers.pdf_importer import PdfImporter
+                importer = PdfImporter()
+            else:
+                raise ValueError(f"지원하지 않는 파일 확장자입니다: {ext}")
+            self.timeline = importer.import_score(self.file_path)
+            if self.timeline is None:
+                raise RuntimeError("악보를 읽었지만 연주할 음표를 찾지 못했습니다.")
+            if self.isInterruptionRequested():
+                self.timeline = None
+                self.error = "불러오기가 취소되었습니다."
+        except Exception as exc:
+            self.error = str(exc)
 
 
 class MainWindow(QMainWindow):
@@ -78,16 +113,15 @@ class MainWindow(QMainWindow):
         # Keyboard & Playback Stack
         self._init_playback_stack()
 
-        # Importers
-        self.midi_importer = MidiImporter()
-        self.musicxml_importer = MusicXmlImporter()
         self.numeric_importer = NumericImporter()
-        self.image_importer = ImageImporter()
-        self.pdf_importer = PdfImporter()
 
         # Library
         self.library_manager = LibraryManager(self.config_mgr)
         self.active_worker: Optional[VideoAnalysisWorker] = None
+        self._score_load_queue = deque()
+        self._score_load_worker: Optional[ScoreLoadWorker] = None
+        self._closing_after_workers = False
+        self._last_roblox_foreground: Optional[bool] = None
 
         # State
         self.timeline: Optional[MusicTimeline] = None
@@ -100,6 +134,7 @@ class MainWindow(QMainWindow):
 
         # 2. UI Setup
         self._setup_ui()
+        self.import_widget.btn_cancel.clicked.connect(self._cancel_active_video_import)
         self._setup_overlay()
         self._connect_signals()
         self._apply_theme()
@@ -107,7 +142,7 @@ class MainWindow(QMainWindow):
 
         # Timer for polling Roblox window focus status
         self._focus_poll_timer = QTimer(self)
-        self._focus_poll_timer.setInterval(500)
+        self._focus_poll_timer.setInterval(1000)
         self._focus_poll_timer.timeout.connect(self._update_roblox_focus_status)
         self._focus_poll_timer.start()
 
@@ -542,15 +577,19 @@ class MainWindow(QMainWindow):
         try:
             timeline = None
             if ext in (".mid", ".midi"):
-                timeline = self.midi_importer.import_score(file_path)
+                from src.importers.midi_importer import MidiImporter
+                timeline = MidiImporter().import_score(file_path)
             elif ext in (".musicxml", ".xml", ".mxl"):
-                timeline = self.musicxml_importer.import_score(file_path)
+                from src.importers.musicxml_importer import MusicXmlImporter
+                timeline = MusicXmlImporter().import_score(file_path)
             elif ext in (".txt", ".num", ".jianpu"):
                 timeline = self.numeric_importer.import_score(file_path)
             elif ext in (".png", ".jpg", ".jpeg", ".bmp", ".tiff"):
-                timeline = self.image_importer.import_score(file_path)
+                from src.importers.image_importer import ImageImporter
+                timeline = ImageImporter().import_score(file_path)
             elif ext in (".pdf",):
-                timeline = self.pdf_importer.import_score(file_path)
+                from src.importers.pdf_importer import PdfImporter
+                timeline = PdfImporter().import_score(file_path)
             else:
                 QMessageBox.warning(self, "지원하지 않는 포맷", f"지원하지 않는 파일 확장자입니다: {ext}")
                 return None
@@ -560,9 +599,80 @@ class MainWindow(QMainWindow):
             return None
 
     def load_score_file(self, file_path: str) -> None:
-        timeline = self.parse_score_file(file_path)
-        if timeline:
-            self._set_loaded_timeline(timeline)
+        self._queue_score_load(file_path)
+
+    def _queue_score_load(
+        self,
+        file_path: str,
+        library_item: Optional[ScoreItem] = None,
+    ) -> None:
+        if not os.path.isfile(file_path):
+            QMessageBox.warning(self, "파일 오류", f"파일을 찾을 수 없습니다:\n{file_path}")
+            return
+        self._score_load_queue.append((file_path, library_item))
+        self._start_next_score_load()
+
+    def _start_next_score_load(self) -> None:
+        if self._closing_after_workers or self._score_load_worker is not None:
+            return
+        if not self._score_load_queue:
+            return
+
+        file_path, library_item = self._score_load_queue.popleft()
+        worker = ScoreLoadWorker(file_path, self)
+        worker.finished.connect(
+            lambda worker=worker, path=file_path, item=library_item:
+                self._on_score_load_worker_finished(worker, path, item)
+        )
+        self._score_load_worker = worker
+        self.statusBar().showMessage(f"악보 불러오는 중: {os.path.basename(file_path)}")
+        worker.start()
+
+    def _on_score_load_worker_finished(
+        self,
+        worker: ScoreLoadWorker,
+        file_path: str,
+        library_item: Optional[ScoreItem],
+    ) -> None:
+        if worker is not self._score_load_worker:
+            return
+
+        if not self._closing_after_workers:
+            if worker.timeline is not None and not worker.error:
+                self._set_loaded_timeline(worker.timeline)
+                self.statusBar().showMessage(
+                    f"불러옴: {worker.timeline.title or os.path.basename(file_path)}", 5000
+                )
+                if library_item is not None:
+                    try:
+                        self.library_manager.update_score_from_timeline(
+                            library_item.id, worker.timeline
+                        )
+                        self.library_widget.refresh_library()
+                    except Exception as exc:
+                        logger.log(f"Library metadata update failed: {exc}")
+                    self.tabs.setCurrentIndex(0)
+            else:
+                message = worker.error or "악보를 읽을 수 없습니다."
+                if library_item is not None:
+                    ext = os.path.splitext(file_path)[1].lower()
+                    library_item.analysis_status = (
+                        "ANALYSIS_REQUIRED"
+                        if ext in (".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".tiff")
+                        else "ANALYSIS_FAILED"
+                    )
+                    library_item.analysis_error = message
+                    self.library_manager.db.update_score(library_item)
+                    self.library_widget.refresh_library()
+                self.statusBar().showMessage("악보를 불러오지 못했습니다.", 5000)
+                QMessageBox.critical(self, "불러오기 오류", f"악보를 불러오지 못했습니다:\n{message}")
+
+        self._score_load_worker = None
+        worker.deleteLater()
+        if self._closing_after_workers:
+            self._maybe_finish_close()
+        else:
+            QTimer.singleShot(0, self._start_next_score_load)
 
     def _import_file_to_library_and_parse(self, file_path: str):
         # 1. First, copy file into library and register it
@@ -576,22 +686,7 @@ class MainWindow(QMainWindow):
         self.library_widget.refresh_library()
         
         # 3. Parse timeline
-        timeline = self.parse_score_file(score_item.filepath)
-        if timeline:
-            self.library_manager.update_score_from_timeline(score_item.id, timeline)
-            self._set_loaded_timeline(timeline)
-        else:
-            # Parsing failed or needs analysis
-            ext = os.path.splitext(file_path)[1].lower()
-            if ext in [".pdf", ".png", ".jpg", ".jpeg"]:
-                score_item.analysis_status = "ANALYSIS_REQUIRED"
-                score_item.analysis_error = "PDF/Image requires OMR analysis"
-            else:
-                score_item.analysis_status = "ANALYSIS_FAILED"
-                score_item.analysis_error = "Failed to parse file format"
-            self.library_manager.db.update_score(score_item)
-            
-        self.library_widget.refresh_library()
+        self._queue_score_load(score_item.filepath, score_item)
 
     def _on_library_add_external(self):
         filters = (
@@ -612,8 +707,7 @@ class MainWindow(QMainWindow):
     def _on_library_score_selected(self, item: ScoreItem):
         # Library item selected
         if os.path.exists(item.filepath):
-            self.load_score_file(item.filepath)
-            self.tabs.setCurrentIndex(0) # Switch to player tab
+            self._queue_score_load(item.filepath, item)
         else:
             QMessageBox.warning(self, "파일 없음", f"라이브러리 파일을 찾을 수 없습니다:\n{item.filepath}")
 
@@ -625,25 +719,33 @@ class MainWindow(QMainWindow):
         self.active_worker = VideoAnalysisWorker(
             source_type=source_type,
             source_path=source_path,
-            library_manager=self.library_manager
+            library_manager=self.library_manager,
+            parent=self,
         )
-        self.active_worker.progress.connect(self.import_widget.update_progress)
-        self.active_worker.finished_success.connect(self._on_import_success)
-        self.active_worker.finished_error.connect(self._on_import_error)
-        
-        # Connect cancel button
-        self.import_widget.btn_cancel.clicked.connect(self.active_worker.cancel)
-        
+        worker = self.active_worker
+        worker.progress.connect(self.import_widget.update_progress)
+        worker.finished_success.connect(self._on_import_success)
+        worker.finished_error.connect(self._on_import_error)
+        worker.finished.connect(lambda worker=worker: self._on_video_worker_finished(worker))
         self.active_worker.start()
 
     def _on_import_success(self, item: ScoreItem):
         self.import_widget.task_finished(True, f"'{item.title}' 라이브러리 저장됨")
         self.library_widget.refresh_library()
-        self.active_worker = None
 
     def _on_import_error(self, err_msg: str):
         self.import_widget.task_finished(False, err_msg)
-        self.active_worker = None
+
+    def _cancel_active_video_import(self) -> None:
+        if self.active_worker and self.active_worker.isRunning():
+            self.active_worker.cancel()
+
+    def _on_video_worker_finished(self, worker: VideoAnalysisWorker) -> None:
+        if self.active_worker is worker:
+            self.active_worker = None
+        worker.deleteLater()
+        if self._closing_after_workers:
+            self._maybe_finish_close()
 
     def _set_loaded_timeline(self, timeline: MusicTimeline) -> None:
         self.timeline = timeline
@@ -809,7 +911,12 @@ class MainWindow(QMainWindow):
         self.virtual_piano.set_active_pitches(set())
 
     def _update_roblox_focus_status(self) -> None:
-        if self.target_window.is_roblox_foreground():
+        foreground = self.target_window.is_roblox_foreground()
+        if foreground == self._last_roblox_foreground:
+            return
+        self._last_roblox_foreground = foreground
+
+        if foreground:
             self.lbl_roblox_status.setText("● 로블록스 창 활성화됨")
             self.lbl_roblox_status.setStyleSheet("color: #10B981; font-size: 12px; margin-left: 10px;")
         else:
@@ -855,8 +962,40 @@ class MainWindow(QMainWindow):
     # ----------------------------------------------------
     # Safe Application Termination
     # ----------------------------------------------------
+    def _background_workers_running(self) -> bool:
+        if self._score_load_worker and self._score_load_worker.isRunning():
+            return True
+        if self.active_worker and self.active_worker.isRunning():
+            return True
+        return bool(self.library_widget.running_background_workers())
+
+    def _maybe_finish_close(self) -> None:
+        if not self._closing_after_workers:
+            return
+        if self._background_workers_running():
+            QTimer.singleShot(250, self._maybe_finish_close)
+            return
+        self._closing_after_workers = False
+        self.close()
+
     def closeEvent(self, event) -> None:
         """Ensures all keys are released, scheduler stopped, and hotkeys unhooked."""
+        if self._background_workers_running():
+            self._closing_after_workers = True
+            self._score_load_queue.clear()
+            if self._score_load_worker and self._score_load_worker.isRunning():
+                self._score_load_worker.requestInterruption()
+            if self.active_worker and self.active_worker.isRunning():
+                self.active_worker.cancel()
+            self.library_widget.cancel_background_imports()
+            self.statusBar().showMessage(
+                "백그라운드 작업을 정리한 뒤 창을 닫습니다."
+            )
+            QTimer.singleShot(250, self._maybe_finish_close)
+            event.ignore()
+            return
+
+        self._closing_after_workers = False
         self.scheduler.stop()
         self.key_state.release_all()
         self.hotkeys.unregister_all()

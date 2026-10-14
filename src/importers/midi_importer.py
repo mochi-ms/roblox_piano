@@ -30,7 +30,7 @@ class MidiImporter(BaseMusicImporter):
         if not os.path.isfile(file_path_or_content):
             raise FileNotFoundError(f"MIDI file not found: {file_path_or_content}")
 
-        mid = mido.MidiFile(file_path_or_content)
+        mid = mido.MidiFile(file_path_or_content, clip=True)
         title = os.path.splitext(os.path.basename(file_path_or_content))[0]
         timeline = MusicTimeline(title=title)
         timeline.metadata["ticks_per_beat"] = mid.ticks_per_beat

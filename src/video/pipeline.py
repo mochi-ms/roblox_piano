@@ -1,6 +1,7 @@
 import os
 import tempfile
 import time
+import threading
 from PySide6.QtCore import QThread, Signal
 
 from src.video.youtube_adapter import YoutubeAdapter
@@ -35,10 +36,14 @@ class VideoAnalysisWorker(QThread):
             self.temp_dir_obj = tempfile.TemporaryDirectory()
             self.temp_dir = self.temp_dir_obj.name
             
-        self.is_cancelled = False
+        self._cancel_requested = threading.Event()
 
     def cancel(self):
-        self.is_cancelled = True
+        self._cancel_requested.set()
+
+    @property
+    def is_cancelled(self) -> bool:
+        return self._cancel_requested.is_set()
 
     def run(self):
         try:
@@ -56,6 +61,8 @@ class VideoAnalysisWorker(QThread):
                 
                 self.progress.emit(20, "비디오 다운로드 중...")
                 def yt_hook(d):
+                    if self.is_cancelled:
+                        raise InterruptedError("사용자 취소됨")
                     if d['status'] == 'downloading':
                         # Convert downloaded bytes to rough percentage (20 to 50%)
                         p = d.get('_percent_str', '0%').replace('%','').strip()
@@ -65,6 +72,8 @@ class VideoAnalysisWorker(QThread):
                         except:
                             pass
                 
+                if self.is_cancelled:
+                    raise InterruptedError("사용자 취소됨")
                 video_filepath = adapter.download_video(self.source_path, progress_hook=yt_hook)
                 if not video_filepath or not os.path.exists(video_filepath):
                     raise RuntimeError("YouTube 비디오 다운로드 실패")

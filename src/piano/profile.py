@@ -3,6 +3,7 @@ Roblox Piano Player - Profile Definition and Loader
 """
 import json
 import os
+import sys
 from dataclasses import dataclass, field
 from typing import Dict, Optional, List
 
@@ -87,12 +88,52 @@ class PianoProfile:
 class ProfileManager:
     @staticmethod
     def get_profiles_dir() -> str:
+        candidates = []
+        # 1. PyInstaller frozen runtime
+        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+            candidates.extend([
+                os.path.join(sys._MEIPASS, "src", "piano", "profiles"),
+                os.path.join(sys._MEIPASS, "profiles"),
+            ])
+
+        # 2. Executable directory (_internal for onedir)
+        exe_dir = os.path.dirname(sys.executable)
+        candidates.extend([
+            os.path.join(exe_dir, "_internal", "src", "piano", "profiles"),
+            os.path.join(exe_dir, "_internal", "profiles"),
+            os.path.join(exe_dir, "src", "piano", "profiles"),
+            os.path.join(exe_dir, "profiles"),
+        ])
+
+        # 3. Source directory
         current_dir = os.path.dirname(os.path.abspath(__file__))
+        candidates.append(os.path.join(current_dir, "profiles"))
+
+        for p in candidates:
+            if p and os.path.exists(p):
+                return p
         return os.path.join(current_dir, "profiles")
 
     @classmethod
     def get_default_profile_path(cls) -> str:
-        return os.path.join(cls.get_profiles_dir(), "roblox_virtual_piano_88.json")
+        target_name = "roblox_virtual_piano_88.json"
+        candidates = []
+
+        # Check profiles dir
+        profiles_dir = cls.get_profiles_dir()
+        candidates.append(os.path.join(profiles_dir, target_name))
+
+        # Check PyInstaller bundle root
+        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+            candidates.extend([
+                os.path.join(sys._MEIPASS, "src", "piano", "profiles", target_name),
+                os.path.join(sys._MEIPASS, target_name),
+            ])
+
+        for p in candidates:
+            if p and os.path.exists(p):
+                return p
+        return os.path.join(profiles_dir, target_name)
 
     @classmethod
     def load_default_profile(cls) -> PianoProfile:

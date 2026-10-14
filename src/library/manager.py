@@ -1,19 +1,21 @@
 import os
-import shutil
-import uuid
 import re
-from typing import List, Optional, Tuple, Dict, Any, Callable
+import shutil
 import time
+import uuid
+from typing import Any, Dict, List, Optional
 
-from src.library.models import ScoreItem, FolderItem
 from src.library.database import ScoreDatabase
-from src.utils.config import ConfigManager
+from src.library.models import FolderItem, ScoreItem
 from src.music.timeline import MusicTimeline
+from src.utils.config import ConfigManager
+
 
 def _send_to_recycle_bin(filepath: str) -> None:
-    """Moves a file or folder to Windows Recycle Bin safely using native SHFileOperationW or send2trash."""
+    """Move a file/folder to the Windows Recycle Bin without permanently deleting it."""
     try:
         import send2trash
+
         send2trash.send2trash(os.path.normpath(filepath))
         return
     except ImportError:
@@ -41,12 +43,10 @@ def _send_to_recycle_bin(filepath: str) -> None:
         ]
 
     abs_path = os.path.abspath(filepath)
-    buffer = abs_path + '\0\0'
-
     fileop = SHFILEOPSTRUCTW()
     fileop.hwnd = None
     fileop.wFunc = FO_DELETE
-    fileop.pFrom = buffer
+    fileop.pFrom = abs_path + "\0\0"
     fileop.pTo = None
     fileop.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI
     fileop.fAnyOperationsAborted = False
@@ -60,114 +60,293 @@ def _send_to_recycle_bin(filepath: str) -> None:
 
 class LibraryManager:
     """
-    High-level manager for the score library.
-    Handles importing, renaming, moving, copying, and deleting files and folders,
-    synchronizing logical folder structures with physical directories.
+    High-level managed library service.
+
+    Important V1 compatibility rule:
+    playback/MIDI/MML code is not changed here. This class only manages the
+    library filesystem + SQLite metadata.
+
+    Performance changes versus the previous implementation:
+    - folder score queries are SQL-filtered instead of SELECT-all + Python filter;
+    - folder path traversal uses a small in-memory folder cache;
+    - tree queries use parent-indexed data;
+    - startup orphan cleanup no longer performs one full score-table scan per folder;
+    - recursive folder import avoids get_all_folders() inside the inner directory loop.
     """
-    def __init__(self, config_manager: ConfigManager):
+
+    def __init__(self, config_manager: Any):
         self.config_manager = config_manager
-        self.library_dir = self.config_manager.config.library_dir
-        
-        # Ensure library directory exists
+        if hasattr(config_manager, "config"):
+            self.library_dir = config_manager.config.library_dir
+        elif hasattr(config_manager, "library_dir"):
+            self.library_dir = config_manager.library_dir
+        else:
+            self.library_dir = str(config_manager)
         os.makedirs(self.library_dir, exist_ok=True)
-        
+
         self.db_path = os.path.join(self.library_dir, "library.db")
         self.db = ScoreDatabase(self.db_path)
+
+        self._folder_cache: Optional[Dict[str, FolderItem]] = None
+        self._children_cache: Optional[Dict[Optional[str], List[FolderItem]]] = None
+
         try:
             self.clean_spurious_empty_folders()
-        except Exception as e:
-            print(f"Failed to clean spurious empty folders: {e}")
+        except Exception as exc:
+            print(f"Failed to clean spurious empty folders: {exc}")
 
-    def _get_folder_path(self, folder_id: Optional[str]) -> str:
-        """Returns the physical absolute path for a folder ID by traversing parents."""
+    # ------------------------------------------------------------------
+    # Folder cache / path resolution
+    # ------------------------------------------------------------------
+    def _invalidate_folder_cache(self) -> None:
+        self._folder_cache = None
+        self._children_cache = None
+
+    def _ensure_folder_cache(self) -> None:
+        if self._folder_cache is not None and self._children_cache is not None:
+            return
+        folders = self.db.get_all_folders()
+        self._folder_cache = {f.id: f for f in folders}
+        children: Dict[Optional[str], List[FolderItem]] = {}
+        for folder in folders:
+            children.setdefault(folder.parent_id, []).append(folder)
+        for values in children.values():
+            values.sort(key=lambda f: f.name.casefold())
+        self._children_cache = children
+
+    def _get_cached_folder(self, folder_id: Optional[str]) -> Optional[FolderItem]:
         if not folder_id:
-            return self.library_dir
-            
-        path_parts = []
-        current_id = folder_id
-        while current_id:
-            folder = self.db.get_folder(current_id)
+            return None
+        self._ensure_folder_cache()
+        assert self._folder_cache is not None
+        return self._folder_cache.get(folder_id)
+
+    def get_folder_path_items(self, folder_id: Optional[str]) -> List[FolderItem]:
+        """Return root->current folder objects without repeated SQLite lookups."""
+        if not folder_id:
+            return []
+        self._ensure_folder_cache()
+        assert self._folder_cache is not None
+
+        result: List[FolderItem] = []
+        visited: set[str] = set()
+        current_id: Optional[str] = folder_id
+        while current_id and current_id not in visited:
+            visited.add(current_id)
+            folder = self._folder_cache.get(current_id)
             if not folder:
                 break
-            path_parts.append(folder.name)
+            result.append(folder)
             current_id = folder.parent_id
-            
-        path_parts.reverse()
-        return os.path.join(self.library_dir, *path_parts)
+        result.reverse()
+        return result
 
-    def _get_safe_filename(self, target_dir: str, desired_name: str, ignore_filepath: Optional[str] = None) -> str:
-        """
-        Returns a conflict-safe filename inside target_dir.
-        If 'song.mid' exists, tries 'song (1).mid', 'song (2).mid', etc.
-        """
-        clean_name = re.sub(r'[\\/*?:"<>|]', "", desired_name).strip()
-        if not clean_name:
-            clean_name = "Untitled"
-            
-        base, ext = os.path.splitext(clean_name)
+    def _get_folder_path(self, folder_id: Optional[str]) -> str:
+        if not folder_id:
+            return self.library_dir
+        return os.path.join(self.library_dir, *(f.name for f in self.get_folder_path_items(folder_id)))
+
+    @staticmethod
+    def _sanitize_name(name: str, fallback: str) -> str:
+        clean = re.sub(r'[\\/*?:"<>|]', "", name).strip().rstrip(". ")
+        return clean or fallback
+
+    def _get_safe_filename(
+        self,
+        target_dir: str,
+        desired_name: str,
+        ignore_filepath: Optional[str] = None,
+    ) -> str:
+        clean_name = self._sanitize_name(desired_name, "Untitled")
+        base_name, ext = os.path.splitext(clean_name)
         candidate = clean_name
         counter = 1
-        
-        while True:
-            full_cand = os.path.join(target_dir, candidate)
-            if not os.path.exists(full_cand):
-                break
-            if ignore_filepath and os.path.abspath(full_cand) == os.path.abspath(ignore_filepath):
-                break
-            candidate = f"{base} ({counter}){ext}"
-            counter += 1
-            
-        return candidate
 
+        ignore_abs = os.path.abspath(ignore_filepath) if ignore_filepath else None
+        while True:
+            candidate_path = os.path.join(target_dir, candidate)
+            if not os.path.exists(candidate_path):
+                return candidate
+            if ignore_abs and os.path.abspath(candidate_path) == ignore_abs:
+                return candidate
+            candidate = f"{base_name} ({counter}){ext}"
+            counter += 1
+
+    def _get_safe_folder_name(
+        self,
+        parent_path: str,
+        desired_name: str,
+        ignore_path: Optional[str] = None,
+    ) -> str:
+        clean_name = self._sanitize_name(desired_name, "새 폴더")
+        candidate = clean_name
+        counter = 1
+        ignore_abs = os.path.abspath(ignore_path) if ignore_path else None
+
+        while True:
+            candidate_path = os.path.join(parent_path, candidate)
+            if not os.path.exists(candidate_path):
+                return candidate
+            if ignore_abs and os.path.abspath(candidate_path) == ignore_abs:
+                return candidate
+            candidate = f"{clean_name} ({counter})"
+            counter += 1
+
+    # ------------------------------------------------------------------
+    # Read/query APIs used by high-performance Library UI
+    # ------------------------------------------------------------------
+    def get_all(self) -> List[ScoreItem]:
+        return self.db.get_all_scores()
+
+    def get_all_folders(self) -> List[FolderItem]:
+        self._ensure_folder_cache()
+        assert self._folder_cache is not None
+        return list(self._folder_cache.values())
+
+    def get_child_folders(
+        self,
+        parent_id: Optional[str],
+        *,
+        sort_by: str = "name",
+        descending: bool = False,
+    ) -> List[FolderItem]:
+        # Use DB sort for non-name columns; cached fast path for normal tree use.
+        if sort_by != "name":
+            return self.db.get_child_folders(parent_id, sort_by=sort_by, descending=descending)
+        self._ensure_folder_cache()
+        assert self._children_cache is not None
+        result = list(self._children_cache.get(parent_id, ()))
+        if descending:
+            result.reverse()
+        return result
+
+    def count_child_folders(self, parent_id: Optional[str]) -> int:
+        self._ensure_folder_cache()
+        assert self._children_cache is not None
+        return len(self._children_cache.get(parent_id, ()))
+
+    def get_folder_scores(
+        self,
+        folder_id: Optional[str],
+        *,
+        limit: Optional[int] = None,
+        offset: int = 0,
+        sort_by: str = "created_at",
+        descending: bool = True,
+    ) -> List[ScoreItem]:
+        return self.db.get_scores_by_folder(
+            folder_id,
+            limit=limit,
+            offset=offset,
+            sort_by=sort_by,
+            descending=descending,
+        )
+
+    def count_folder_scores(self, folder_id: Optional[str]) -> int:
+        return self.db.count_scores_by_folder(folder_id)
+
+    def search(
+        self,
+        keyword: str,
+        *,
+        limit: Optional[int] = None,
+        offset: int = 0,
+        sort_by: str = "title",
+        descending: bool = False,
+    ) -> List[ScoreItem]:
+        return self.db.search_scores(
+            keyword,
+            limit=limit,
+            offset=offset,
+            sort_by=sort_by,
+            descending=descending,
+        )
+
+    def count_search(self, keyword: str) -> int:
+        return self.db.count_search_scores(keyword)
+
+    def search_folders(self, keyword: str, *, limit: Optional[int] = 200) -> List[FolderItem]:
+        return self.db.search_folders(keyword, limit=limit)
+
+    def get_favorites(
+        self,
+        *,
+        limit: Optional[int] = None,
+        offset: int = 0,
+        sort_by: str = "updated_at",
+        descending: bool = True,
+    ) -> List[ScoreItem]:
+        return self.db.get_favorite_scores(
+            limit=limit,
+            offset=offset,
+            sort_by=sort_by,
+            descending=descending,
+        )
+
+    def count_favorites(self) -> int:
+        return self.db.count_favorite_scores()
+
+    def get_recent(
+        self,
+        *,
+        limit: Optional[int] = None,
+        offset: int = 0,
+    ) -> List[ScoreItem]:
+        return self.db.get_recent_scores(limit=limit, offset=offset)
+
+    def count_recent(self) -> int:
+        return self.db.count_recent_scores()
+
+    def toggle_favorite(self, score_id: str) -> bool:
+        item = self.db.get_score(score_id)
+        if not item:
+            raise ValueError(f"Score {score_id} not found")
+        new_value = not bool(item.favorite)
+        self.db.set_score_favorite(score_id, new_value)
+        return new_value
+
+    def mark_played(self, score_id: str) -> None:
+        self.db.mark_score_played(score_id, time.time())
+
+    # ------------------------------------------------------------------
+    # Import
+    # ------------------------------------------------------------------
     def import_folder_recursive(
         self,
         source_folder_path: str,
         target_parent_folder_id: Optional[str] = None,
         progress_callback: Optional[Any] = None,
-        cancel_check: Optional[Any] = None
+        cancel_check: Optional[Any] = None,
     ) -> Dict[str, Any]:
-        """
-        Recursively imports an entire folder hierarchy from the filesystem into the library.
-        Preserves original folder tree, file names (with collision safety), and copies files.
-        Extracts MusicTimeline metadata for supported score formats.
-        """
         from src.importers.midi_importer import MidiImporter
         from src.importers.musicxml_importer import MusicXmlImporter
-        from src.importers.mml_importer import MmlImporter
         from src.services.mml_service import MmlConversionService
 
-        if not os.path.exists(source_folder_path) or not os.path.isdir(source_folder_path):
+        if not os.path.isdir(source_folder_path):
             raise ValueError(f"Invalid source folder: {source_folder_path}")
 
-        root_name = os.path.basename(os.path.abspath(source_folder_path).rstrip(r'\/'))
-        if not root_name:
-            root_name = "악보"
+        root_name = os.path.basename(os.path.abspath(source_folder_path).rstrip(r"\/")) or "악보"
 
-        # 1. Check or create root folder in target_parent_folder_id
-        existing_folders = self.db.get_all_folders()
-        root_folder = None
-        for f in existing_folders:
-            if f.parent_id == target_parent_folder_id and f.name.lower() == root_name.lower():
-                root_folder = f
-                break
+        # Build a single lookup instead of calling get_all_folders in every loop.
+        all_folders = self.db.get_all_folders()
+        child_lookup: Dict[tuple[Optional[str], str], FolderItem] = {
+            (f.parent_id, f.name.casefold()): f for f in all_folders
+        }
 
+        root_folder = child_lookup.get((target_parent_folder_id, root_name.casefold()))
         imported_folders_count = 0
-        if not root_folder:
+        if root_folder is None:
             root_folder = self.create_folder(root_name, target_parent_folder_id)
             imported_folders_count += 1
+            child_lookup[(target_parent_folder_id, root_folder.name.casefold())] = root_folder
 
-        # Pre-scan total files for accurate progress
-        all_files_to_process = []
-        for dirpath, dirnames, filenames in os.walk(source_folder_path):
-            for fname in filenames:
-                all_files_to_process.append(os.path.join(dirpath, fname))
-        total_files = len(all_files_to_process)
-
+        total_files = sum(len(filenames) for _, _, filenames in os.walk(source_folder_path))
         rel_dir_to_folder_id: Dict[str, str] = {"": root_folder.id}
+
         imported_scores_count = 0
         skipped_count = 0
         failed_count = 0
-        failed_items = []
+        failed_items: List[tuple[str, str]] = []
         processed_count = 0
         is_cancelled = False
 
@@ -176,7 +355,19 @@ class LibraryManager:
         mml_svc = MmlConversionService()
 
         ignore_exts = {".ini", ".db", ".ds_store", ".tmp", ".bak", ".log"}
-        score_exts = {".mid", ".midi", ".musicxml", ".mxl", ".xml", ".mml", ".txt", ".pdf", ".png", ".jpg", ".jpeg"}
+        score_exts = {
+            ".mid",
+            ".midi",
+            ".musicxml",
+            ".mxl",
+            ".xml",
+            ".mml",
+            ".txt",
+            ".pdf",
+            ".png",
+            ".jpg",
+            ".jpeg",
+        }
 
         for dirpath, dirnames, filenames in os.walk(source_folder_path):
             if cancel_check and cancel_check():
@@ -187,125 +378,124 @@ class LibraryManager:
             cur_key = "" if rel_dir == "." else os.path.normpath(rel_dir)
             cur_folder_id = rel_dir_to_folder_id.get(cur_key, root_folder.id)
 
-            # Ensure subdirectories are created and mapped
-            for d in dirnames:
-                sub_key = d if cur_key == "" else os.path.normpath(os.path.join(cur_key, d))
-                # Check if folder exists
-                sub_folder = None
-                for ef in self.db.get_all_folders():
-                    if ef.parent_id == cur_folder_id and ef.name.lower() == d.lower():
-                        sub_folder = ef
-                        break
-                if not sub_folder:
-                    sub_folder = self.create_folder(d, cur_folder_id)
+            for dirname in dirnames:
+                sub_key = dirname if not cur_key else os.path.normpath(os.path.join(cur_key, dirname))
+                lookup_key = (cur_folder_id, dirname.casefold())
+                sub_folder = child_lookup.get(lookup_key)
+                if sub_folder is None:
+                    sub_folder = self.create_folder(dirname, cur_folder_id)
                     imported_folders_count += 1
+                    child_lookup[(cur_folder_id, sub_folder.name.casefold())] = sub_folder
                 rel_dir_to_folder_id[sub_key] = sub_folder.id
 
             target_dir = self._get_folder_path(cur_folder_id)
             os.makedirs(target_dir, exist_ok=True)
 
-            # Process files
-            for fname in filenames:
+            for filename in filenames:
                 if cancel_check and cancel_check():
                     is_cancelled = True
                     break
 
                 processed_count += 1
-                src_filepath = os.path.join(dirpath, fname)
-                lower_fname = fname.lower()
-                base_name, ext = os.path.splitext(lower_fname)
+                src_filepath = os.path.join(dirpath, filename)
+                lower_name = filename.lower()
+                _, ext = os.path.splitext(lower_name)
 
-                # Skip system and ignore files
-                if lower_fname in ["desktop.ini", "thumbs.db", ".ds_store"] or lower_fname.startswith("readme") or lower_fname.startswith("license"):
+                if (
+                    lower_name in {"desktop.ini", "thumbs.db", ".ds_store"}
+                    or lower_name.startswith("readme")
+                    or lower_name.startswith("license")
+                    or ext in ignore_exts
+                    or ext not in score_exts
+                ):
                     skipped_count += 1
-                    continue
-                if ext in ignore_exts or ext not in score_exts:
-                    skipped_count += 1
+                    if progress_callback:
+                        progress_callback(processed_count, total_files, filename)
                     continue
 
-                # Content-based classification for .txt
                 source_type = "FILE"
                 if ext == ".txt":
                     try:
-                        with open(src_filepath, "r", encoding="utf-8", errors="ignore") as f:
-                            head_snippet = f.read(100).strip().upper()
-                        if head_snippet.startswith("MML@"):
+                        with open(src_filepath, "r", encoding="utf-8", errors="ignore") as file_obj:
+                            snippet = file_obj.read(200).strip().upper()
+                        if snippet.startswith("MML@"):
                             source_type = "MML"
-                        elif re.search(r'\b[1-7][+#-]?\b', head_snippet):
+                        elif re.search(r"\b[1-7][+#-]?\b", snippet):
                             source_type = "NUMERIC"
                         else:
                             skipped_count += 1
+                            if progress_callback:
+                                progress_callback(processed_count, total_files, filename)
                             continue
                     except Exception:
                         skipped_count += 1
+                        if progress_callback:
+                            progress_callback(processed_count, total_files, filename)
                         continue
-                elif ext in [".mid", ".midi"]:
+                elif ext in {".mid", ".midi"}:
                     source_type = "MIDI"
-                elif ext in [".musicxml", ".mxl", ".xml"]:
+                elif ext in {".musicxml", ".mxl", ".xml"}:
                     source_type = "MUSICXML"
                 elif ext == ".mml":
                     source_type = "MML"
                 elif ext == ".pdf":
                     source_type = "PDF"
-                elif ext in [".png", ".jpg", ".jpeg"]:
+                elif ext in {".png", ".jpg", ".jpeg"}:
                     source_type = "IMAGE"
 
-                # Safe destination filename in target_dir
-                dest_filename = self._get_safe_filename(target_dir, fname)
+                dest_filename = self._get_safe_filename(target_dir, filename)
                 dest_filepath = os.path.join(target_dir, dest_filename)
 
-                # Copy file physically (preserving original)
                 try:
                     shutil.copy2(src_filepath, dest_filepath)
-                except Exception as e:
+                except Exception as exc:
                     failed_count += 1
-                    failed_items.append((os.path.join(rel_dir, fname), str(e)))
+                    failed_items.append((os.path.join(rel_dir, filename), str(exc)))
+                    if progress_callback:
+                        progress_callback(processed_count, total_files, filename)
                     continue
 
-                # Parse metadata via importers
                 duration = 0.0
                 bpm = 120.0
-                total_notes = 0
+                total_notes_count = 0
                 title = os.path.splitext(dest_filename)[0]
                 status = "READY"
-                error_msg = None
+                error_msg = ""
 
                 try:
                     if source_type == "MIDI":
                         timeline = midi_imp.import_score(dest_filepath)
                         duration = timeline.duration
                         bpm = timeline.initial_bpm
-                        total_notes = timeline.total_notes
+                        total_notes_count = timeline.total_notes
                         if timeline.title:
                             title = timeline.title
                     elif source_type == "MUSICXML":
                         timeline = xml_imp.import_score(dest_filepath)
                         duration = timeline.duration
                         bpm = timeline.initial_bpm
-                        total_notes = timeline.total_notes
+                        total_notes_count = timeline.total_notes
                         if timeline.title:
                             title = timeline.title
                     elif source_type == "MML":
-                        with open(dest_filepath, "r", encoding="utf-8", errors="ignore") as f_mml:
-                            mml_text = f_mml.read()
+                        with open(dest_filepath, "r", encoding="utf-8", errors="ignore") as mml_file:
+                            mml_text = mml_file.read()
                         valid, meta, mml_err, _ = mml_svc.validate_and_analyze(mml_text)
-                        if valid:
-                            duration = meta.get("duration", 0.0)
-                            bpm = meta.get("bpm", 120.0)
-                            total_notes = meta.get("notes", 0)
+                        if valid and meta:
+                            duration = float(meta.get("duration", 0.0))
+                            bpm = float(meta.get("bpm", meta.get("tempo", 120.0)))
+                            total_notes_count = int(meta.get("notes", meta.get("total_notes", 0)))
                         else:
                             status = "FAILED"
-                            error_msg = mml_err
-                    elif source_type in ["PDF", "IMAGE"]:
+                            error_msg = mml_err or "MML validation failed"
+                    elif source_type in {"PDF", "IMAGE"}:
                         status = "ANALYZING"
-                except Exception as ex:
-                    # Keep file registered but flag status
-                    status = "READY"
-                    error_msg = str(ex)
+                except Exception as exc:
+                    # Keep the imported file. Metadata failure must not destroy user's copy.
+                    error_msg = str(exc)
 
-                score_id = str(uuid.uuid4())
                 score_item = ScoreItem(
-                    id=score_id,
+                    id=str(uuid.uuid4()),
                     title=title,
                     source_type=source_type,
                     source_url=src_filepath,
@@ -315,18 +505,19 @@ class LibraryManager:
                     folder_id=cur_folder_id,
                     duration=duration,
                     bpm=bpm,
-                    total_notes=total_notes,
+                    total_notes=total_notes_count,
                     tags="imported,folder",
                     analysis_status=status,
-                    analysis_error=error_msg
+                    analysis_error=error_msg,
                 )
                 self.db.insert_score(score_item)
                 imported_scores_count += 1
 
                 if progress_callback:
-                    progress_callback(processed_count, total_files, fname)
+                    progress_callback(processed_count, total_files, filename)
 
-        summary = {
+        self._invalidate_folder_cache()
+        return {
             "root_folder_id": root_folder.id,
             "root_folder_name": root_folder.name,
             "total_scanned": total_files,
@@ -335,21 +526,19 @@ class LibraryManager:
             "skipped": skipped_count,
             "failed": failed_count,
             "failed_items": failed_items,
-            "cancelled": is_cancelled
+            "cancelled": is_cancelled,
         }
-        return summary
 
-    def import_external_file(self, source_filepath: str, source_type: str = "FILE", folder_id: Optional[str] = None) -> ScoreItem:
-        """
-        Copies an external file into the appropriate physical folder and registers it in the database.
-        Returns the registered ScoreItem.
-        """
+    def import_external_file(
+        self,
+        source_filepath: str,
+        source_type: str = "FILE",
+        folder_id: Optional[str] = None,
+    ) -> ScoreItem:
         ext = os.path.splitext(source_filepath)[1].lower()
-        score_id = str(uuid.uuid4())
-        
         target_dir = self._get_folder_path(folder_id)
         os.makedirs(target_dir, exist_ok=True)
-        
+
         original_filename = os.path.basename(source_filepath)
         if os.path.abspath(os.path.dirname(source_filepath)) == os.path.abspath(target_dir):
             dest_filename = original_filename
@@ -358,50 +547,50 @@ class LibraryManager:
             dest_filename = self._get_safe_filename(target_dir, original_filename)
             dest_filepath = os.path.join(target_dir, dest_filename)
             shutil.copy2(source_filepath, dest_filepath)
-        
-        # Default statuses and metadata extraction
+
         status = "READY"
         duration = 0.0
         bpm = 120.0
         total_notes = 0
-        
-        if ext in [".pdf", ".png", ".jpg", ".jpeg"]:
+
+        if ext in {".pdf", ".png", ".jpg", ".jpeg"}:
             status = "ANALYZING"
-        elif ext in [".mid", ".midi"]:
+        elif ext in {".mid", ".midi"}:
             try:
                 from src.importers.midi_importer import MidiImporter
-                importer = MidiImporter()
-                timeline = importer.import_score(dest_filepath)
+
+                timeline = MidiImporter().import_score(dest_filepath)
                 duration = timeline.duration
                 bpm = timeline.initial_bpm
                 total_notes = timeline.total_notes
-            except Exception as e:
-                print(f"Could not extract MIDI metadata for {dest_filepath}: {e}")
-        elif ext in [".mml", ".txt"]:
+            except Exception as exc:
+                print(f"Could not extract MIDI metadata for {dest_filepath}: {exc}")
+        elif ext in {".mml", ".txt"}:
             try:
                 from src.importers.mml_importer import MmlImporter
+
                 importer = MmlImporter()
                 if importer.can_import(dest_filepath):
-                    with open(dest_filepath, "r", encoding="utf-8") as f:
-                        meta = importer.extract_metadata(f.read())
-                    duration = meta.get("duration", 0.0)
-                    bpm = meta.get("bpm", 120.0)
-                    total_notes = meta.get("notes", 0)
-            except Exception as e:
-                print(f"Could not extract MML metadata for {dest_filepath}: {e}")
-        elif ext in [".musicxml", ".xml", ".mxl"]:
+                    with open(dest_filepath, "r", encoding="utf-8") as file_obj:
+                        meta = importer.extract_metadata(file_obj.read())
+                    duration = float(meta.get("duration", 0.0))
+                    bpm = float(meta.get("bpm", meta.get("tempo", 120.0)))
+                    total_notes = int(meta.get("notes", meta.get("total_notes", 0)))
+            except Exception as exc:
+                print(f"Could not extract MML metadata for {dest_filepath}: {exc}")
+        elif ext in {".musicxml", ".xml", ".mxl"}:
             try:
                 from src.importers.musicxml_importer import MusicXmlImporter
-                importer = MusicXmlImporter()
-                timeline = importer.import_score(dest_filepath)
+
+                timeline = MusicXmlImporter().import_score(dest_filepath)
                 duration = timeline.duration
                 bpm = timeline.initial_bpm
                 total_notes = timeline.total_notes
-            except Exception as e:
-                print(f"Could not extract MusicXML metadata for {dest_filepath}: {e}")
-            
+            except Exception as exc:
+                print(f"Could not extract MusicXML metadata for {dest_filepath}: {exc}")
+
         item = ScoreItem(
-            id=score_id,
+            id=str(uuid.uuid4()),
             title=os.path.splitext(dest_filename)[0],
             source_type=source_type,
             source_url=source_filepath,
@@ -413,32 +602,37 @@ class LibraryManager:
             bpm=bpm,
             total_notes=total_notes,
             tags="imported",
-            analysis_status=status
+            analysis_status=status,
         )
         self.db.insert_score(item)
         return item
-        
+
     def update_score_from_timeline(self, score_id: str, timeline: MusicTimeline) -> None:
-        """Updates duration, bpm, total_notes, and status when timeline is parsed successfully."""
         item = self.db.get_score(score_id)
-        if item:
-            item.duration = timeline.duration
-            item.bpm = timeline.initial_bpm
-            item.total_notes = timeline.total_notes
-            item.analysis_status = "READY"
-            if timeline.title:
-                item.title = timeline.title
-            item.updated_at = time.time()
-            self.db.update_score(item)
-            
-    def register_generated_score(self, xml_filepath: str, title: str, source_type: str, source_url: str, timeline: MusicTimeline, folder_id: Optional[str] = None) -> ScoreItem:
-        """Registers a newly generated MusicXML or MIDI file into the library."""
-        score_id = str(uuid.uuid4())
+        if not item:
+            return
+        item.duration = timeline.duration
+        item.bpm = timeline.initial_bpm
+        item.total_notes = timeline.total_notes
+        item.analysis_status = "READY"
+        if timeline.title:
+            item.title = timeline.title
+        item.updated_at = time.time()
+        self.db.update_score(item)
+
+    def register_generated_score(
+        self,
+        xml_filepath: str,
+        title: str,
+        source_type: str,
+        source_url: str,
+        timeline: MusicTimeline,
+        folder_id: Optional[str] = None,
+    ) -> ScoreItem:
         ext = os.path.splitext(xml_filepath)[1].lower()
-        
         target_dir = self._get_folder_path(folder_id)
         os.makedirs(target_dir, exist_ok=True)
-        
+
         if os.path.dirname(os.path.abspath(xml_filepath)) != os.path.abspath(target_dir):
             desired_name = f"{title}{ext}" if title else f"generated{ext}"
             dest_filename = self._get_safe_filename(target_dir, desired_name)
@@ -446,9 +640,9 @@ class LibraryManager:
             shutil.copy2(xml_filepath, dest_filepath)
         else:
             dest_filepath = xml_filepath
-            
+
         item = ScoreItem(
-            id=score_id,
+            id=str(uuid.uuid4()),
             title=title,
             source_type=source_type,
             source_url=source_url,
@@ -459,36 +653,33 @@ class LibraryManager:
             duration=timeline.duration,
             bpm=timeline.initial_bpm,
             total_notes=timeline.total_notes,
-            tags="youtube,omr" if source_type == "YOUTUBE" else "omr"
+            tags="youtube,omr" if source_type == "YOUTUBE" else "omr",
         )
         self.db.insert_score(item)
         return item
-        
+
+    # ------------------------------------------------------------------
+    # Score operations
+    # ------------------------------------------------------------------
     def rename_score(self, score_id: str, new_name: str) -> ScoreItem:
-        """
-        Safely renames a score item physically and in the database.
-        Maintains the file extension unless specified.
-        """
         item = self.db.get_score(score_id)
         if not item:
             raise ValueError(f"Score {score_id} not found")
-            
+
         old_filepath = item.filepath
         target_dir = os.path.dirname(old_filepath)
-        
-        # Handle extension
+
         clean_name = new_name.strip()
         _, new_ext = os.path.splitext(clean_name)
         if not new_ext and item.file_extension:
-            clean_name = f"{clean_name}{item.file_extension}"
-            
+            clean_name += item.file_extension
+
         dest_filename = self._get_safe_filename(target_dir, clean_name, ignore_filepath=old_filepath)
         new_filepath = os.path.join(target_dir, dest_filename)
-        
-        # Physical rename
+
         if os.path.exists(old_filepath) and os.path.abspath(old_filepath) != os.path.abspath(new_filepath):
             shutil.move(old_filepath, new_filepath)
-            
+
         item.title = os.path.splitext(dest_filename)[0]
         item.filepath = new_filepath
         item.original_filename = dest_filename
@@ -497,24 +688,19 @@ class LibraryManager:
         return item
 
     def copy_score(self, score_id: str, target_folder_id: Optional[str]) -> ScoreItem:
-        """
-        Copies a score to target_folder_id, creating a new ScoreItem in DB.
-        """
         item = self.db.get_score(score_id)
         if not item:
             raise ValueError(f"Score {score_id} not found")
-            
+
         target_dir = self._get_folder_path(target_folder_id)
         os.makedirs(target_dir, exist_ok=True)
-        
-        filename = os.path.basename(item.filepath)
-        dest_filename = self._get_safe_filename(target_dir, filename)
+        dest_filename = self._get_safe_filename(target_dir, os.path.basename(item.filepath))
         dest_filepath = os.path.join(target_dir, dest_filename)
-        
+
         if os.path.exists(item.filepath):
             shutil.copy2(item.filepath, dest_filepath)
-            
-        new_item = ScoreItem(
+
+        copied = ScoreItem(
             id=str(uuid.uuid4()),
             title=os.path.splitext(dest_filename)[0],
             source_type=item.source_type,
@@ -527,230 +713,224 @@ class LibraryManager:
             bpm=item.bpm,
             total_notes=item.total_notes,
             tags=item.tags,
-            analysis_status=item.analysis_status
+            analysis_status=item.analysis_status,
+            analysis_error=item.analysis_error,
+            favorite=False,
         )
-        self.db.insert_score(new_item)
-        return new_item
+        self.db.insert_score(copied)
+        return copied
 
     def move_score(self, score_id: str, new_folder_id: Optional[str]) -> None:
-        """Moves a score physically and updates DB."""
         item = self.db.get_score(score_id)
-        if not item:
+        if not item or item.folder_id == new_folder_id:
             return
-        
-        if item.folder_id == new_folder_id:
-            return
-            
+
         old_path = item.filepath
         target_dir = self._get_folder_path(new_folder_id)
         os.makedirs(target_dir, exist_ok=True)
-        
+
         if os.path.exists(old_path):
-            filename = os.path.basename(old_path)
-            dest_filename = self._get_safe_filename(target_dir, filename)
+            dest_filename = self._get_safe_filename(target_dir, os.path.basename(old_path))
             new_path = os.path.join(target_dir, dest_filename)
             shutil.move(old_path, new_path)
             item.filepath = new_path
             item.original_filename = dest_filename
-            
+
         item.folder_id = new_folder_id
         item.updated_at = time.time()
         self.db.update_score(item)
 
     def delete_score(self, score_id: str, permanent: bool = False) -> None:
-        """Deletes a score item from disk (Recycle Bin or permanent) and removes from DB."""
         item = self.db.get_score(score_id)
-        if item:
-            if os.path.exists(item.filepath):
-                if permanent:
-                    try:
-                        os.remove(item.filepath)
-                    except Exception as e:
-                        print(f"Failed to permanently delete {item.filepath}: {e}")
-                        raise
-                else:
-                    try:
-                        _send_to_recycle_bin(item.filepath)
-                    except Exception as e:
-                        print(f"Failed to move to Recycle Bin {item.filepath}: {e}")
-                        raise
-            self.db.delete_score(score_id)
+        if not item:
+            return
 
+        if os.path.exists(item.filepath):
+            if permanent:
+                os.remove(item.filepath)
+            else:
+                _send_to_recycle_bin(item.filepath)
+
+        self.db.delete_score(score_id)
+
+    # ------------------------------------------------------------------
+    # Folder operations
+    # ------------------------------------------------------------------
     def create_folder(self, name: str, parent_id: Optional[str] = None) -> FolderItem:
-        """Creates a new folder physically and in DB."""
         parent_path = self._get_folder_path(parent_id)
-        safe_name = re.sub(r'[\\/*?:"<>|]', "", name).strip()
-        if not safe_name:
-            safe_name = "새 폴더"
-            
-        physical_path = os.path.join(parent_path, safe_name)
-        original_safe = safe_name
-        counter = 1
-        while os.path.exists(physical_path):
-            safe_name = f"{original_safe} ({counter})"
-            physical_path = os.path.join(parent_path, safe_name)
-            counter += 1
+        os.makedirs(parent_path, exist_ok=True)
+        safe_name = self._get_safe_folder_name(parent_path, name)
+        os.makedirs(os.path.join(parent_path, safe_name), exist_ok=True)
 
-        os.makedirs(physical_path, exist_ok=True)
-        
-        folder_id = str(uuid.uuid4())
-        item = FolderItem(id=folder_id, parent_id=parent_id, name=safe_name)
+        item = FolderItem(id=str(uuid.uuid4()), parent_id=parent_id, name=safe_name)
         self.db.insert_folder(item)
+        self._invalidate_folder_cache()
         return item
 
     def rename_folder(self, folder_id: str, new_name: str) -> FolderItem:
-        """Renames a folder and moves directory if necessary."""
         folder = self.db.get_folder(folder_id)
         if not folder:
             raise ValueError(f"Folder {folder_id} not found")
-            
+
         old_path = self._get_folder_path(folder.id)
-        clean_name = re.sub(r'[\\/*?:"<>|]', "", new_name).strip()
-        if not clean_name:
-            clean_name = "새 폴더"
-            
         parent_path = self._get_folder_path(folder.parent_id)
+        clean_name = self._get_safe_folder_name(parent_path, new_name, ignore_path=old_path)
         new_path = os.path.join(parent_path, clean_name)
-        
-        counter = 1
-        orig_cand = clean_name
-        while os.path.exists(new_path) and os.path.abspath(new_path).lower() != os.path.abspath(old_path).lower():
-            clean_name = f"{orig_cand} ({counter})"
-            new_path = os.path.join(parent_path, clean_name)
-            counter += 1
-            
+
         if os.path.exists(old_path) and os.path.abspath(old_path) != os.path.abspath(new_path):
             shutil.move(old_path, new_path)
             self._update_score_paths_recursive(folder_id, old_path, new_path)
-            
+
         folder.name = clean_name
         folder.updated_at = time.time()
         self.db.update_folder(folder)
+        self._invalidate_folder_cache()
         return folder
 
+    def copy_folder(self, folder_id: str, target_parent_id: Optional[str]) -> FolderItem:
+        """
+        Explorer-like recursive folder copy using registered library entries.
+        Prevent copying a folder into itself/its descendant.
+        """
+        source = self.db.get_folder(folder_id)
+        if not source:
+            raise ValueError(f"Folder {folder_id} not found")
+        if folder_id == target_parent_id or self.is_descendant(folder_id, target_parent_id):
+            raise ValueError("자기 자신이나 하위 폴더 안으로 폴더를 복사할 수 없습니다.")
+
+        def clone(source_folder_id: str, new_parent_id: Optional[str]) -> FolderItem:
+            source_folder = self.db.get_folder(source_folder_id)
+            if not source_folder:
+                raise ValueError(f"Folder {source_folder_id} not found")
+
+            new_folder = self.create_folder(source_folder.name, new_parent_id)
+            for score in self.get_folder_scores(source_folder_id):
+                self.copy_score(score.id, new_folder.id)
+            for child in self.get_child_folders(source_folder_id):
+                clone(child.id, new_folder.id)
+            return new_folder
+
+        result = clone(folder_id, target_parent_id)
+        self._invalidate_folder_cache()
+        return result
+
     def delete_folder(self, folder_id: str, permanent: bool = False) -> None:
-        """Recursively deletes a folder and scores inside."""
-        folders = self.get_all_folders()
-        children = [f for f in folders if f.parent_id == folder_id]
-        for child in children:
+        # Snapshot children before mutation so recursive delete is deterministic.
+        for child in list(self.get_child_folders(folder_id)):
             self.delete_folder(child.id, permanent=permanent)
-            
-        scores = self.get_folder_scores(folder_id)
-        for s in scores:
-            self.delete_score(s.id, permanent=permanent)
-            
+
+        for score in self.get_folder_scores(folder_id):
+            self.delete_score(score.id, permanent=permanent)
+
         physical_path = self._get_folder_path(folder_id)
         if os.path.exists(physical_path):
             if permanent:
-                try:
-                    shutil.rmtree(physical_path)
-                except Exception as e:
-                    print(f"Failed to delete folder {physical_path}: {e}")
-                    raise
+                shutil.rmtree(physical_path)
             else:
-                try:
-                    _send_to_recycle_bin(physical_path)
-                except Exception as e:
-                    print(f"Failed to move folder to Recycle Bin {physical_path}: {e}")
-                    raise
-                        
+                _send_to_recycle_bin(physical_path)
+
         self.db.delete_folder(folder_id)
+        self._invalidate_folder_cache()
 
     def is_descendant(self, parent_folder_id: str, candidate_child_id: Optional[str]) -> bool:
-        """Returns True if candidate_child_id is the same as or a descendant of parent_folder_id."""
         if not candidate_child_id or not parent_folder_id:
             return False
         if parent_folder_id == candidate_child_id:
             return True
-            
-        current = self.db.get_folder(candidate_child_id)
-        visited = set()
-        while current and current.parent_id:
-            if current.id in visited:
-                break
-            visited.add(current.id)
+
+        self._ensure_folder_cache()
+        assert self._folder_cache is not None
+
+        current_id: Optional[str] = candidate_child_id
+        visited: set[str] = set()
+        while current_id and current_id not in visited:
+            visited.add(current_id)
+            current = self._folder_cache.get(current_id)
+            if not current:
+                return False
             if current.parent_id == parent_folder_id:
                 return True
-            current = self.db.get_folder(current.parent_id)
+            current_id = current.parent_id
         return False
 
     def move_folder(self, folder_id: str, new_parent_id: Optional[str]) -> FolderItem:
-        """
-        Moves a folder to a new parent folder, preventing cycles and synchronizing physical paths and DB.
-        """
         folder = self.db.get_folder(folder_id)
         if not folder:
             raise ValueError(f"Folder {folder_id} not found")
-            
         if folder.parent_id == new_parent_id:
             return folder
-            
-        # Prevent moving into itself or its own descendant
         if folder_id == new_parent_id or self.is_descendant(folder_id, new_parent_id):
             raise ValueError("자기 자신이나 하위 폴더로는 이동할 수 없습니다.")
-            
+
         old_path = self._get_folder_path(folder_id)
         new_parent_path = self._get_folder_path(new_parent_id)
         os.makedirs(new_parent_path, exist_ok=True)
-        
-        # Check collision in new target directory
-        safe_name = folder.name
+        safe_name = self._get_safe_folder_name(new_parent_path, folder.name, ignore_path=old_path)
         new_path = os.path.join(new_parent_path, safe_name)
-        counter = 1
-        orig_cand = safe_name
-        while os.path.exists(new_path) and os.path.abspath(new_path).lower() != os.path.abspath(old_path).lower():
-            safe_name = f"{orig_cand} ({counter})"
-            new_path = os.path.join(new_parent_path, safe_name)
-            counter += 1
-            
+
         if os.path.exists(old_path) and os.path.abspath(old_path) != os.path.abspath(new_path):
             shutil.move(old_path, new_path)
             self._update_score_paths_recursive(folder_id, old_path, new_path)
-            
+
         folder.name = safe_name
         folder.parent_id = new_parent_id
         folder.updated_at = time.time()
         self.db.update_folder(folder)
+        self._invalidate_folder_cache()
         return folder
+
+    def _update_score_paths_recursive(
+        self,
+        folder_id: str,
+        old_base_path: str,
+        new_base_path: str,
+    ) -> None:
+        for score in self.get_folder_scores(folder_id):
+            if score.filepath.startswith(old_base_path):
+                rel_path = os.path.relpath(score.filepath, old_base_path)
+                score.filepath = os.path.join(new_base_path, rel_path)
+                score.updated_at = time.time()
+                self.db.update_score(score)
+
+        for child in self.get_child_folders(folder_id):
+            self._update_score_paths_recursive(child.id, old_base_path, new_base_path)
 
     def clean_spurious_empty_folders(self) -> int:
         """
-        Removes orphaned empty folders with no scores, no subfolders, and no physical directory.
+        O(F + S_distinct) cleanup instead of the old O(F * S) implementation.
+        Only deletes DB records for folders that:
+        - have no registered scores,
+        - have no child folders,
+        - and no physical directory exists.
         """
-        folders = self.get_all_folders()
-        cleaned_count = 0
-        for f in folders:
-            scores = self.get_folder_scores(f.id)
-            children = [c for c in folders if c.parent_id == f.id]
-            physical_path = self._get_folder_path(f.id)
-            if len(scores) == 0 and len(children) == 0 and not os.path.exists(physical_path):
-                self.db.delete_folder(f.id)
-                cleaned_count += 1
-        return cleaned_count
+        folders = self.db.get_all_folders()
+        score_folder_ids = self.db.get_folder_ids_with_scores()
+        parent_ids = {f.parent_id for f in folders if f.parent_id is not None}
 
-    def _update_score_paths_recursive(self, folder_id: str, old_base_path: str, new_base_path: str):
-        scores = self.get_folder_scores(folder_id)
-        for s in scores:
-            if s.filepath.startswith(old_base_path):
-                rel_path = os.path.relpath(s.filepath, old_base_path)
-                s.filepath = os.path.join(new_base_path, rel_path)
-                self.db.update_score(s)
-                
-        folders = self.get_all_folders()
-        children = [f for f in folders if f.parent_id == folder_id]
-        for child in children:
-            self._update_score_paths_recursive(child.id, old_base_path, new_base_path)
+        folder_map = {f.id: f for f in folders}
 
-    def get_all(self) -> List[ScoreItem]:
-        return self.db.get_all_scores()
+        def folder_path(folder_id: str) -> str:
+            parts: List[str] = []
+            current_id: Optional[str] = folder_id
+            visited: set[str] = set()
+            while current_id and current_id not in visited:
+                visited.add(current_id)
+                folder = folder_map.get(current_id)
+                if not folder:
+                    break
+                parts.append(folder.name)
+                current_id = folder.parent_id
+            return os.path.join(self.library_dir, *reversed(parts))
 
-    def search(self, keyword: str) -> List[ScoreItem]:
-        return self.db.search_scores(keyword)
+        cleaned = 0
+        for folder in folders:
+            if folder.id in score_folder_ids or folder.id in parent_ids:
+                continue
+            if os.path.exists(folder_path(folder.id)):
+                continue
+            self.db.delete_folder(folder.id)
+            cleaned += 1
 
-    def get_all_folders(self) -> List[FolderItem]:
-        return self.db.get_all_folders()
-        
-    def get_folder_scores(self, folder_id: Optional[str]) -> List[ScoreItem]:
-        scores = self.get_all()
-        return [s for s in scores if s.folder_id == folder_id]
-
+        if cleaned:
+            self._invalidate_folder_cache()
+        return cleaned
