@@ -86,210 +86,6 @@ class LibraryWidget(QWidget):
     # ==================================================================
     def _setup_ui(self):
         self.setObjectName("libraryPage")
-        self.setStyleSheet(
-            """
-            QWidget#libraryPage {
-                background: #0D1117;
-                color: #D0D7DE;
-                font-family: "Segoe UI Variable", "Segoe UI", "Malgun Gothic";
-                font-size: 13px;
-            }
-
-            QFrame#locationBar, QFrame#sidebar, QFrame#tableFrame {
-                background: #10161F;
-                border: 1px solid #212B38;
-                border-radius: 8px;
-            }
-
-            QLineEdit#searchBox {
-                background: #0D131C;
-                color: #F0F6FC;
-                border: 1px solid #2A3544;
-                border-radius: 7px;
-                padding: 7px 12px;
-                min-height: 20px;
-            }
-            QLineEdit#searchBox:focus {
-                border-color: #3B82F6;
-            }
-
-            QPushButton, QToolButton {
-                background: #161D27;
-                color: #D0D7DE;
-                border: 1px solid #2A3544;
-                border-radius: 7px;
-                padding: 6px 11px;
-                min-height: 20px;
-            }
-            QPushButton:hover, QToolButton:hover {
-                background: #1D2734;
-                border-color: #3A4758;
-                color: #FFFFFF;
-            }
-            QPushButton:pressed, QToolButton:pressed {
-                background: #101720;
-            }
-            QPushButton:disabled, QToolButton:disabled {
-                background: #111720;
-                color: #566171;
-                border-color: #202936;
-            }
-
-            QToolButton#primaryAction, QPushButton#primaryAction {
-                background: #2463D4;
-                border: 1px solid #3677EA;
-                color: #FFFFFF;
-                font-weight: 600;
-            }
-            QToolButton#primaryAction:hover, QPushButton#primaryAction:hover {
-                background: #2F6FDE;
-            }
-
-            QToolButton#navButton {
-                background: transparent;
-                border: 1px solid transparent;
-                padding: 5px;
-                min-width: 28px;
-                max-width: 28px;
-            }
-            QToolButton#navButton:hover {
-                background: #182231;
-                border-color: #29384A;
-            }
-
-            QToolButton#scopeButton {
-                text-align: left;
-                background: transparent;
-                border: 1px solid transparent;
-                padding: 7px 10px;
-                color: #AAB4C3;
-            }
-            QToolButton#scopeButton:hover {
-                background: #151F2C;
-                color: #F0F6FC;
-            }
-            QToolButton#scopeButton:checked {
-                background: #18325B;
-                border-color: #244A80;
-                color: #73A7FF;
-                font-weight: 600;
-            }
-
-            QLabel#sectionLabel {
-                color: #748094;
-                font-size: 11px;
-                font-weight: 600;
-                padding: 0 3px;
-            }
-            QLabel#statusText {
-                color: #7F8C9E;
-                font-size: 11px;
-            }
-
-            QTreeView {
-                background: transparent;
-                border: none;
-                outline: none;
-                padding: 2px 0;
-            }
-            QTreeView::item {
-                min-height: 29px;
-                padding: 2px 6px;
-                border-radius: 5px;
-                color: #B8C1CD;
-            }
-            QTreeView::item:hover {
-                background: #151F2C;
-                color: #FFFFFF;
-            }
-            QTreeView::item:selected {
-                background: #18325B;
-                color: #73A7FF;
-            }
-
-            QFrame#tableFrame {
-                background: #0E141D;
-            }
-
-            QTableView {
-                background: #0E141D;
-                alternate-background-color: #111923;
-                color: #D8DEE7;
-                border: none;
-                outline: none;
-                gridline-color: transparent;
-                selection-background-color: #173D70;
-                selection-color: #FFFFFF;
-            }
-            QTableView::item {
-                min-height: 35px;
-                padding: 4px 9px;
-                border-bottom: 1px solid #182230;
-            }
-            QTableView::item:hover {
-                background: #141F2C;
-            }
-
-            QHeaderView::section {
-                background: #151D28;
-                color: #929EAE;
-                border: none;
-                border-bottom: 1px solid #273344;
-                padding: 8px 10px;
-                font-size: 11px;
-                font-weight: 600;
-            }
-
-            QMenu {
-                background: #151D28;
-                color: #D8DEE7;
-                border: 1px solid #303C4D;
-                padding: 5px;
-            }
-            QMenu::item {
-                padding: 7px 28px 7px 12px;
-                border-radius: 5px;
-            }
-            QMenu::item:selected {
-                background: #1E3C67;
-                color: #FFFFFF;
-            }
-            QMenu::separator {
-                height: 1px;
-                background: #293545;
-                margin: 5px 7px;
-            }
-
-            QSplitter::handle {
-                background: transparent;
-                width: 8px;
-            }
-
-            QPushButton#crumb {
-                background: transparent;
-                border: none;
-                color: #8F9BAA;
-                padding: 4px 6px;
-            }
-            QPushButton#crumb:hover {
-                background: #172231;
-                color: #DDE5EF;
-            }
-            QPushButton#crumbCurrent {
-                background: transparent;
-                border: none;
-                color: #F0F6FC;
-                font-weight: 600;
-                padding: 4px 6px;
-            }
-
-            QLabel#emptyState {
-                color: #6F7C8D;
-                font-size: 13px;
-            }
-            """
-        )
-
         root = QVBoxLayout(self)
         root.setContentsMargins(4, 6, 4, 4)
         root.setSpacing(8)
@@ -896,6 +692,15 @@ class LibraryWidget(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.lbl_empty.setGeometry(self.table_view.viewport().rect())
+        if not hasattr(self, "v3_splitter"):
+            return
+        narrow = self.width() < 810
+        self.v3_splitter.setSizes(
+            [158 if narrow else 180, max(300, self.width() - (190 if narrow else 212))]
+        )
+        header = self.table_view.horizontalHeader()
+        for column in (3, 4, 5):
+            header.setSectionHidden(column, narrow)
 
     # ==================================================================
     # Selection / activation

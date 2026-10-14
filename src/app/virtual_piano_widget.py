@@ -21,8 +21,8 @@ class VirtualPianoWidget(QWidget):
         super().__init__(parent)
         self.mapper: RobloxPianoMapper = mapper or RobloxPianoMapper()
         self._active_pitches: Set[int] = set()
-        self.setMinimumHeight(110)
-        self.setMaximumHeight(160)
+        self.setMinimumHeight(88)
+        self.setMaximumHeight(120)
         self.setMouseTracking(True)
         self._hovered_pitch: Optional[int] = None
 
@@ -114,7 +114,7 @@ class VirtualPianoWidget(QWidget):
         h = self.height()
 
         # Background frame
-        painter.fillRect(0, 0, w, h, QColor("#111317"))
+        painter.fillRect(0, 0, w, h, QColor("#0B0C0E"))
 
         white_rects, black_rects = self._get_key_geometry()
 
@@ -127,8 +127,8 @@ class VirtualPianoWidget(QWidget):
             km = self.mapper.map_pitch(pitch)
 
             if is_active:
-                brush = QBrush(QColor("#3875E8"))  # Active Blue
-                pen = QPen(QColor("#5C95FF"), 1)
+                brush = QBrush(QColor("#3B82F6"))  # Active Blue
+                pen = QPen(QColor("#60A5FA"), 1)
                 text_color = QColor("#FFFFFF")
             else:
                 brush = QBrush(QColor("#EDEFEF"))  # Ivory White
@@ -162,8 +162,8 @@ class VirtualPianoWidget(QWidget):
             km = self.mapper.map_pitch(pitch)
 
             if is_active:
-                brush = QBrush(QColor("#F59E0B"))  # Active Amber
-                pen = QPen(QColor("#FBBF24"), 1)
+                brush = QBrush(QColor("#3B82F6"))  # Active Amber
+                pen = QPen(QColor("#60A5FA"), 1)
                 text_color = QColor("#000000")
             else:
                 brush = QBrush(QColor("#1E2128"))  # Deep Black/Charcoal

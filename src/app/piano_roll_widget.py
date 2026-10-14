@@ -71,14 +71,14 @@ class PianoRollWidget(QWidget):
         h = self.height()
 
         # Background
-        painter.fillRect(0, 0, w, h, QColor("#15181E"))
+        painter.fillRect(0, 0, w, h, QColor("#0B0C0E"))
 
         # Border
-        painter.setPen(QPen(QColor("#252A34"), 1))
+        painter.setPen(QPen(QColor("#262932"), 1))
         painter.drawRoundedRect(1, 1, w - 2, h - 2, 8, 8)
 
         if not self._timeline or not self._timeline.notes or self._timeline.duration <= 0:
-            painter.setPen(QColor("#5A6272"))
+            painter.setPen(QColor("#6B7280"))
             painter.setFont(QFont("Segoe UI", 11))
             painter.drawText(self.rect(), Qt.AlignCenter, "불러온 악보가 없습니다")
             return
@@ -92,7 +92,7 @@ class PianoRollWidget(QWidget):
         pitch_span = max(1, self._max_pitch - self._min_pitch)
 
         # Draw grid lines for octaves
-        painter.setPen(QPen(QColor("#1F232B"), 1))
+        painter.setPen(QPen(QColor("#1B1E24"), 1))
         for p in range(self._min_pitch, self._max_pitch + 1):
             if p % 12 == 0:  # C note
                 y = margin_y + draw_h - ((p - self._min_pitch) / pitch_span * draw_h)
@@ -114,7 +114,7 @@ class PianoRollWidget(QWidget):
             if note.hand == HandType.RIGHT:
                 color = QColor("#3B82F6")  # Vibrant Blue
             elif note.hand == HandType.LEFT:
-                color = QColor("#8B5CF6")  # Vibrant Purple
+                color = QColor("#14B8A6")  # Vibrant Purple
             else:
                 color = QColor("#10B981")  # Emerald Green
 

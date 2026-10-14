@@ -9,7 +9,8 @@ from PySide6.QtGui import QDragEnterEvent, QDropEvent, QIcon, QFont
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QStackedWidget, QFileDialog, QSlider, QFrame, QMessageBox, QDialog,
-    QScrollArea, QCheckBox, QTabWidget
+    QScrollArea, QCheckBox, QTabWidget, QButtonGroup, QProgressBar,
+    QStyle, QSizePolicy
 )
 
 from src.music.events import NoteEvent, HandType
@@ -77,6 +78,37 @@ class ScoreLoadWorker(QThread):
                 self.error = "불러오기가 취소되었습니다."
         except Exception as exc:
             self.error = str(exc)
+
+
+class ElidedLabel(QLabel):
+    def __init__(self, text: str = "", parent=None):
+        super().__init__(text, parent)
+        self._full_text = text
+        self.setToolTip(text)
+
+    def set_elided_text(self, text: str) -> None:
+        self._full_text = text
+        self.setToolTip(text)
+        self._apply_elision()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._apply_elision()
+
+    def _apply_elision(self) -> None:
+        width = max(0, self.contentsRect().width())
+        if width:
+            display = self.fontMetrics().elidedText(
+                self._full_text, Qt.ElideRight, width
+            )
+        else:
+            display = self._full_text
+        QLabel.setText(self, display)
+
+
+def _pitch_label(pitch: int) -> str:
+    names = ("C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B")
+    return f"{names[pitch % 12]}{pitch // 12 - 1}"
 
 
 class MainWindow(QMainWindow):
@@ -195,299 +227,346 @@ class MainWindow(QMainWindow):
         central_widget = QWidget(self)
         self.setCentralWidget(central_widget)
         self.root_layout = QVBoxLayout(central_widget)
-        self.root_layout.setContentsMargins(20, 16, 20, 16)
-        self.root_layout.setSpacing(14)
+        self.root_layout.setContentsMargins(12, 10, 12, 2)
+        self.root_layout.setSpacing(8)
 
-        # Top Navigation Bar
-        self.top_bar = QHBoxLayout()
-        self.lbl_app_title = QLabel("로블록스 피아노 연주기")
-        self.lbl_app_title.setObjectName("title_label")
+        self.header = QFrame(central_widget)
+        self.header.setObjectName("GlobalHeader")
+        self.header.setFixedHeight(48)
+        header_layout = QHBoxLayout(self.header)
+        header_layout.setContentsMargins(8, 0, 8, 0)
+        header_layout.setSpacing(6)
 
+        self.lbl_app_title = QLabel("로블록스 피아노")
+        self.lbl_app_title.setObjectName("appTitle")
         self.lbl_status_badge = QLabel("준비됨")
-        self.lbl_status_badge.setStyleSheet(
-            "background-color: #2D3748; color: #E2E8F0; font-weight: bold; padding: 4px 10px; border-radius: 6px; font-size: 11px;"
-        )
+        self.lbl_status_badge.setObjectName("statusBadge")
+        self.lbl_status_badge.setProperty("state", "ready")
 
-        self.lbl_roblox_status = QLabel("● 로블록스 확인 중...")
-        self.lbl_roblox_status.setStyleSheet("color: #94A3B8; font-size: 12px; margin-left: 10px;")
+        self.workspace_nav = QWidget(self.header)
+        nav_layout = QHBoxLayout(self.workspace_nav)
+        nav_layout.setContentsMargins(0, 0, 0, 0)
+        nav_layout.setSpacing(2)
+        self.workspace_nav_group = QButtonGroup(self)
+        self.workspace_nav_group.setExclusive(True)
+        self.workspace_nav_buttons = []
+        for index, title in enumerate(("연주", "라이브러리", "가져오기")):
+            button = QPushButton(title, self.workspace_nav)
+            button.setObjectName("workspaceSegment")
+            button.setCheckable(True)
+            self.workspace_nav_group.addButton(button, index)
+            button.clicked.connect(
+                lambda checked=False, tab_index=index: self.tabs.setCurrentIndex(tab_index)
+                if hasattr(self, "tabs") else None
+            )
+            nav_layout.addWidget(button)
+            self.workspace_nav_buttons.append(button)
 
-        self.btn_overlay_toggle = QPushButton("오버레이 (F4)")
-        self.btn_overlay_toggle.setObjectName("accent_toggle")
+        self.lbl_roblox_status = QLabel("○ Roblox 대기")
+        self.lbl_roblox_status.setObjectName("robloxStatus")
+        self.lbl_roblox_status.setProperty("state", "waiting")
+        self.lbl_roblox_status.setToolTip("연주를 시작하면 Roblox 창을 자동으로 확인합니다")
+
+        self.btn_overlay_toggle = QPushButton("오버레이  F4")
+        self.btn_overlay_toggle.setObjectName("headerToggle")
         self.btn_overlay_toggle.setCheckable(True)
         self.btn_overlay_toggle.setChecked(False)
         self.btn_overlay_toggle.clicked.connect(self._toggle_overlay)
 
-        self.btn_settings = QPushButton("⚙ 설정")
+        self.btn_settings = QPushButton("설정")
+        self.btn_settings.setObjectName("headerAction")
         self.btn_settings.clicked.connect(self._open_settings)
 
-        self.top_bar.addWidget(self.lbl_app_title)
-        self.top_bar.addWidget(self.lbl_status_badge)
-        self.top_bar.addWidget(self.lbl_roblox_status)
-        self.top_bar.addStretch()
-        self.top_bar.addWidget(self.btn_overlay_toggle)
-        self.top_bar.addWidget(self.btn_settings)
+        header_layout.addWidget(self.lbl_app_title)
+        header_layout.addWidget(self.lbl_status_badge)
+        header_layout.addStretch(1)
+        header_layout.addWidget(self.workspace_nav)
+        header_layout.addStretch(1)
+        header_layout.addWidget(self.lbl_roblox_status)
+        header_layout.addWidget(self.btn_overlay_toggle)
+        header_layout.addWidget(self.btn_settings)
+        self.root_layout.addWidget(self.header)
 
-        self.root_layout.addLayout(self.top_bar)
-
-        # Tabs
         self.tabs = QTabWidget(self)
+        self.tabs.setObjectName("workspaceStack")
+        self.tabs.tabBar().hide()
         self.tabs.setDocumentMode(True)
-        self.tabs.setStyleSheet("QTabWidget::pane { border: none; }")
+        self.tabs.currentChanged.connect(self._sync_workspace_nav)
         self.root_layout.addWidget(self.tabs, 1)
 
-        # Tab 0: Player Stack (Landing Drop View + Player View)
         self.player_container = QWidget()
         player_layout = QVBoxLayout(self.player_container)
-        player_layout.setContentsMargins(0,0,0,0)
+        player_layout.setContentsMargins(0, 0, 0, 0)
         self.view_stack = QStackedWidget()
         player_layout.addWidget(self.view_stack)
-        
         self._build_landing_view()
         self._build_player_view()
-        self.tabs.addTab(self.player_container, "플레이어")
+        self.tabs.addTab(self.player_container, "연주")
 
-        # Tab 1: Library
         self.library_widget = LibraryWidget(self.library_manager, self)
         self.library_widget.score_selected.connect(self._on_library_score_selected)
         self.tabs.addTab(self.library_widget, "라이브러리")
 
-        # Tab 2: Import
         self.import_widget = ImportWidget(self)
         self.import_widget.import_requested.connect(self._on_import_requested)
-        self.tabs.addTab(self.import_widget, "비디오 / YouTube 가져오기")
+        self.import_widget.score_open_requested.connect(self._on_library_score_selected)
+        self.tabs.addTab(self.import_widget, "가져오기")
+        for button in self.workspace_nav_buttons:
+            button.setChecked(False)
+        self.workspace_nav_buttons[0].setChecked(True)
+
+        status = self.statusBar()
+        status.setSizeGripEnabled(False)
+        status.setFixedHeight(28)
+        self.lbl_shortcut_hint = QLabel("F6 재생  ·  F7 일시 정지/계속  ·  F8 정지  ·  F4 오버레이")
+        status.addWidget(self.lbl_shortcut_hint, 1)
+        self.lbl_background_task = QLabel("동영상 분석")
+        self.lbl_background_task.setObjectName("statusBadge")
+        self.lbl_background_task.setProperty("state", "countdown")
+        self.lbl_background_task.setContentsMargins(6, 0, 6, 0)
+        self.background_task_progress = QProgressBar()
+        self.background_task_progress.setTextVisible(False)
+        self.background_task_progress.setFixedWidth(100)
+        status.addPermanentWidget(self.lbl_background_task)
+        status.addPermanentWidget(self.background_task_progress)
+        self.lbl_background_task.hide()
+        self.background_task_progress.hide()
+
+    def _sync_workspace_nav(self, index: int) -> None:
+        for tab_index, button in enumerate(self.workspace_nav_buttons):
+            button.setChecked(tab_index == index)
 
     def _build_landing_view(self) -> None:
         self.landing_view = QWidget()
         layout = QVBoxLayout(self.landing_view)
-        layout.setContentsMargins(0, 10, 0, 0)
+        layout.setContentsMargins(8, 4, 8, 4)
         layout.setAlignment(Qt.AlignCenter)
 
-        self.drop_card = QFrame()
+        self.drop_card = QFrame(self.landing_view)
         self.drop_card.setObjectName("drop_card")
-        self.drop_card.setMinimumSize(600, 360)
+        self.drop_card.setMinimumSize(0, 300)
+        self.drop_card.setMaximumWidth(650)
         drop_layout = QVBoxLayout(self.drop_card)
+        drop_layout.setContentsMargins(24, 22, 24, 22)
         drop_layout.setAlignment(Qt.AlignCenter)
-        drop_layout.setSpacing(16)
+        drop_layout.setSpacing(12)
 
-        lbl_icon = QLabel("⛁") # monochrome symbol
-        lbl_icon.setStyleSheet("font-size: 50px; color: #64748B;")
+        lbl_icon = QLabel(self.drop_card)
         lbl_icon.setAlignment(Qt.AlignCenter)
+        lbl_icon.setPixmap(self.style().standardIcon(QStyle.SP_FileIcon).pixmap(38, 38))
 
-        lbl_main = QLabel("여기에 악보 파일을 드래그 앤 드롭하세요")
-        lbl_main.setStyleSheet("font-size: 20px; font-weight: bold; color: #FFFFFF;")
+        lbl_main = QLabel("악보 파일을 이곳에 끌어다 놓으세요", self.drop_card)
+        lbl_main.setObjectName("dropTitle")
         lbl_main.setAlignment(Qt.AlignCenter)
 
-        lbl_formats = QLabel("지원 포맷: MIDI (.mid)  •  MusicXML (.xml, .mxl)  •  숫자악보 (.txt)  •  이미지 / PDF")
-        lbl_formats.setStyleSheet("font-size: 13px; color: #8C93A0;")
+        lbl_formats = QLabel(
+            "MIDI   ·   MusicXML   ·   숫자 악보   ·   PDF   ·   이미지",
+            self.drop_card,
+        )
+        lbl_formats.setObjectName("dropHint")
         lbl_formats.setAlignment(Qt.AlignCenter)
 
-        btn_browse = QPushButton("악보 파일 찾기...")
-        btn_browse.setObjectName("primary_btn")
-        btn_browse.setFixedWidth(200)
-        btn_browse.clicked.connect(self._browse_file)
+        self.btn_browse_score = QPushButton("내 PC에서 파일 찾기")
+        self.btn_browse_score.setObjectName("primary_btn")
+        self.btn_browse_score.setMinimumWidth(170)
+        self.btn_browse_score.clicked.connect(self._browse_file)
 
-        btn_sample = QPushButton("데모 곡 불러오기 (캐논 변주곡)")
-        btn_sample.setFixedWidth(200)
-        btn_sample.clicked.connect(self._load_sample_score)
+        self.btn_demo_score = QPushButton("데모 곡 불러오기")
+        self.btn_demo_score.setObjectName("secondaryAction")
+        self.btn_demo_score.setMinimumWidth(150)
+        self.btn_demo_score.clicked.connect(self._load_sample_score)
+
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
+        actions.addWidget(self.btn_browse_score)
+        actions.addWidget(self.btn_demo_score)
 
         drop_layout.addWidget(lbl_icon)
         drop_layout.addWidget(lbl_main)
         drop_layout.addWidget(lbl_formats)
-        drop_layout.addSpacing(10)
-        drop_layout.addWidget(btn_browse, 0, Qt.AlignCenter)
-        drop_layout.addWidget(btn_sample, 0, Qt.AlignCenter)
-
-        layout.addWidget(self.drop_card)
+        drop_layout.addSpacing(5)
+        drop_layout.addLayout(actions)
+        layout.addWidget(self.drop_card, 0, Qt.AlignCenter)
         self.view_stack.addWidget(self.landing_view)
 
     def _build_player_view(self) -> None:
         self.player_view = QWidget()
         layout = QVBoxLayout(self.player_view)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
+        layout.setSpacing(7)
 
-        # Header Info Bar
-        self.info_card = QFrame()
-        self.info_card.setObjectName("card")
+        self.info_card = QFrame(self.player_view)
+        self.info_card.setObjectName("trackHeader")
         info_layout = QHBoxLayout(self.info_card)
-        info_layout.setContentsMargins(14, 10, 14, 10)
-        info_layout.setSpacing(12)
+        info_layout.setContentsMargins(12, 7, 12, 7)
+        info_layout.setSpacing(9)
 
-        self.btn_back = QPushButton("← 라이브러리")
-        self.btn_back.setStyleSheet("""
-            QPushButton {
-                background-color: #21262D;
-                color: #C9D1D9;
-                border: 1px solid #30363D;
-                border-radius: 6px;
-                padding: 5px 12px;
-                font-size: 12px;
-                font-weight: 500;
-            }
-            QPushButton:hover {
-                background-color: #30363D;
-                color: #FFFFFF;
-            }
-        """)
-        self.btn_back.clicked.connect(self._go_back_to_landing)
-        info_layout.addWidget(self.btn_back)
+        self.lbl_song_title = ElidedLabel("곡 제목", self.info_card)
+        self.lbl_song_title.setObjectName("trackTitle")
+        self.lbl_song_title.setMinimumWidth(90)
+        self.lbl_song_title.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        info_layout.addWidget(self.lbl_song_title, 1)
 
-        self.lbl_song_title = QLabel("곡 제목")
-        self.lbl_song_title.setStyleSheet("font-size: 16px; font-weight: 700; color: #F2F5F8;")
-        info_layout.addWidget(self.lbl_song_title)
-
-        lbl_sep1 = QLabel("·")
-        lbl_sep1.setStyleSheet("color: #484F58; font-weight: bold;")
-        info_layout.addWidget(lbl_sep1)
-
-        # Unified Stats line: Duration · BPM · Notes · Range
-        self.lbl_stat_dur = QLabel("00:00")
-        self.lbl_stat_dur.setStyleSheet("font-size: 13px; font-weight: 600; color: #C9D1D9;")
-        info_layout.addWidget(self.lbl_stat_dur)
-
-        lbl_sep2 = QLabel("·")
-        lbl_sep2.setStyleSheet("color: #484F58; font-weight: bold;")
-        info_layout.addWidget(lbl_sep2)
-
-        self.lbl_stat_bpm = QLabel("120 BPM")
-        self.lbl_stat_bpm.setStyleSheet("font-size: 13px; font-weight: 600; color: #C9D1D9;")
-        info_layout.addWidget(self.lbl_stat_bpm)
-
-        lbl_sep3 = QLabel("·")
-        lbl_sep3.setStyleSheet("color: #484F58; font-weight: bold;")
-        info_layout.addWidget(lbl_sep3)
-
-        self.lbl_stat_notes = QLabel("0 Notes")
-        self.lbl_stat_notes.setStyleSheet("font-size: 13px; font-weight: 600; color: #C9D1D9;")
-        info_layout.addWidget(self.lbl_stat_notes)
-
-        lbl_sep4 = QLabel("·")
-        lbl_sep4.setStyleSheet("color: #484F58; font-weight: bold;")
-        info_layout.addWidget(lbl_sep4)
-
-        self.lbl_stat_range = QLabel("A0 — C8")
-        self.lbl_stat_range.setStyleSheet("font-size: 13px; color: #8B949E;")
-        info_layout.addWidget(self.lbl_stat_range)
+        self.lbl_stat_dur = QLabel("00:00", self.info_card)
+        self.lbl_stat_dur.setObjectName("metricValue")
+        self.lbl_stat_bpm = QLabel("120 BPM", self.info_card)
+        self.lbl_stat_bpm.setObjectName("metricValue")
+        self.lbl_stat_notes = QLabel("0 노트", self.info_card)
+        self.lbl_stat_notes.setObjectName("metricValue")
+        self.lbl_stat_range = QLabel("A0–C8", self.info_card)
+        self.lbl_stat_range.setObjectName("rangeValue")
+        self.lbl_stat_range.setProperty("state", "success")
+        for label in (self.lbl_stat_dur, self.lbl_stat_bpm, self.lbl_stat_notes, self.lbl_stat_range):
+            info_layout.addWidget(label)
 
         self.btn_octave_fit = QPushButton("옥타브 맞춤")
-        self.btn_octave_fit.setStyleSheet("""
-            QPushButton {
-                font-size: 11px;
-                padding: 3px 8px;
-                background-color: #21262D;
-                color: #58A6FF;
-                border: 1px solid #30363D;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #30363D;
-                border-color: #58A6FF;
-            }
-        """)
+        self.btn_octave_fit.setObjectName("secondaryAction")
         self.btn_octave_fit.clicked.connect(self._apply_octave_fit)
         info_layout.addWidget(self.btn_octave_fit)
 
-        info_layout.addStretch(1)
+        self.btn_open_score = QPushButton("파일 열기")
+        self.btn_open_score.setObjectName("secondaryAction")
+        self.btn_open_score.clicked.connect(self._browse_file)
+        info_layout.addWidget(self.btn_open_score)
         layout.addWidget(self.info_card)
 
-        # Piano Roll Widget
-        self.piano_roll = PianoRollWidget(self)
-        self.piano_roll.seek_requested.connect(self._handle_seek)
-        layout.addWidget(self.piano_roll, 2)
+        self.lbl_countdown_banner = QLabel("")
+        self.lbl_countdown_banner.setObjectName("countdownBanner")
+        self.lbl_countdown_banner.setAlignment(Qt.AlignCenter)
+        self.lbl_countdown_banner.hide()
+        layout.addWidget(self.lbl_countdown_banner)
 
-        # 88-Key Interactive Virtual Piano Widget
-        self.virtual_piano = VirtualPianoWidget(self.mapper, self)
+        self.piano_roll = PianoRollWidget(self.player_view)
+        self.piano_roll.seek_requested.connect(self._handle_seek)
+        self.piano_roll.setMinimumHeight(120)
+        layout.addWidget(self.piano_roll, 1)
+
+        self.virtual_piano = VirtualPianoWidget(self.mapper, self.player_view)
         self.virtual_piano.key_clicked.connect(self._handle_piano_key_clicked)
+        self.virtual_piano.setMinimumHeight(88)
+        self.virtual_piano.setMaximumHeight(120)
         layout.addWidget(self.virtual_piano)
 
-        # Controls & Hand Assignment Card
-        self.controls_card = QFrame()
-        self.controls_card.setObjectName("card")
-        ctrl_layout = QVBoxLayout(self.controls_card)
-        ctrl_layout.setContentsMargins(16, 10, 16, 10)
-        ctrl_layout.setSpacing(8)
+        self.controls_card = QFrame(self.player_view)
+        self.controls_card.setObjectName("ControlDeck")
+        self.controls_card.setFixedHeight(88)
+        deck = QVBoxLayout(self.controls_card)
+        deck.setContentsMargins(10, 6, 10, 5)
+        deck.setSpacing(2)
 
-        # Row 1: Hand selection + Speed + Transpose
-        row1 = QHBoxLayout()
-        row1.setSpacing(12)
+        controls_row = QHBoxLayout()
+        controls_row.setContentsMargins(0, 0, 0, 0)
+        controls_row.setSpacing(8)
 
-        # Hands
-        self.chk_rh = QCheckBox("오른손 (RH)")
-        self.chk_rh.setChecked(True)
+        left_controls = QWidget(self.controls_card)
+        left_layout = QVBoxLayout(left_controls)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(2)
+        hand_row = QHBoxLayout()
+        hand_row.setContentsMargins(0, 0, 0, 0)
+        hand_row.setSpacing(4)
+        self.chk_rh = QCheckBox("R  오른손")
+        self.chk_rh.setObjectName("handToggle")
+        self.chk_rh.setChecked(self.config.enable_rh)
+        self.chk_lh = QCheckBox("L  왼손")
+        self.chk_lh.setObjectName("handToggle")
+        self.chk_lh.setChecked(self.config.enable_lh)
         self.chk_rh.toggled.connect(self._toggle_hands)
-
-        self.chk_lh = QCheckBox("왼손 (LH)")
-        self.chk_lh.setChecked(True)
         self.chk_lh.toggled.connect(self._toggle_hands)
+        hand_row.addWidget(self.chk_lh)
+        hand_row.addWidget(self.chk_rh)
+        left_layout.addLayout(hand_row)
 
-        row1.addWidget(self.chk_rh)
-        row1.addWidget(self.chk_lh)
-        row1.addSpacing(16)
-
-        # Speed slider
-        lbl_speed = QLabel("배속:")
-        lbl_speed.setStyleSheet("color: #8B949E;")
-        row1.addWidget(lbl_speed)
-        self.slider_speed = QSlider(Qt.Horizontal)
-        self.slider_speed.setRange(25, 200)  # 0.25x to 2.00x
-        self.slider_speed.setValue(100)
-        self.slider_speed.setFixedWidth(110)
-        self.lbl_speed_val = QLabel("1.00×")
-        self.lbl_speed_val.setStyleSheet("font-weight: 600; color: #F0F6FC;")
-        self.lbl_speed_val.setFixedWidth(42)
-        self.slider_speed.valueChanged.connect(self._on_speed_slider_changed)
-        row1.addWidget(self.slider_speed)
-        row1.addWidget(self.lbl_speed_val)
-        row1.addSpacing(16)
-
-        # Transpose slider
-        lbl_trans = QLabel("조옮김:")
-        lbl_trans.setStyleSheet("color: #8B949E;")
-        row1.addWidget(lbl_trans)
-        self.slider_transpose = QSlider(Qt.Horizontal)
+        transpose_row = QHBoxLayout()
+        transpose_row.setContentsMargins(0, 0, 0, 0)
+        transpose_row.setSpacing(3)
+        lbl_transpose = QLabel("조옮김")
+        lbl_transpose.setObjectName("guideText")
+        self.btn_transpose_down = QPushButton("−")
+        self.btn_transpose_down.setObjectName("smallControl")
+        self.btn_transpose_down.clicked.connect(
+            lambda: self.slider_transpose.setValue(self.slider_transpose.value() - 1)
+        )
+        self.lbl_transpose_val = QLabel("0 st")
+        self.lbl_transpose_val.setObjectName("numericValue")
+        self.lbl_transpose_val.setAlignment(Qt.AlignCenter)
+        self.lbl_transpose_val.setMinimumWidth(42)
+        self.slider_transpose = QSlider(Qt.Horizontal, self.controls_card)
         self.slider_transpose.setRange(-12, 12)
         self.slider_transpose.setValue(0)
-        self.slider_transpose.setFixedWidth(110)
-        self.lbl_transpose_val = QLabel("0")
-        self.lbl_transpose_val.setStyleSheet("font-weight: 600; color: #F0F6FC;")
-        self.lbl_transpose_val.setFixedWidth(24)
         self.slider_transpose.valueChanged.connect(self._on_transpose_changed)
-        row1.addWidget(self.slider_transpose)
-        row1.addWidget(self.lbl_transpose_val)
+        self.slider_transpose.hide()
+        self.btn_transpose_up = QPushButton("+")
+        self.btn_transpose_up.setObjectName("smallControl")
+        self.btn_transpose_up.clicked.connect(
+            lambda: self.slider_transpose.setValue(self.slider_transpose.value() + 1)
+        )
+        self.btn_reset_transpose = QPushButton("0")
+        self.btn_reset_transpose.setObjectName("smallControl")
+        self.btn_reset_transpose.setToolTip("조옮김 초기화")
+        self.btn_reset_transpose.clicked.connect(lambda: self.slider_transpose.setValue(0))
+        transpose_row.addWidget(lbl_transpose)
+        transpose_row.addWidget(self.btn_transpose_down)
+        transpose_row.addWidget(self.lbl_transpose_val)
+        transpose_row.addWidget(self.btn_transpose_up)
+        transpose_row.addWidget(self.btn_reset_transpose)
+        left_layout.addLayout(transpose_row)
+        controls_row.addWidget(left_controls, 1)
 
-        btn_reset_transpose = QPushButton("초기화")
-        btn_reset_transpose.setStyleSheet("font-size: 11px; padding: 2px 8px; background-color: #21262D; color: #8B949E; border: 1px solid #30363D; border-radius: 4px;")
-        btn_reset_transpose.clicked.connect(lambda: self.slider_transpose.setValue(0))
-        row1.addWidget(btn_reset_transpose)
-
-        row1.addStretch()
-        ctrl_layout.addLayout(row1)
-
-        # Row 2: Play / Pause / Stop Buttons & Guide Text
-        row2 = QHBoxLayout()
-        row2.setSpacing(10)
-
-        self.btn_main_play = QPushButton("▶ 재생 (F6)")
+        transport = QWidget(self.controls_card)
+        transport_layout = QHBoxLayout(transport)
+        transport_layout.setContentsMargins(0, 0, 0, 0)
+        transport_layout.setSpacing(5)
+        self.btn_main_play = QPushButton("재생   F6")
         self.btn_main_play.setObjectName("primary_btn")
-        self.btn_main_play.setFixedHeight(38)
-        self.btn_main_play.setMinimumWidth(140)
+        self.btn_main_play.setFixedHeight(36)
+        self.btn_main_play.setMinimumWidth(112)
         self.btn_main_play.clicked.connect(self._handle_play_button_click)
-
-        self.btn_main_stop = QPushButton("■ 정지 (F8)")
-        self.btn_main_stop.setFixedHeight(38)
-        self.btn_main_stop.setMinimumWidth(100)
+        self.btn_main_stop = QPushButton("정지   F8")
+        self.btn_main_stop.setFixedHeight(36)
+        self.btn_main_stop.setMinimumWidth(72)
         self.btn_main_stop.clicked.connect(self._handle_stop_button_click)
+        transport_layout.addWidget(self.btn_main_play)
+        transport_layout.addWidget(self.btn_main_stop)
+        controls_row.addWidget(transport, 0, Qt.AlignCenter)
 
-        self.lbl_guide_text = QLabel("로블록스 피아노에 앉은 후 F6을 누르면 3초 카운트다운 후 자동 연주가 시작됩니다.")
-        self.lbl_guide_text.setStyleSheet("color: #8B949E; font-size: 12px; margin-left: 8px;")
+        right_controls = QWidget(self.controls_card)
+        speed_layout = QVBoxLayout(right_controls)
+        speed_layout.setContentsMargins(0, 0, 0, 0)
+        speed_layout.setSpacing(2)
+        speed_row = QHBoxLayout()
+        speed_row.setContentsMargins(0, 0, 0, 0)
+        speed_row.setSpacing(4)
+        lbl_speed = QLabel("속도")
+        lbl_speed.setObjectName("guideText")
+        speed_row.addWidget(lbl_speed)
+        self.slider_speed = QSlider(Qt.Horizontal)
+        self.slider_speed.setRange(25, 200)
+        self.slider_speed.setValue(int(round(self.config.playback_speed * 100)))
+        self.slider_speed.setMinimumWidth(74)
+        self.slider_speed.setMaximumWidth(104)
+        self.lbl_speed_val = QLabel(f"{self.config.playback_speed:.2f}×")
+        self.lbl_speed_val.setObjectName("numericValue")
+        self.lbl_speed_val.setFixedWidth(48)
+        self.lbl_speed_val.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.slider_speed.valueChanged.connect(self._on_speed_slider_changed)
+        speed_row.addWidget(self.slider_speed, 1)
+        speed_row.addWidget(self.lbl_speed_val)
+        speed_layout.addLayout(speed_row)
 
-        row2.addWidget(self.btn_main_play)
-        row2.addWidget(self.btn_main_stop)
-        row2.addWidget(self.lbl_guide_text, 1)
+        self.btn_speed_reset = QPushButton("1.00×")
+        self.btn_speed_reset.setObjectName("secondaryAction")
+        self.btn_speed_reset.setFixedHeight(24)
+        self.btn_speed_reset.setToolTip("기본 속도로 설정")
+        self.btn_speed_reset.clicked.connect(lambda: self.slider_speed.setValue(100))
+        speed_layout.addWidget(self.btn_speed_reset, 0, Qt.AlignRight)
+        controls_row.addWidget(right_controls, 1)
 
-        ctrl_layout.addLayout(row2)
+        deck.addLayout(controls_row, 1)
+        self.lbl_guide_text = QLabel("F6 재생  ·  F7 일시 정지/계속  ·  클릭하거나 드래그해 재생 위치 이동")
+        self.lbl_guide_text.setObjectName("guideText")
+        deck.addWidget(self.lbl_guide_text)
         layout.addWidget(self.controls_card)
-
         self.view_stack.addWidget(self.player_view)
 
     def _setup_overlay(self) -> None:
@@ -513,6 +592,9 @@ class MainWindow(QMainWindow):
 
     def _apply_theme(self) -> None:
         self.setStyleSheet(get_stylesheet(self.config.theme))
+        if hasattr(self, "library_widget"):
+            from src.app.library_visual_v3 import get_library_stylesheet
+            self.library_widget.setStyleSheet(get_library_stylesheet(self.config.theme))
 
     def _register_hotkeys(self) -> None:
         self.hotkeys.update_hotkeys(
@@ -716,6 +798,13 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "작업 중", "이미 다른 분석 작업이 진행 중입니다.")
             return
 
+        self.lbl_background_task.setText("동영상 분석")
+        self.lbl_background_task.setToolTip(source_path)
+        self.lbl_background_task.show()
+        self.background_task_progress.setValue(0)
+        self.background_task_progress.show()
+        self.statusBar().showMessage("동영상 분석을 시작했습니다.", 4000)
+
         self.active_worker = VideoAnalysisWorker(
             source_type=source_type,
             source_path=source_path,
@@ -724,17 +813,27 @@ class MainWindow(QMainWindow):
         )
         worker = self.active_worker
         worker.progress.connect(self.import_widget.update_progress)
+        worker.progress.connect(self._on_background_import_progress)
         worker.finished_success.connect(self._on_import_success)
         worker.finished_error.connect(self._on_import_error)
         worker.finished.connect(lambda worker=worker: self._on_video_worker_finished(worker))
         self.active_worker.start()
 
+    def _on_background_import_progress(self, percent: int, status_text: str) -> None:
+        self.background_task_progress.setValue(max(0, min(100, percent)))
+        self.lbl_background_task.setToolTip(status_text)
+        self.lbl_background_task.setText("분석 중")
+
     def _on_import_success(self, item: ScoreItem):
-        self.import_widget.task_finished(True, f"'{item.title}' 라이브러리 저장됨")
+        self.import_widget.task_finished(
+            True, f"{item.title} · 라이브러리에 저장됨", item
+        )
         self.library_widget.refresh_library()
+        self.statusBar().showMessage("악보 추출이 완료되었습니다.", 5000)
 
     def _on_import_error(self, err_msg: str):
         self.import_widget.task_finished(False, err_msg)
+        self.statusBar().showMessage("동영상 분석에 실패했습니다.", 5000)
 
     def _cancel_active_video_import(self) -> None:
         if self.active_worker and self.active_worker.isRunning():
@@ -743,6 +842,8 @@ class MainWindow(QMainWindow):
     def _on_video_worker_finished(self, worker: VideoAnalysisWorker) -> None:
         if self.active_worker is worker:
             self.active_worker = None
+        self.lbl_background_task.hide()
+        self.background_task_progress.hide()
         worker.deleteLater()
         if self._closing_after_workers:
             self._maybe_finish_close()
@@ -751,29 +852,32 @@ class MainWindow(QMainWindow):
         self.timeline = timeline
         self.scheduler.set_timeline(timeline)
 
-        # Update UI stats
-        self.lbl_song_title.setText(timeline.title)
-        self.overlay.set_song_title(timeline.title)
+        title = timeline.title or "제목 없음"
+        self.lbl_song_title.set_elided_text(title)
+        self.overlay.set_song_title(title)
 
         dur_min, dur_sec = divmod(int(timeline.duration), 60)
         self.lbl_stat_dur.setText(f"{dur_min:02d}:{dur_sec:02d}")
         self.lbl_stat_bpm.setText(f"{int(timeline.initial_bpm)} BPM")
-        self.lbl_stat_notes.setText(f"{timeline.total_notes:,} Notes")
+        self.lbl_stat_notes.setText(f"{timeline.total_notes:,} 노트")
 
-        # Range check
         analysis = RangeProcessor.analyze_range(timeline)
+        pitch_range = f"{_pitch_label(analysis.min_pitch)}–{_pitch_label(analysis.max_pitch)}"
         if analysis.out_of_range_count > 0:
-            self.lbl_stat_range.setText(f"Out: {analysis.out_of_range_count}")
-            self.lbl_stat_range.setStyleSheet("color: #EF4444; font-weight: bold;")
+            self.lbl_stat_range.setText(
+                f"{pitch_range} · 범위 밖 {analysis.out_of_range_count:,}"
+            )
+            self.lbl_stat_range.setProperty("state", "warning")
             self.btn_octave_fit.show()
         else:
-            self.lbl_stat_range.setText("A0 — C8 (OK)")
-            self.lbl_stat_range.setStyleSheet("color: #10B981; font-weight: bold;")
+            self.lbl_stat_range.setText(pitch_range)
+            self.lbl_stat_range.setProperty("state", "success")
             self.btn_octave_fit.hide()
+        self.lbl_stat_range.style().unpolish(self.lbl_stat_range)
+        self.lbl_stat_range.style().polish(self.lbl_stat_range)
 
-        # Update Piano Roll & Virtual Piano
         self.piano_roll.set_timeline(timeline)
-        self.view_stack.setCurrentIndex(1)  # Switch to Player View
+        self.view_stack.setCurrentIndex(1)
 
     def _go_back_to_landing(self) -> None:
         self.scheduler.stop()
@@ -787,12 +891,16 @@ class MainWindow(QMainWindow):
             return
         modified = RangeProcessor.apply_octave_fit(self.timeline)
         self.piano_roll.update()
-        self.lbl_stat_range.setText("A0 — C8 (Fitted)")
-        self.lbl_stat_range.setStyleSheet("color: #10B981; font-weight: bold;")
+        analysis = RangeProcessor.analyze_range(self.timeline)
+        self.lbl_stat_range.setText(
+            f"{_pitch_label(analysis.min_pitch)}–{_pitch_label(analysis.max_pitch)}"
+        )
+        self.lbl_stat_range.setProperty("state", "success")
+        self.lbl_stat_range.style().unpolish(self.lbl_stat_range)
+        self.lbl_stat_range.style().polish(self.lbl_stat_range)
         self.btn_octave_fit.hide()
-        QMessageBox.information(
-            self, "옥타브 맞춤 적용됨",
-            f"로블록스 88건반 범위에 맞게 {modified}개의 노트를 성공적으로 조정했습니다."
+        self.statusBar().showMessage(
+            f"옥타브 맞춤 완료 · {modified:,}개 음표 조정", 5000
         )
 
     # ----------------------------------------------------
@@ -837,7 +945,7 @@ class MainWindow(QMainWindow):
         self.overlay.set_speed(spd)
 
     def _on_transpose_changed(self, semitones: int) -> None:
-        self.lbl_transpose_val.setText(f"{semitones:+d}" if semitones != 0 else "0")
+        self.lbl_transpose_val.setText(f"{semitones:+d} st" if semitones != 0 else "0 st")
         if self.timeline:
             Transposer.transpose(self.timeline, semitones)
             self.piano_roll.update()
@@ -874,22 +982,25 @@ class MainWindow(QMainWindow):
             return
 
         self.overlay.set_playback_state(state)
-
         if state == PlaybackState.PLAYING:
             self.lbl_status_badge.setText("연주 중")
-            self.lbl_status_badge.setStyleSheet("background-color: #059669; color: #D1FAE5; font-weight: bold; padding: 4px 10px; border-radius: 6px;")
-            self.btn_main_play.setText("⏸ 일시정지 (F7)")
+            self.lbl_status_badge.setProperty("state", "playing")
+            self.btn_main_play.setText("일시 정지   F7")
         elif state == PlaybackState.PAUSED:
-            self.lbl_status_badge.setText("일시정지됨")
-            self.lbl_status_badge.setStyleSheet("background-color: #DC2626; color: #FEE2E2; font-weight: bold; padding: 4px 10px; border-radius: 6px;")
-            self.btn_main_play.setText("▶ 계속 (F7)")
+            self.lbl_status_badge.setText("일시 정지")
+            self.lbl_status_badge.setProperty("state", "paused")
+            self.btn_main_play.setText("계속   F7")
         elif state == PlaybackState.COUNTDOWN:
-            self.lbl_status_badge.setText("카운트다운")
-            self.lbl_status_badge.setStyleSheet("background-color: #D97706; color: #FEF3C7; font-weight: bold; padding: 4px 10px; border-radius: 6px;")
+            self.lbl_status_badge.setText("시작 대기")
+            self.lbl_status_badge.setProperty("state", "countdown")
+            self.btn_main_play.setText("재생   F6")
         else:
             self.lbl_status_badge.setText("준비됨")
-            self.lbl_status_badge.setStyleSheet("background-color: #2D3748; color: #E2E8F0; font-weight: bold; padding: 4px 10px; border-radius: 6px;")
-            self.btn_main_play.setText("▶ 재생 (F6)")
+            self.lbl_status_badge.setProperty("state", "ready")
+            self.btn_main_play.setText("재생   F6")
+
+        self.lbl_status_badge.style().unpolish(self.lbl_status_badge)
+        self.lbl_status_badge.style().polish(self.lbl_status_badge)
 
     @Slot(float, float)
     def _on_playback_progress(self, current: float, total: float) -> None:
@@ -899,6 +1010,13 @@ class MainWindow(QMainWindow):
     @Slot(int)
     def _on_playback_countdown(self, sec: int) -> None:
         self.overlay.set_countdown(sec)
+        if sec > 0:
+            self.lbl_countdown_banner.setText(
+                f"{sec}초 후 연주 시작 · 지금 Roblox 창을 클릭해 포커스를 맞추세요"
+            )
+            self.lbl_countdown_banner.show()
+        else:
+            self.lbl_countdown_banner.hide()
 
     @Slot(list)
     def _on_notes_played(self, notes: List[NoteEvent]) -> None:
@@ -917,11 +1035,15 @@ class MainWindow(QMainWindow):
         self._last_roblox_foreground = foreground
 
         if foreground:
-            self.lbl_roblox_status.setText("● 로블록스 창 활성화됨")
-            self.lbl_roblox_status.setStyleSheet("color: #10B981; font-size: 12px; margin-left: 10px;")
+            self.lbl_roblox_status.setText("● Roblox 활성")
+            self.lbl_roblox_status.setProperty("state", "active")
+            self.lbl_roblox_status.setToolTip("현재 Roblox 창에 키 입력을 보낼 수 있습니다")
         else:
-            self.lbl_roblox_status.setText("○ 로블록스 창 비활성화됨")
-            self.lbl_roblox_status.setStyleSheet("color: #94A3B8; font-size: 12px; margin-left: 10px;")
+            self.lbl_roblox_status.setText("○ Roblox 대기")
+            self.lbl_roblox_status.setProperty("state", "waiting")
+            self.lbl_roblox_status.setToolTip("연주를 시작하면 Roblox 창을 자동으로 확인합니다")
+        self.lbl_roblox_status.style().unpolish(self.lbl_roblox_status)
+        self.lbl_roblox_status.style().polish(self.lbl_roblox_status)
 
     def _toggle_overlay(self) -> None:
         if self.overlay.isVisible():

@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt, QPoint, Signal
 from PySide6.QtGui import QPainter, QColor, QFont, QPen, QBrush, QMouseEvent
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QProgressBar, QGraphicsDropShadowEffect, QFrame
+    QProgressBar, QFrame
 )
 from src.playback.scheduler import PlaybackState
 
@@ -41,80 +41,109 @@ class FloatingOverlay(QWidget):
         self._lh_active: bool = True
 
         self._setup_ui()
-        self.resize(340, 160)
+        self.resize(360, 112)
 
     def _setup_ui(self) -> None:
-        self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(10, 10, 10, 10)
-
-        # Card container
-        self.card = QFrame(self)
-        self.card.setObjectName("overlay_card")
-        self.card.setStyleSheet("""
-            QFrame#overlay_card {
-                background-color: rgba(20, 23, 29, 230);
-                border: 1px solid rgba(255, 255, 255, 0.12);
-                border-radius: 12px;
+        self.setStyleSheet("""
+            QWidget {
+                background: transparent;
+                color: #F3F4F6;
+                font-family: "Malgun Gothic", "Segoe UI", sans-serif;
             }
+            QFrame#overlayCard {
+                background: rgba(18, 19, 22, 238);
+                border: 1px solid rgba(255, 255, 255, 34);
+                border-radius: 8px;
+            }
+            QFrame#overlayCard[state="playing"] { border-color: #10B981; }
+            QFrame#overlayCard[state="countdown"] { border-color: #F59E0B; }
+            QLabel#overlayTitle { color: #F3F4F6; font-size: 12px; font-weight: 600; }
+            QLabel#overlayStatus {
+                padding: 2px 6px;
+                border-radius: 4px;
+                background: #22252C;
+                color: #9CA3AF;
+                font-size: 10px;
+                font-weight: 600;
+            }
+            QLabel#overlayStatus[state="playing"] { color: #10B981; }
+            QLabel#overlayStatus[state="countdown"] { color: #F59E0B; }
+            QLabel#overlayStatus[state="paused"] { color: #F59E0B; }
+            QLabel#overlayCountdown { color: #F59E0B; font-size: 18px; font-weight: 700; }
+            QLabel#overlayInfo {
+                color: #9CA3AF;
+                font-size: 10px;
+                font-family: "Cascadia Mono", "Consolas", monospace;
+            }
+            QLabel#overlayHands { color: #14B8A6; font-size: 10px; }
+            QLabel#overlayHint { color: #6B7280; font-size: 9px; }
+            QPushButton#overlayIcon {
+                min-width: 22px; max-width: 22px; min-height: 22px; max-height: 22px;
+                padding: 0; background: transparent; border: none; color: #9CA3AF;
+            }
+            QPushButton#overlayPrimary {
+                min-height: 25px; padding: 0 9px;
+                background: #3B82F6; border: none; border-radius: 5px;
+                color: white; font-size: 10px; font-weight: 600;
+            }
+            QPushButton#overlaySecondary {
+                min-height: 25px; padding: 0 8px;
+                background: #22252C; border: 1px solid #262932; border-radius: 5px;
+                color: #C9CBD0; font-size: 10px; font-weight: 600;
+            }
+            QProgressBar {
+                min-height: 4px; max-height: 4px;
+                background: rgba(255,255,255,28); border: none; border-radius: 2px;
+            }
+            QProgressBar::chunk { background: #3B82F6; border-radius: 2px; }
         """)
 
-        # Drop shadow
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(20)
-        shadow.setColor(QColor(0, 0, 0, 160))
-        shadow.setOffset(0, 4)
-        self.card.setGraphicsEffect(shadow)
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(8, 8, 8, 8)
+        self.main_layout.setSpacing(0)
 
+        self.card = QFrame(self)
+        self.card.setObjectName("overlayCard")
         self.card_layout = QVBoxLayout(self.card)
-        self.card_layout.setContentsMargins(14, 12, 14, 12)
-        self.card_layout.setSpacing(8)
+        self.card_layout.setContentsMargins(12, 8, 12, 8)
+        self.card_layout.setSpacing(5)
 
-        # Header: Title + Status + Compact toggle
         self.header_layout = QHBoxLayout()
+        self.header_layout.setContentsMargins(0, 0, 0, 0)
+        self.header_layout.setSpacing(7)
         self.lbl_title = QLabel(self._song_title)
-        self.lbl_title.setStyleSheet("font-weight: bold; font-size: 13px; color: #FFFFFF;")
-
+        self.lbl_title.setObjectName("overlayTitle")
         self.lbl_status = QLabel("준비됨")
-        self.lbl_status.setStyleSheet("font-size: 10px; font-weight: bold; padding: 2px 6px; border-radius: 4px; background-color: #2D3748; color: #E2E8F0;")
-
+        self.lbl_status.setObjectName("overlayStatus")
+        self.lbl_status.setProperty("state", "ready")
         self.btn_toggle_mode = QPushButton("—")
-        self.btn_toggle_mode.setFixedSize(22, 22)
-        self.btn_toggle_mode.setStyleSheet("background-color: transparent; border: none; color: #A0AEC0; font-size: 14px;")
+        self.btn_toggle_mode.setObjectName("overlayIcon")
         self.btn_toggle_mode.clicked.connect(self.toggle_compact_mode)
-
         self.header_layout.addWidget(self.lbl_title, 1)
         self.header_layout.addWidget(self.lbl_status)
         self.header_layout.addWidget(self.btn_toggle_mode)
         self.card_layout.addLayout(self.header_layout)
 
-        # Countdown label (prominent display)
         self.lbl_countdown = QLabel("")
+        self.lbl_countdown.setObjectName("overlayCountdown")
         self.lbl_countdown.setAlignment(Qt.AlignCenter)
-        self.lbl_countdown.setStyleSheet("font-size: 26px; font-weight: 900; color: #F59E0B; margin: 4px 0px;")
         self.lbl_countdown.hide()
         self.card_layout.addWidget(self.lbl_countdown)
 
-        # Progress bar
         self.progress_bar = QProgressBar()
         self.progress_bar.setFixedHeight(4)
         self.progress_bar.setTextVisible(False)
-        self.progress_bar.setStyleSheet("""
-            QProgressBar { background-color: rgba(255, 255, 255, 0.1); border-radius: 2px; }
-            QProgressBar::chunk { background-color: #3875E8; border-radius: 2px; }
-        """)
         self.card_layout.addWidget(self.progress_bar)
 
-        # Sub-info: Time + Hands + Speed
         self.sub_layout = QHBoxLayout()
+        self.sub_layout.setContentsMargins(0, 0, 0, 0)
+        self.sub_layout.setSpacing(6)
         self.lbl_time = QLabel("00:00 / 00:00")
-        self.lbl_time.setStyleSheet("font-size: 11px; color: #94A3B8; font-family: monospace;")
-
+        self.lbl_time.setObjectName("overlayInfo")
         self.lbl_hands = QLabel("오른손 ●  왼손 ●")
-        self.lbl_hands.setStyleSheet("font-size: 11px; color: #38BDF8;")
-
+        self.lbl_hands.setObjectName("overlayHands")
         self.lbl_speed = QLabel("1.00×")
-        self.lbl_speed.setStyleSheet("font-size: 11px; color: #94A3B8;")
-
+        self.lbl_speed.setObjectName("overlayInfo")
         self.sub_layout.addWidget(self.lbl_time)
         self.sub_layout.addStretch()
         self.sub_layout.addWidget(self.lbl_hands)
@@ -122,27 +151,24 @@ class FloatingOverlay(QWidget):
         self.sub_layout.addWidget(self.lbl_speed)
         self.card_layout.addLayout(self.sub_layout)
 
-        # Controls: F6 Play/Pause, F8 Stop
         self.controls_layout = QHBoxLayout()
-        self.lbl_hotkeys_hint = QLabel("F6: 재생/일시정지  •  F8: 정지")
-        self.lbl_hotkeys_hint.setStyleSheet("font-size: 10px; color: #64748B;")
-
-        self.btn_play = QPushButton("▶ F6")
-        self.btn_play.setFixedHeight(26)
-        self.btn_play.setStyleSheet("background-color: #2563EB; border: none; border-radius: 4px; color: white; font-weight: bold; font-size: 11px; padding: 0 10px;")
+        self.controls_layout.setContentsMargins(0, 0, 0, 0)
+        self.controls_layout.setSpacing(5)
+        self.lbl_hotkeys_hint = QLabel("F6 재생  ·  F7 일시 정지  ·  F8 정지")
+        self.lbl_hotkeys_hint.setObjectName("overlayHint")
+        self.btn_play = QPushButton("재생  F6")
+        self.btn_play.setObjectName("overlayPrimary")
         self.btn_play.clicked.connect(self.play_requested.emit)
-
-        self.btn_stop = QPushButton("■ F8")
-        self.btn_stop.setFixedHeight(26)
-        self.btn_stop.setStyleSheet("background-color: #334155; border: none; border-radius: 4px; color: #CBD5E1; font-weight: bold; font-size: 11px; padding: 0 8px;")
+        self.btn_stop = QPushButton("정지  F8")
+        self.btn_stop.setObjectName("overlaySecondary")
         self.btn_stop.clicked.connect(self.stop_requested.emit)
-
         self.controls_layout.addWidget(self.lbl_hotkeys_hint, 1)
         self.controls_layout.addWidget(self.btn_play)
         self.controls_layout.addWidget(self.btn_stop)
         self.card_layout.addLayout(self.controls_layout)
 
         self.main_layout.addWidget(self.card)
+        self.resize(360, 112)
 
     def set_song_title(self, title: str) -> None:
         self._song_title = title
@@ -184,26 +210,31 @@ class FloatingOverlay(QWidget):
 
     def set_playback_state(self, state: PlaybackState) -> None:
         self._state = state
-        state_colors = {
-            PlaybackState.IDLE: ("준비됨", "#2D3748", "#E2E8F0"),
-            PlaybackState.COUNTDOWN: ("시작 대기", "#D97706", "#FEF3C7"),
-            PlaybackState.PLAYING: ("연주 중", "#059669", "#D1FAE5"),
-            PlaybackState.PAUSED: ("일시정지됨", "#DC2626", "#FEE2E2"),
-            PlaybackState.STOPPED: ("정지됨", "#475569", "#F1F5F9"),
-            PlaybackState.COMPLETED: ("완료됨", "#2563EB", "#DBEAFE"),
+        state_names = {
+            PlaybackState.IDLE: ("준비됨", "ready"),
+            PlaybackState.COUNTDOWN: ("시작 대기", "countdown"),
+            PlaybackState.PLAYING: ("연주 중", "playing"),
+            PlaybackState.PAUSED: ("일시 정지", "paused"),
+            PlaybackState.STOPPED: ("정지됨", "ready"),
+            PlaybackState.COMPLETED: ("완료됨", "ready"),
         }
-        text, bg, fg = state_colors.get(state, ("준비됨", "#2D3748", "#E2E8F0"))
+        text, state_name = state_names.get(state, ("준비됨", "ready"))
         self.lbl_status.setText(text)
-        self.lbl_status.setStyleSheet(f"font-size: 10px; font-weight: bold; padding: 2px 6px; border-radius: 4px; background-color: {bg}; color: {fg};")
+        self.lbl_status.setProperty("state", state_name)
+        self.card.setProperty("state", state_name)
+        self.lbl_status.style().unpolish(self.lbl_status)
+        self.lbl_status.style().polish(self.lbl_status)
+        self.card.style().unpolish(self.card)
+        self.card.style().polish(self.card)
 
         if state == PlaybackState.PLAYING:
-            self.btn_play.setText("⏸ F7")
+            self.btn_play.setText("일시 정지  F7")
             self.lbl_countdown.hide()
         elif state == PlaybackState.PAUSED:
-            self.btn_play.setText("▶ F7")
+            self.btn_play.setText("계속  F7")
             self.lbl_countdown.hide()
         else:
-            self.btn_play.setText("▶ F6")
+            self.btn_play.setText("재생  F6")
 
     def toggle_compact_mode(self) -> None:
         self._is_compact = not self._is_compact
@@ -214,7 +245,7 @@ class FloatingOverlay(QWidget):
             self.sub_layout.itemAt(4).widget().hide()  # lbl_speed
             self.controls_layout.itemAt(0).widget().hide()  # hint
             self.btn_toggle_mode.setText("+")
-            self.resize(260, 68)
+            self.resize(320, 68)
         else:
             self.progress_bar.show()
             self.sub_layout.itemAt(0).widget().show()
@@ -222,7 +253,7 @@ class FloatingOverlay(QWidget):
             self.sub_layout.itemAt(4).widget().show()
             self.controls_layout.itemAt(0).widget().show()
             self.btn_toggle_mode.setText("—")
-            self.resize(340, 160)
+            self.resize(360, 112)
 
         self.mode_toggled.emit(self._is_compact)
 
