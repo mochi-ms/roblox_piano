@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="tile" x1="48" y1="34" x2="457" y2="478" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#19263B"/>
+      <stop offset="1" stop-color="#101827"/>
+    </linearGradient>
+    <linearGradient id="keys" x1="256" y1="164" x2="256" y2="378" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#DCE6F4"/>
+    </linearGradient>
+    <linearGradient id="blackKeys" x1="0" y1="164" x2="0" y2="288" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#26364F"/>
+      <stop offset="1" stop-color="#111A2A"/>
+    </linearGradient>
+  </defs>
+
+  <!-- The transparent corners keep Windows from showing a square tile. -->
+  <rect x="18" y="18" width="476" height="476" rx="132" fill="url(#tile)"/>
+  <rect x="19" y="19" width="474" height="474" rx="131" fill="none" stroke="#D8E7FF" stroke-opacity=".12" stroke-width="2"/>
+
+  <!-- One octave: seven white keys and the familiar two-plus-three black-key pattern. -->
+  <rect x="76" y="164" width="360" height="214" rx="27" fill="url(#keys)"/>
+  <path d="M127 288V377 M179 288V377 M230 288V377 M282 288V377 M333 288V377 M385 288V377" fill="none" stroke="#8B9BB2" stroke-opacity=".8" stroke-width="3"/>
+
+  <g fill="url(#blackKeys)" stroke="#33445E" stroke-opacity=".75" stroke-width="2">
+    <rect x="109" y="164" width="37" height="126" rx="8"/>
+    <rect x="161" y="164" width="37" height="126" rx="8"/>
+    <rect x="264" y="164" width="37" height="126" rx="8"/>
+    <rect x="315" y="164" width="37" height="126" rx="8"/>
+    <rect x="367" y="164" width="37" height="126" rx="8"/>
+  </g>
+  <path d="M117 174H138 M169 174H190 M272 174H293 M323 174H344 M375 174H396" fill="none" stroke="#AFC9EE" stroke-opacity=".24" stroke-width="3" stroke-linecap="round"/>
+
+  <!-- A restrained playback cue ties the keyboard to the auto-player function. -->
+  <rect x="152" y="414" width="198" height="8" rx="4" fill="#3979D8"/>
+  <circle cx="370" cy="418" r="11" fill="#58B7FF"/>
+</svg>
